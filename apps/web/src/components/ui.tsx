@@ -240,12 +240,14 @@ export function ErrorBox({
       <div className="row-flex" style={{ gap: 10 }}>
         <IconAlert size={16} style={{ color: "var(--down)", flexShrink: 0 }} />
         <div>
-          <strong>Upstream request failed:</strong> {error}
-          <span className="faint" style={{ display: "block", marginTop: 2 }}>
+          <div>
+            <strong>Upstream request failed:</strong> {error}{" "}
+          </div>
+          <div className="faint" style={{ marginTop: 2 }}>
             {hasStaleData
               ? "Showing last known data snapshot while automatic background retry continues."
               : "Automatic polling remains active and will recover as soon as the endpoint responds."}
-          </span>
+          </div>
         </div>
       </div>
       {onRetry && (

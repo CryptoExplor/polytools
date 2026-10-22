@@ -46,6 +46,9 @@ export function usePollData<T>(
 
   // Monotonic generation counter to discard stale responses when deps change
   const genRef = useRef(0);
+  // Monotonic request counter and manual-override flag serialized through startPoll.tick()
+  const reqIdRef = useRef(0);
+  const forceManualRef = useRef(false);
 
   useEffect(() => {
     const myGen = ++genRef.current;
@@ -55,21 +58,24 @@ export function usePollData<T>(
 
     const h = startPoll(
       async () => {
-        if (!mounted || myGen !== genRef.current || pausedRef.current) return;
+        const isForced = forceManualRef.current;
+        forceManualRef.current = false;
+        if (!mounted || myGen !== genRef.current || (pausedRef.current && !isForced)) return;
+        const myReq = ++reqIdRef.current;
         setRefreshing(true);
         try {
           const result = await fnRef.current();
-          if (!mounted || myGen !== genRef.current) return;
+          if (!mounted || myGen !== genRef.current || myReq !== reqIdRef.current) return;
           setData(result);
           setError(null);
           setUpdatedAt(Date.now());
         } catch (e) {
-          if (!mounted || myGen !== genRef.current) return;
+          if (!mounted || myGen !== genRef.current || myReq !== reqIdRef.current) return;
           const msg = e instanceof Error ? e.message : "Request failed";
           setError(msg);
           setLastErrorAt(Date.now());
         } finally {
-          if (mounted && myGen === genRef.current) {
+          if (mounted && myGen === genRef.current && myReq === reqIdRef.current) {
             setLoading(false);
             setRefreshing(false);
           }
@@ -88,27 +94,8 @@ export function usePollData<T>(
   }, deps);
 
   const refresh = useCallback(() => {
-    const myGen = genRef.current;
-    setRefreshing(true);
-    void (async () => {
-      try {
-        const result = await fnRef.current();
-        if (myGen !== genRef.current) return;
-        setData(result);
-        setError(null);
-        setUpdatedAt(Date.now());
-      } catch (e) {
-        if (myGen !== genRef.current) return;
-        const msg = e instanceof Error ? e.message : "Request failed";
-        setError(msg);
-        setLastErrorAt(Date.now());
-      } finally {
-        if (myGen === genRef.current) {
-          setLoading(false);
-          setRefreshing(false);
-        }
-      }
-    })();
+    forceManualRef.current = true;
+    void handleRef.current?.tick();
   }, []);
 
   return {

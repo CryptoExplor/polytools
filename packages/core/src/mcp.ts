@@ -46,7 +46,7 @@ export class McpClient {
     this.url = opts.url;
     this.clientName = opts.clientName ?? "polyester-tools";
     this.timeoutMs = opts.timeoutMs ?? 20_000;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = opts.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   private headers(extra?: Record<string, string>): Record<string, string> {
@@ -62,8 +62,9 @@ export class McpClient {
   private async post(body: unknown, captureSid = false): Promise<Response> {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), this.timeoutMs);
+    const fetchFn = this.fetchImpl;
     try {
-      const res = await this.fetchImpl(this.url, {
+      const res = await fetchFn(this.url, {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify(body),
@@ -149,14 +150,15 @@ export class McpClient {
     _retried = false,
   ): Promise<T> {
     await this.ensureSession();
-    const res = await this.post({
-      jsonrpc: "2.0",
-      id: Date.now(),
-      method: "tools/call",
-      params: { name, arguments: args },
-    });
-    const msg = await this.parse(res);
+    let msg: any;
     try {
+      const res = await this.post({
+        jsonrpc: "2.0",
+        id: Date.now(),
+        method: "tools/call",
+        params: { name, arguments: args },
+      });
+      msg = await this.parse(res);
       this.assertOk(msg);
     } catch (e) {
       // Session expired / unknown → rebuild once and retry.
