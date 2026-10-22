@@ -1,0 +1,15 @@
+{
+  "name": "@poly/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reusable serverless backend for Polyester tools: one pure Web-API handler with adapters for Cloudflare Pages/Workers, Vercel, and Node.",
+  "scripts": {
+    "dev": "npx tsx adapters/node.ts",
+    "deploy:worker": "wrangler deploy adapters/worker.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "wrangler": "^3.80.0"
+  }
+}

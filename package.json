@@ -1,0 +1,21 @@
+{
+  "name": "polyester-tools",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Modular, open tools for the Polyester exchange — static frontend + reusable serverless backend. Testnet today, mainnet-ready.",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npm -w apps/web run dev",
+    "build": "npm -w apps/web run build:all",
+    "typecheck": "npm -w apps/web run typecheck",
+    "preview": "npm -w apps/web run preview"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

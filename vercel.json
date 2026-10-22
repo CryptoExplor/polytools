@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "comment": "Vercel monorepo deploy: frontend from apps/web, API from backend/api (Edge). No rewrites needed — HashRouter handles SPA routing.",
+  "buildCommand": "npm -w apps/web run build",
+  "outputDirectory": "apps/web/dist",
+  "installCommand": "npm install",
+  "functions": {
+    "backend/api/**": {
+      "runtime": "edge"
+    }
+  }
+}

@@ -1,0 +1,3 @@
+# Cloudflare Pages / Netlify SPA fallback.
+# (Cloudflare Pages Functions under /api always take precedence over this.)
+/*    /index.html   200
