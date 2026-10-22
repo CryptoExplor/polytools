@@ -1,164 +1,589 @@
 /**
- * TOOL 1 — Market dashboard.
- * All pairs, live prices (3s poll), 24h stats, client-side sparklines
- * built from the live price ring buffer, sortable columns.
+ * TOOL 1 — Market Dashboard (/#/)
+ * High-density market overview terminal with 3s live polling, breadth stats,
+ * quote/trend filters, accessible sortable columns, session tick sparklines,
+ * and one-click navigation to Charts, Order Book, or Trade Tape.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../lib/api";
-import { usePollData, useNow } from "../lib/hooks";
-import { useApp } from "../lib/store";
-import { ErrorBox, Loading, Pill, SymBadge } from "../components/ui";
 import {
-  price, dec, bpsToPct, spreadBps,
-  fmtNum, fmtCompact, fmtPctFromBps, fmtAgo, splitSymbol, trendSign,
+  bpsToPct,
+  dec,
+  fmtAgo,
+  fmtCompact,
+  fmtNum,
+  fmtPctFromBps,
+  price,
+  splitSymbol,
+  spreadBps,
+  trendSign,
   type MarketOverviewEntry,
 } from "@poly/core";
+import { api } from "../lib/api";
+import { useNow, usePollData } from "../lib/hooks";
+import { useApp } from "../lib/store";
+import {
+  Card,
+  DataFreshness,
+  EmptyState,
+  ErrorBox,
+  Loading,
+  MetricCell,
+  MetricStrip,
+  PageHeader,
+  Pill,
+  Sparkline,
+  SymBadge,
+  TermTip,
+} from "../components/ui";
+import { IconBook, IconChart, IconSearch, IconTape } from "../components/icons";
 
-type SortKey = "symbol" | "last" | "change" | "vol" | "spread";
+type SortKey = "symbol" | "last" | "index" | "change" | "vol" | "spread";
+type TrendFilter = "all" | "up" | "down";
 
 export default function Dashboard() {
-  const { setSymbol, pairs } = useApp();
+  const { setSymbol, pairBySymbol } = useApp();
   const nav = useNavigate();
-  const now = useNow();
-  const { data, error, loading, updatedAt } = usePollData(() => api.overview(), 3000, []);
+  const now = useNow(1000);
+  const {
+    data,
+    error,
+    loading,
+    refreshing,
+    updatedAt,
+    paused,
+    setPaused,
+    refresh,
+  } = usePollData(() => api.overview(), 3000, []);
+
   const [sortKey, setSortKey] = useState<SortKey>("vol");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
   const [query, setQuery] = useState("");
+  const [quoteFilter, setQuoteFilter] = useState<string>("ALL");
+  const [trendFilter, setTrendFilter] = useState<TrendFilter>("all");
 
-  const pairMap = useMemo(() => new Map(pairs.map((p) => [p.symbol, p])), [pairs]);
+  // Maintain ring buffers of observed last prices per symbol inside useEffect (pure render)
+  const buffersRef = useRef<Map<string, number[]>>(new Map());
+  const prevPriceRef = useRef<Map<string, number>>(new Map());
+  const [flashMap, setFlashMap] = useState<Record<string, "up" | "down">>({});
+  const [, setTickVersion] = useState(0);
 
-  // Ring buffers of last prices per symbol → live 1-px sparklines, zero extra API calls.
-  const buffers = useRef(new Map<string, number[]>());
-  const sparkline = (m: MarketOverviewEntry): number[] => {
-    const p = price(m.lastPrice);
-    let buf = buffers.current.get(m.symbol);
-    if (!buf) { buf = []; buffers.current.set(m.symbol, buf); }
-    if (buf[buf.length - 1] !== p) { buf.push(p); if (buf.length > 40) buf.shift(); }
-    return buf;
-  };
+  useEffect(() => {
+    if (!data?.markets?.length) return;
+    const nextFlash: Record<string, "up" | "down"> = {};
+    for (const m of data.markets) {
+      const p = price(m.lastPrice);
+      if (!isFinite(p)) continue;
+
+      const prev = prevPriceRef.current.get(m.symbol);
+      if (prev !== undefined && prev !== p) {
+        nextFlash[m.symbol] = p > prev ? "up" : "down";
+      }
+      prevPriceRef.current.set(m.symbol, p);
+
+      let buf = buffersRef.current.get(m.symbol);
+      if (!buf) {
+        buf = [];
+        buffersRef.current.set(m.symbol, buf);
+      }
+      if (buf[buf.length - 1] !== p) {
+        buf.push(p);
+        if (buf.length > 40) buf.shift();
+      }
+    }
+    setTickVersion((v) => v + 1);
+    if (Object.keys(nextFlash).length > 0) {
+      setFlashMap(nextFlash);
+      const timer = setTimeout(() => setFlashMap({}), 650);
+      return () => clearTimeout(timer);
+    }
+  }, [data]);
+
+  const quoteChoices = useMemo(() => {
+    const set = new Set<string>(["ALL"]);
+    for (const m of data?.markets ?? []) {
+      const [, q] = splitSymbol(m.symbol);
+      if (q) set.add(q);
+    }
+    return [...set];
+  }, [data]);
 
   const rows = useMemo(() => {
-    let list = data?.markets ?? [];
-    if (query) list = list.filter((m) => m.symbol.toLowerCase().includes(query.toLowerCase()));
-    const val = (m: MarketOverviewEntry): number | string => {
+    let list = [...(data?.markets ?? [])];
+
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter((m) => m.symbol.toLowerCase().includes(q));
+    }
+
+    if (quoteFilter !== "ALL") {
+      list = list.filter((m) => splitSymbol(m.symbol)[1] === quoteFilter);
+    }
+
+    if (trendFilter === "up") {
+      list = list.filter((m) => m.change24hBps > 0);
+    } else if (trendFilter === "down") {
+      list = list.filter((m) => m.change24hBps < 0);
+    }
+
+    const numVal = (m: MarketOverviewEntry): number => {
       switch (sortKey) {
-        case "symbol": return m.symbol;
-        case "last": return price(m.lastPrice);
-        case "change": return m.change24hBps;
-        case "vol": return dec(m.volume24hUsd);
-        case "spread": return spreadBps(price(m.bestBid), price(m.bestAsk));
+        case "last":
+          return price(m.lastPrice) || 0;
+        case "index":
+          return price(m.indexPrice) || 0;
+        case "change":
+          return m.change24hBps || 0;
+        case "vol":
+          return dec(m.volume24hUsd) || 0;
+        case "spread": {
+          const sp = spreadBps(price(m.bestBid), price(m.bestAsk));
+          return isFinite(sp) ? sp : Number.POSITIVE_INFINITY;
+        }
+        default:
+          return 0;
       }
     };
-    return [...list].sort((a, b) => {
-      const va = val(a), vb = val(b);
-      const c = typeof va === "string" ? va.localeCompare(vb as string) : (va as number) - (vb as number);
-      return c * sortDir;
-    });
-  }, [data, query, sortKey, sortDir]);
 
-  const totals = useMemo(() => {
+    return list.sort((a, b) => {
+      if (sortKey === "symbol") {
+        return a.symbol.localeCompare(b.symbol) * sortDir;
+      }
+      return (numVal(a) - numVal(b)) * sortDir;
+    });
+  }, [data, query, quoteFilter, trendFilter, sortKey, sortDir]);
+
+  const summary = useMemo(() => {
     const ms = data?.markets ?? [];
+    const volUsd = ms.reduce((acc, m) => acc + (dec(m.volume24hUsd) || 0), 0);
+    const gainers = ms.filter((m) => m.change24hBps > 0).length;
+    const losers = ms.filter((m) => m.change24hBps < 0).length;
+
+    let topGainer: MarketOverviewEntry | null = null;
+    let topVol: MarketOverviewEntry | null = null;
+    let tightest: { symbol: string; bps: number } | null = null;
+
+    for (const m of ms) {
+      if (!topGainer || m.change24hBps > topGainer.change24hBps) topGainer = m;
+      if (!topVol || (dec(m.volume24hUsd) || 0) > (dec(topVol.volume24hUsd) || 0)) topVol = m;
+      const sp = spreadBps(price(m.bestBid), price(m.bestAsk));
+      if (isFinite(sp) && sp >= 0 && (!tightest || sp < tightest.bps)) {
+        tightest = { symbol: m.symbol, bps: sp };
+      }
+    }
+
     return {
       count: ms.length,
-      volUsd: ms.reduce((s, m) => s + (dec(m.volume24hUsd) || 0), 0),
-      gainers: ms.filter((m) => m.change24hBps > 0).length,
+      volUsd,
+      gainers,
+      losers,
+      topGainer,
+      topVol,
+      tightest,
     };
   }, [data]);
 
-  const sortBtn = (k: SortKey, label: string) => (
-    <th onClick={() => { setSortKey(k); setSortDir(sortKey === k ? ((sortDir * -1) as 1 | -1) : -1); }}>
-      {label} {sortKey === k ? (sortDir === 1 ? "↑" : "↓") : ""}
-    </th>
-  );
+  const handleSort = (k: SortKey) => {
+    if (sortKey === k) {
+      setSortDir((d) => (d === 1 ? -1 : 1));
+    } else {
+      setSortKey(k);
+      setSortDir(k === "symbol" || k === "spread" ? 1 : -1);
+    }
+  };
 
-  const open = (symbol: string) => { setSymbol(symbol); nav("/charts"); };
+  const renderSortTh = (k: SortKey, label: React.ReactNode, alignLeft = false) => {
+    const active = sortKey === k;
+    const ariaSort = active ? (sortDir === 1 ? "ascending" : "descending") : "none";
+    return (
+      <th aria-sort={ariaSort} className={alignLeft ? "align-left" : ""}>
+        <button
+          type="button"
+          className={`th-sort-btn ${active ? "active" : ""}`}
+          onClick={() => handleSort(k)}
+        >
+          <span>{label}</span>
+          <span aria-hidden="true">{active ? (sortDir === 1 ? "↑" : "↓") : "↕"}</span>
+        </button>
+      </th>
+    );
+  };
+
+  const openTool = (sym: string, path: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSymbol(sym);
+    nav(path);
+  };
 
   return (
-    <div className="grid">
-      <div className="grid cols-4">
-        <div className="card stat"><div className="label">Markets</div><div className="value">{totals.count}</div><div className="sub">spot pairs listed</div></div>
-        <div className="card stat"><div className="label">24h volume</div><div className="value">{fmtCompact(totals.volUsd, "$")}</div><div className="sub">across all pairs</div></div>
-        <div className="card stat"><div className="label">Gainers 24h</div><div className="value up">{totals.gainers}</div><div className="sub">of {totals.count} markets</div></div>
-        <div className="card stat"><div className="label">Updated</div><div className="value" style={{ fontSize: 15, marginTop: 8 }}>{updatedAt ? fmtAgo(updatedAt, now) : "—"}</div><div className="sub">polling every 3s · click a row for charts</div></div>
-      </div>
+    <div className="page-stack">
+      <PageHeader
+        title="Spot Market Overview"
+        badge={
+          data?.apiEnv ? (
+            <Pill kind={data.apiEnv === "testnet" ? "warn" : "up"}>{data.apiEnv}</Pill>
+          ) : null
+        }
+        subtitle="Real-time top-of-book prices, 24-hour volume, basis-point spreads, and live session tick sparklines across all listed Polyester spot pairs."
+        actions={
+          <DataFreshness
+            updatedAt={updatedAt}
+            refreshing={refreshing}
+            error={error}
+            intervalSec={3}
+            paused={paused}
+            onTogglePause={() => setPaused(!paused)}
+            onRefresh={refresh}
+          />
+        }
+      />
 
-      <ErrorBox error={error} />
+      <MetricStrip>
+        <MetricCell
+          label="Listed Markets"
+          value={summary.count || "—"}
+          sub={`${rows.length} shown by active filter`}
+        />
+        <MetricCell
+          label="24h Turnover (USD)"
+          value={summary.count ? fmtCompact(summary.volUsd, "$") : "—"}
+          sub={
+            summary.topVol
+              ? `Leader: ${summary.topVol.symbol} (${fmtCompact(dec(summary.topVol.volume24hUsd), "$")})`
+              : "Aggregate spot volume"
+          }
+        />
+        <MetricCell
+          label="24h Market Breadth"
+          value={
+            summary.count ? (
+              <span>
+                <span className="up">▲ {summary.gainers}</span>
+                <span className="faint"> / </span>
+                <span className="down">▼ {summary.losers}</span>
+              </span>
+            ) : (
+              "—"
+            )
+          }
+          sub={
+            summary.count ? (
+              <div className="imbalance-bar mt-1" title="Advancers vs Decliners">
+                <div
+                  className="imbalance-bid"
+                  style={{ width: `${(summary.gainers / Math.max(1, summary.count)) * 100}%` }}
+                />
+                <div
+                  className="imbalance-ask"
+                  style={{ width: `${(summary.losers / Math.max(1, summary.count)) * 100}%` }}
+                />
+              </div>
+            ) : (
+              "24h advancers vs decliners"
+            )
+          }
+        />
+        <MetricCell
+          label="Top 24h Mover"
+          trend={
+            summary.topGainer
+              ? trendSign(summary.topGainer.change24hBps) === "up"
+                ? "up"
+                : "down"
+              : undefined
+          }
+          value={
+            summary.topGainer
+              ? `${summary.topGainer.symbol} ${fmtPctFromBps(summary.topGainer.change24hBps)}`
+              : "—"
+          }
+          sub={
+            summary.topGainer
+              ? `Last ${fmtNum(price(summary.topGainer.lastPrice))}`
+              : "Waiting for market data"
+          }
+        />
+        <MetricCell
+          label="Tightest Spread"
+          value={summary.tightest ? `${summary.tightest.bps.toFixed(1)} bps` : "—"}
+          sub={summary.tightest ? `on ${summary.tightest.symbol}` : "Top-of-book bid/ask"}
+        />
+      </MetricStrip>
 
-      <div className="row-flex mb-3">
-        <input className="input" style={{ maxWidth: 240 }} placeholder="Filter markets…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <Pill kind="accent">{data?.apiEnv ?? "…"}</Pill>
-      </div>
+      <ErrorBox error={error} onRetry={refresh} hasStaleData={Boolean(data?.markets?.length)} />
 
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr>
-              {sortBtn("symbol", "Market")}
-              {sortBtn("last", "Last price")}
-              {sortBtn("change", "24h %")}
-              <th>24h range</th>
-              {sortBtn("vol", "24h vol $")}
-              {sortBtn("spread", "Spread")}
-              <th>Live</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && !rows.length && (
-              <tr><td colSpan={7}><Loading lines={6} /></td></tr>
-            )}
-            {rows.map((m) => {
-              const last = price(m.lastPrice);
-              const hi = price(m.high24h);
-              const lo = price(m.low24h);
-              const bid = price(m.bestBid);
-              const ask = price(m.bestAsk);
-              const pos = hi > lo ? Math.min(1, Math.max(0, (last - lo) / (hi - lo))) : 0.5;
-              const [base, quote] = splitSymbol(m.symbol);
-              const pair = pairMap.get(m.symbol);
-              const spark = sparkline(m);
-              return (
-                <tr key={m.symbol} onClick={() => open(m.symbol)}>
-                  <td>
-                    <span className="sym-cell">
-                      <SymBadge asset={base} />
-                      <span>{base}<small>/{quote}</small>
-                        {pair && <small title={`tick ${pair.tickSize} · min notional ${pair.minNotionalQuote} ${quote}`}> ·</small>}
-                      </span>
-                    </span>
+      <Card
+        flush
+        title="Spot Markets"
+        subtitle="Click any market row to open its chart, or use the quick-launch buttons on the right."
+        actions={
+          <div className="row-flex" style={{ gap: 8 }}>
+            <div className="input-group" style={{ width: 210 }}>
+              <span className="input-icon">
+                <IconSearch size={14} />
+              </span>
+              <input
+                type="search"
+                className="input with-icon"
+                placeholder="Search symbol (e.g. BTC)…"
+                aria-label="Filter markets by symbol"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+
+            <div className="seg-group" role="group" aria-label="Filter by quote asset">
+              {quoteChoices.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  className={`seg-btn ${quoteFilter === q ? "active" : ""}`}
+                  onClick={() => setQuoteFilter(q)}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+
+            <div className="seg-group" role="group" aria-label="Filter by 24h direction">
+              <button
+                type="button"
+                className={`seg-btn ${trendFilter === "all" ? "active" : ""}`}
+                onClick={() => setTrendFilter("all")}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                className={`seg-btn ${trendFilter === "up" ? "active" : ""}`}
+                onClick={() => setTrendFilter("up")}
+              >
+                ▲ Gainers
+              </button>
+              <button
+                type="button"
+                className={`seg-btn ${trendFilter === "down" ? "active" : ""}`}
+                onClick={() => setTrendFilter("down")}
+              >
+                ▼ Losers
+              </button>
+            </div>
+          </div>
+        }
+        footer={
+          <>
+            <span>
+              Wire prices are decoded from scaled integers (<code className="mono">raw ÷ 10³</code>).
+              Session sparklines accumulate live observed ticks in your browser with zero extra API calls.
+            </span>
+            {updatedAt && <span>Snapshot synced {fmtAgo(updatedAt, now)}</span>}
+          </>
+        }
+      >
+        <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
+          <table className="data">
+            <thead>
+              <tr>
+                {renderSortTh("symbol", "Market", true)}
+                {renderSortTh("last", "Last Price")}
+                {renderSortTh(
+                  "index",
+                  <TermTip
+                    label="Index Price"
+                    tip="Exchange reference index price (scaled integer ÷ 10³)"
+                  />,
+                )}
+                {renderSortTh("change", "24h Change")}
+                <th>24h Low / High</th>
+                {renderSortTh("vol", "24h Volume ($)")}
+                {renderSortTh(
+                  "spread",
+                  <TermTip
+                    label="Spread"
+                    tip="Top-of-book (Best Ask − Best Bid) ÷ Mid in basis points (1 bps = 0.01%)"
+                  />,
+                )}
+                <th>Session Trend</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && !rows.length && (
+                <tr>
+                  <td colSpan={9} style={{ padding: "18px 16px" }}>
+                    <Loading lines={7} />
                   </td>
-                  <td className="mono" style={{ fontWeight: 650 }}>{fmtNum(last)}</td>
-                  <td><Pill kind={trendSign(bpsToPct(m.change24hBps)) === "up" ? "up" : trendSign(bpsToPct(m.change24hBps)) === "down" ? "down" : undefined}>{fmtPctFromBps(m.change24hBps)}</Pill></td>
-                  <td>
-                    <div className="range" title={`low ${fmtNum(lo)} → high ${fmtNum(hi)}`}>
-                      <div className="fill" style={{ width: "100%", opacity: 0.5 }} />
-                      <div className="marker" style={{ left: `calc(${(pos * 100).toFixed(1)}% - 1px)` }} />
-                    </div>
-                  </td>
-                  <td className="mono">{fmtCompact(dec(m.volume24hUsd))}</td>
-                  <td className="mono muted">{isFinite(spreadBps(bid, ask)) ? `${spreadBps(bid, ask).toFixed(1)} bps` : "—"}</td>
-                  <td><MiniSpark data={spark} /></td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div className="faint">Prices are scaled-integer decoded (÷10³). Live column builds from your session's observed ticks — no extra API load.</div>
-    </div>
-  );
-}
+              )}
+              {!loading && rows.length === 0 && (
+                <tr>
+                  <td colSpan={9}>
+                    <EmptyState
+                      title={
+                        data?.markets?.length
+                          ? "No markets match your filter"
+                          : "No market overview data available"
+                      }
+                      description={
+                        data?.markets?.length
+                          ? "Try clearing the search query or switching the quote/direction filter."
+                          : "Verify the backend MCP connection or click Refresh to retry."
+                      }
+                      action={
+                        (query || quoteFilter !== "ALL" || trendFilter !== "all") && (
+                          <button
+                            type="button"
+                            className="btn sm"
+                            onClick={() => {
+                              setQuery("");
+                              setQuoteFilter("ALL");
+                              setTrendFilter("all");
+                            }}
+                          >
+                            Reset filters
+                          </button>
+                        )
+                      }
+                    />
+                  </td>
+                </tr>
+              )}
+              {rows.map((m) => {
+                const last = price(m.lastPrice);
+                const idxPx = price(m.indexPrice);
+                const hi = price(m.high24h);
+                const lo = price(m.low24h);
+                const bid = price(m.bestBid);
+                const ask = price(m.bestAsk);
+                const sp = spreadBps(bid, ask);
+                const pos =
+                  isFinite(hi) && isFinite(lo) && hi > lo
+                    ? Math.min(1, Math.max(0, (last - lo) / (hi - lo)))
+                    : 0.5;
+                const [base, quote] = splitSymbol(m.symbol);
+                const pair = pairBySymbol.get(m.symbol);
+                const spark = buffersRef.current.get(m.symbol) ?? (isFinite(last) ? [last] : []);
+                const sign = trendSign(bpsToPct(m.change24hBps));
+                const flash = flashMap[m.symbol];
 
-function MiniSpark({ data }: { data: number[] }) {
-  if (data.length < 2) return <span className="faint">…</span>;
-  const min = Math.min(...data), max = Math.max(...data);
-  const span = max - min || 1;
-  const pts = data.map((v, i) => `${(i * (100 / (data.length - 1))).toFixed(1)},${(26 - ((v - min) / span) * 22).toFixed(1)}`).join(" ");
-  const up = data[data.length - 1] >= data[0];
-  return (
-    <svg width="100" height="28">
-      <polyline points={pts} fill="none" stroke={up ? "var(--up)" : "var(--down)"} strokeWidth="1.5" />
-    </svg>
+                return (
+                  <tr
+                    key={m.symbol}
+                    className={`interactive-row ${
+                      flash === "up" ? "flash-up" : flash === "down" ? "flash-down" : ""
+                    }`}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`Open ${m.symbol} chart. Last price ${fmtNum(last)} ${quote}`}
+                    onClick={() => openTool(m.symbol, "/charts")}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openTool(m.symbol, "/charts");
+                      }
+                    }}
+                  >
+                    <td>
+                      <span className="sym-cell">
+                        <SymBadge asset={base} />
+                        <span>
+                          {base}
+                          <small>/{quote}</small>
+                          {pair && (
+                            <small
+                              className="mono"
+                              style={{ display: "block", fontSize: 10.5 }}
+                              title={`Tick size: ${pair.tickSize} · Min order: ${pair.minQtyBase} ${base} (${pair.minNotionalQuote} ${quote})`}
+                            >
+                              tick {pair.tickSize}
+                            </small>
+                          )}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="mono" style={{ fontWeight: 700 }}>
+                      {fmtNum(last)}
+                    </td>
+                    <td className="mono muted">{fmtNum(idxPx)}</td>
+                    <td>
+                      <Pill
+                        kind={sign === "up" ? "up" : sign === "down" ? "down" : undefined}
+                      >
+                        {sign === "up" ? "▲ " : sign === "down" ? "▼ " : ""}
+                        {fmtPctFromBps(m.change24hBps)}
+                      </Pill>
+                    </td>
+                    <td>
+                      <div style={{ display: "inline-flex", flexDirection: "column", gap: 3 }}>
+                        <div
+                          className="range"
+                          title={`24h Low: ${fmtNum(lo)} → 24h High: ${fmtNum(hi)}`}
+                        >
+                          <div className="fill" style={{ width: "100%", opacity: 0.55 }} />
+                          <div
+                            className="marker"
+                            style={{ left: `calc(${(pos * 100).toFixed(1)}% - 1.5px)` }}
+                          />
+                        </div>
+                        <div className="between mono faint" style={{ fontSize: 10, width: 110 }}>
+                          <span>{fmtCompact(lo)}</span>
+                          <span>{fmtCompact(hi)}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="mono" style={{ fontWeight: 600 }}>
+                        {fmtCompact(dec(m.volume24hUsd), "$")}
+                      </div>
+                      <div className="faint mono" style={{ fontSize: 10.5 }}>
+                        {fmtCompact(dec(m.volume24hBase))} {base}
+                      </div>
+                    </td>
+                    <td className="mono muted" title={`Bid ${fmtNum(bid)} / Ask ${fmtNum(ask)}`}>
+                      {isFinite(sp) ? `${sp.toFixed(1)} bps` : "—"}
+                    </td>
+                    <td>
+                      <Sparkline data={spark} width={96} height={24} />
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <div className="row-flex" style={{ justifyContent: "flex-end", gap: 4 }}>
+                        <button
+                          type="button"
+                          className="btn sm ghost"
+                          title={`Open ${m.symbol} Order Book`}
+                          onClick={(e) => openTool(m.symbol, "/book", e)}
+                        >
+                          <IconBook size={12} />
+                          <span className="hide-sm">Book</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn sm ghost"
+                          title={`Open ${m.symbol} Trade Tape`}
+                          onClick={(e) => openTool(m.symbol, "/tape", e)}
+                        >
+                          <IconTape size={12} />
+                          <span className="hide-sm">Tape</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn sm ghost"
+                          title={`Open ${m.symbol} Candlestick Chart`}
+                          onClick={(e) => openTool(m.symbol, "/charts", e)}
+                        >
+                          <IconChart size={12} />
+                          <span className="hide-sm">Chart</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
   );
 }
