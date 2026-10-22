@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Ideas & discussion
+    url: https://github.com/CryptoExplor/polyester/discussions
+    about: Questions, ideas, and show-and-tell belong in Discussions.
+  - name: 📖 Polyester developer docs
+    url: https://testnet.polyester.com/docs/developer-docs
+    about: Official API/SDK documentation for the underlying exchange.
