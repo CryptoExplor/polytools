@@ -27,7 +27,15 @@
  *   /api/flow/explain?txHash=...
  */
 
-import { NETWORKS, resolveMcpUrl } from "../../packages/core/src/index";
+import {
+  BOOK_DEPTHS,
+  CANDLE_TIMEFRAMES,
+  McpError,
+  NETWORKS,
+  resolveMcpUrl,
+  type BookDepth,
+  type CandleTimeframe,
+} from "../../packages/core/src/index";
 import { cached, cacheStats } from "./cache";
 import { dataFor } from "./mcpServer";
 
@@ -43,6 +51,20 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Max-Age": "86400",
 };
 
+const VALID_DEPTHS = new Set<number>(BOOK_DEPTHS);
+const VALID_TIMEFRAMES = new Set<string>(CANDLE_TIMEFRAMES);
+const VALID_HEATMAP_INTERVALS = new Set<string>(["1s", "1m", "5m", "1h"]);
+const VALID_SIDES = new Set<string>(["buy", "sell"]);
+const VALID_COMPARE_BY = new Set<string>(["networkFee", "depositMinAmount"]);
+const VALID_LOOKUP_KIND = new Set<string>(["source", "any"]);
+
+class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
 function json(body: unknown, init: ResponseInit = {}, extra?: Record<string, string>) {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json; charset=utf-8");
@@ -51,18 +73,56 @@ function json(body: unknown, init: ResponseInit = {}, extra?: Record<string, str
   return new Response(JSON.stringify(body, null, 0), { ...init, headers });
 }
 
-function error(status: number, message: string) {
-  return json({ error: message }, { status });
+function cachedJson(body: unknown, maxAgeSec: number) {
+  return json(body, {}, { "Cache-Control": `public, max-age=${maxAgeSec}` });
 }
 
-const num = (v: string | null, dflt: number, min: number, max: number): number => {
-  const n = v === null ? dflt : Number(v);
-  if (!isFinite(n)) return dflt;
+function error(status: number, code: string, detail?: string) {
+  return json(detail ? { error: code, detail } : { error: code }, { status });
+}
+
+const num = (
+  name: string,
+  v: string | null,
+  dflt: number,
+  min: number,
+  max: number,
+): number => {
+  if (v === null || v.trim() === "") return dflt;
+  const n = Number(v);
+  if (!Number.isFinite(n)) {
+    throw new ValidationError(`${name} must be a valid number`);
+  }
   return Math.min(max, Math.max(min, Math.trunc(n)));
 };
 
-const str = (v: string | null): string | undefined =>
-  v !== null && v !== "" ? v : undefined;
+const optNum = (
+  name: string,
+  v: string | null,
+  min: number,
+  max: number,
+): number | undefined => {
+  if (v === null || v.trim() === "") return undefined;
+  const n = Number(v);
+  if (!Number.isFinite(n)) {
+    throw new ValidationError(`${name} must be a valid number`);
+  }
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+};
+
+const str = (v: string | null): string | undefined => {
+  if (v === null) return undefined;
+  const trimmed = v.trim();
+  return trimmed !== "" ? trimmed : undefined;
+};
+
+const isValidTxHash = (txHash: string): boolean =>
+  /^0x[0-9a-fA-F]{64}$/.test(txHash);
+
+const isValidFlowId = (flowId: string): boolean =>
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+    flowId,
+  ) || /^flow[_-][a-zA-Z0-9_-]{6,128}$/.test(flowId);
 
 export async function api(request: Request, opts: ApiOptions = {}): Promise<Response> {
   const url = new URL(request.url);
@@ -74,8 +134,6 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
   if (request.method !== "GET") return error(405, "Method not allowed");
 
   // ---- environment resolution -------------------------------------------------
-  // MCP_URL wins anywhere. When the mainnet endpoint is announced, set
-  // MCP_URL_MAINNET (or edit packages/core/src/config.ts) — no other change needed.
   const mcpUrl =
     resolveMcpUrl("testnet", opts.env?.MCP_URL) ||
     resolveMcpUrl("mainnet", opts.env?.MCP_URL_MAINNET);
@@ -108,116 +166,277 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
   try {
     switch (path) {
       case "/api/markets":
-        return json(await cached("markets", 60_000, () => data.spotMarkets()));
+        return cachedJson(
+          await cached("markets", 60_000, () => data.spotMarkets()),
+          60,
+        );
 
       case "/api/overview": {
-        const symbols = str(url.searchParams.get("symbols"))?.split(",");
-        const key = `overview:${symbols?.join(",") ?? "*"}`;
-        return json(await cached(key, 2_000, () => data.marketOverview(symbols)));
+        const symbols = str(url.searchParams.get("symbols"))
+          ?.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const limit = num("limit", url.searchParams.get("limit"), 100, 1, 200);
+        const key = `overview:${symbols?.join(",") ?? "*"}:${limit}`;
+        return cachedJson(
+          await cached(key, 2_000, () => data.marketOverview(symbols, limit)),
+          2,
+        );
       }
 
       case "/api/orderbook": {
-        const symbol = url.searchParams.get("symbol");
-        if (!symbol) return error(400, "symbol is required");
-        const depth = num(url.searchParams.get("depth"), 20, 1, 100) as
-          | 1 | 5 | 10 | 20 | 50 | 100;
-        return json(
+        const symbol = str(url.searchParams.get("symbol"));
+        if (!symbol) return error(400, "invalid_argument", "symbol is required");
+        const rawDepth = str(url.searchParams.get("depth"));
+        let depth: BookDepth = 20;
+        if (rawDepth !== undefined) {
+          const parsed = Number(rawDepth);
+          if (!Number.isInteger(parsed) || !VALID_DEPTHS.has(parsed)) {
+            return error(
+              400,
+              "invalid_argument",
+              "depth must be one of 1, 5, 10, 20, 50, 100",
+            );
+          }
+          depth = parsed as BookDepth;
+        }
+        return cachedJson(
           await cached(`book:${symbol}:${depth}`, 1_500, () =>
             data.orderbook(symbol, depth),
           ),
+          1,
         );
       }
 
       case "/api/candles": {
-        const symbol = url.searchParams.get("symbol");
-        if (!symbol) return error(400, "symbol is required");
-        const tf = str(url.searchParams.get("tf")) ?? "1h";
-        const limit = num(url.searchParams.get("limit"), 120, 1, 500);
-        return json(
-          await cached(`candles:${symbol}:${tf}:${limit}`, 3_000, () =>
-            data.candles(symbol, tf as never, limit),
+        const symbol = str(url.searchParams.get("symbol"));
+        if (!symbol) return error(400, "invalid_argument", "symbol is required");
+        const tf =
+          str(url.searchParams.get("tf")) ??
+          str(url.searchParams.get("timeframe")) ??
+          "1h";
+        if (!VALID_TIMEFRAMES.has(tf)) {
+          return error(
+            400,
+            "invalid_argument",
+            `tf must be one of ${CANDLE_TIMEFRAMES.join(", ")}`,
+          );
+        }
+        const limit = num("limit", url.searchParams.get("limit"), 120, 1, 200);
+        const startTsSec = optNum(
+          "startTsSec",
+          url.searchParams.get("startTsSec"),
+          0,
+          4_102_444_800,
+        );
+        const endTsSec = optNum(
+          "endTsSec",
+          url.searchParams.get("endTsSec"),
+          0,
+          4_102_444_800,
+        );
+        if (
+          startTsSec !== undefined &&
+          endTsSec !== undefined &&
+          startTsSec > endTsSec
+        ) {
+          return error(
+            400,
+            "invalid_argument",
+            "startTsSec must be less than or equal to endTsSec",
+          );
+        }
+        // Quantize timestamp bounds to 60s buckets in cache keys so rolling UI
+        // windows reuse cached responses within the TTL window.
+        const startBucket =
+          startTsSec !== undefined ? Math.floor(startTsSec / 60) * 60 : "*";
+        const endBucket =
+          endTsSec !== undefined ? Math.floor(endTsSec / 60) * 60 : "*";
+        const key = `candles:${symbol}:${tf}:${limit}:${startBucket}:${endBucket}`;
+        return cachedJson(
+          await cached(key, 3_000, () =>
+            data.candles(
+              symbol,
+              tf as CandleTimeframe,
+              limit,
+              startTsSec,
+              endTsSec,
+            ),
           ),
+          3,
         );
       }
 
       case "/api/trades": {
-        const symbol = url.searchParams.get("symbol");
-        if (!symbol) return error(400, "symbol is required");
-        const limit = num(url.searchParams.get("limit"), 25, 1, 100);
-        const side = str(url.searchParams.get("side")) as "buy" | "sell" | undefined;
-        return json(
+        const symbol = str(url.searchParams.get("symbol"));
+        if (!symbol) return error(400, "invalid_argument", "symbol is required");
+        const limit = num("limit", url.searchParams.get("limit"), 25, 1, 100);
+        const sideRaw = str(url.searchParams.get("side"));
+        if (sideRaw !== undefined && !VALID_SIDES.has(sideRaw)) {
+          return error(400, "invalid_argument", "side must be buy or sell");
+        }
+        const side = sideRaw as "buy" | "sell" | undefined;
+        return cachedJson(
           await cached(`trades:${symbol}:${limit}:${side ?? "*"}`, 1_200, () =>
             data.recentTrades(symbol, limit, side),
           ),
+          1,
         );
       }
 
       case "/api/heatmap": {
-        const symbol = url.searchParams.get("symbol");
-        if (!symbol) return error(400, "symbol is required");
-        const interval = (str(url.searchParams.get("interval")) ?? "1m") as
-          | "1s" | "1m" | "5m" | "1h";
-        const depth = num(url.searchParams.get("depth"), 50, 1, 100);
-        return json(
-          await cached(`heat:${symbol}:${interval}:${depth}`, 5_000, () =>
-            data.heatmap(symbol, interval, depth),
+        const symbol = str(url.searchParams.get("symbol"));
+        if (!symbol) return error(400, "invalid_argument", "symbol is required");
+        const intervalRaw = str(url.searchParams.get("interval")) ?? "1m";
+        if (!VALID_HEATMAP_INTERVALS.has(intervalRaw)) {
+          return error(
+            400,
+            "invalid_argument",
+            "interval must be one of 1s, 1m, 5m, 1h",
+          );
+        }
+        const interval = intervalRaw as "1s" | "1m" | "5m" | "1h";
+        const rawDepth = str(url.searchParams.get("depth"));
+        let depth: BookDepth = 50;
+        if (rawDepth !== undefined) {
+          const parsed = Number(rawDepth);
+          if (!Number.isInteger(parsed) || !VALID_DEPTHS.has(parsed)) {
+            return error(
+              400,
+              "invalid_argument",
+              "depth must be one of 1, 5, 10, 20, 50, 100",
+            );
+          }
+          depth = parsed as BookDepth;
+        }
+        const windowSec = optNum(
+          "windowSec",
+          url.searchParams.get("windowSec"),
+          60,
+          86_400,
+        );
+        const limit = optNum("limit", url.searchParams.get("limit"), 1, 500);
+        const key = `heat:${symbol}:${interval}:${depth}:${windowSec ?? "*"}:${limit ?? "*"}`;
+        return cachedJson(
+          await cached(key, 5_000, () =>
+            data.heatmap(symbol, interval, depth, windowSec, limit),
           ),
+          5,
         );
       }
 
       // ---- zipper / routes -------------------------------------------------------
       case "/api/zipper/config":
-        return json(
+        return cachedJson(
           await cached("zipper:config", 300_000, () => data.depositWithdrawConfig()),
+          300,
         );
 
       case "/api/zipper/routes": {
-        const asset = url.searchParams.get("asset");
-        if (!asset) return error(400, "asset is required");
+        const asset = str(url.searchParams.get("asset"));
+        if (!asset) return error(400, "invalid_argument", "asset is required");
         const chainFilter = str(url.searchParams.get("chainFilter"));
-        return json(
+        return cachedJson(
           await cached(
             `zipper:routes:${asset}:${chainFilter ?? "*"}`,
             300_000,
             () => data.assetRoutes(asset, chainFilter),
           ),
+          300,
         );
       }
 
       case "/api/zipper/compare": {
-        const asset = url.searchParams.get("asset");
-        if (!asset) return error(400, "asset is required");
-        const compareBy = (str(url.searchParams.get("compareBy")) ?? "networkFee") as
-          | "networkFee" | "depositMinAmount";
-        return json(
-          await cached(`zipper:cmp:${asset}:${compareBy}`, 300_000, () =>
-            data.compareRoutes(asset, compareBy),
+        const asset = str(url.searchParams.get("asset"));
+        if (!asset) return error(400, "invalid_argument", "asset is required");
+        const compareByRaw = str(url.searchParams.get("compareBy")) ?? "networkFee";
+        if (!VALID_COMPARE_BY.has(compareByRaw)) {
+          return error(
+            400,
+            "invalid_argument",
+            "compareBy must be networkFee or depositMinAmount",
+          );
+        }
+        const compareBy = compareByRaw as "networkFee" | "depositMinAmount";
+        const chainFilter = str(url.searchParams.get("chainFilter"));
+        return cachedJson(
+          await cached(
+            `zipper:cmp:${asset}:${compareBy}:${chainFilter ?? "*"}`,
+            300_000,
+            () => data.compareRoutes(asset, compareBy, chainFilter),
           ),
+          300,
         );
       }
 
       // ---- lifecycle -------------------------------------------------------------
       case "/api/flow": {
-        const flowId = url.searchParams.get("flowId");
-        if (!flowId) return error(400, "flowId is required");
+        const flowId = str(url.searchParams.get("flowId"));
+        if (!flowId) return error(400, "invalid_argument", "flowId is required");
+        if (!isValidFlowId(flowId)) {
+          return error(
+            400,
+            "invalid_argument",
+            "validation error: invalid flowId format (expected UUID or flow identifier)",
+          );
+        }
         return json(await data.lifecycleFlow(flowId));
       }
 
       case "/api/flow/by-tx": {
-        const txHash = url.searchParams.get("txHash");
-        if (!txHash) return error(400, "txHash is required");
-        return json(await data.lifecycleByTx(txHash));
+        const txHash = str(url.searchParams.get("txHash"));
+        if (!txHash) return error(400, "invalid_argument", "txHash is required");
+        if (!isValidTxHash(txHash)) {
+          return error(
+            400,
+            "invalid_argument",
+            "validation error: invalid txHash format (expected 0x-prefixed 32-byte hex hash)",
+          );
+        }
+        const lookupKindRaw = str(url.searchParams.get("lookupKind")) ?? "any";
+        if (!VALID_LOOKUP_KIND.has(lookupKindRaw)) {
+          return error(400, "invalid_argument", "lookupKind must be source or any");
+        }
+        const limit = optNum("limit", url.searchParams.get("limit"), 1, 50);
+        return json(
+          await data.lifecycleByTx(
+            txHash,
+            lookupKindRaw as "source" | "any",
+            limit,
+          ),
+        );
       }
 
       case "/api/flow/explain": {
-        const txHash = url.searchParams.get("txHash");
-        if (!txHash) return error(400, "txHash is required");
-        return json(await data.explainTransaction(txHash));
+        const txHash = str(url.searchParams.get("txHash"));
+        if (!txHash) return error(400, "invalid_argument", "txHash is required");
+        if (!isValidTxHash(txHash)) {
+          return error(
+            400,
+            "invalid_argument",
+            "validation error: invalid txHash format (expected 0x-prefixed 32-byte hex hash)",
+          );
+        }
+        const lookupKindRaw = str(url.searchParams.get("lookupKind")) ?? "any";
+        if (!VALID_LOOKUP_KIND.has(lookupKindRaw)) {
+          return error(400, "invalid_argument", "lookupKind must be source or any");
+        }
+        return json(
+          await data.explainTransaction(
+            txHash,
+            lookupKindRaw as "source" | "any",
+          ),
+        );
       }
     }
   } catch (e) {
-    const message = e instanceof Error ? e.message : "upstream error";
-    return error(502, message);
+    if (e instanceof ValidationError) {
+      return error(400, "invalid_argument", e.message);
+    }
+    if (e instanceof McpError && /^(validation error|invalid)/i.test(e.message)) {
+      return error(400, "invalid_argument", e.message.slice(0, 240));
+    }
+    return error(502, "upstream", "Upstream market data service unavailable");
   }
 
   return error(404, `Unknown route: ${path}`);

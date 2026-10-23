@@ -11,8 +11,8 @@
  *                  TELEGRAM_CHAT_ID    (channel/group id)
  *                  ALERT_MIN_BPS       (optional, default 300 = 3%)
  *
- * Deploy:  cd backend && npx wrangler deploy adapters/worker.ts
- * Add cron in wrangler.toml:  crons = ["*/15 * * * *"]
+ * Deploy:  npx wrangler deploy
+ * Cron schedule is configured in wrangler.toml ([triggers] crons)
  */
 
 import { api } from "../src/handler";
@@ -26,11 +26,19 @@ import {
   type MarketOverviewResult,
 } from "../../packages/core/src/index";
 
+interface AssetsBinding {
+  fetch(request: Request): Promise<Response>;
+}
+
 interface WorkerEnv extends Record<string, string | undefined> {
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
   ALERT_MIN_BPS?: string;
 }
+
+type FullWorkerEnv = WorkerEnv & {
+  ASSETS?: AssetsBinding;
+};
 
 async function sendTelegram(env: WorkerEnv, text: string): Promise<void> {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
@@ -72,11 +80,18 @@ async function moversReport(env: WorkerEnv): Promise<string | null> {
 }
 
 export default {
-  fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  fetch(request: Request, env: FullWorkerEnv): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
+      return api(request, { env });
+    }
+    if (env.ASSETS && typeof env.ASSETS.fetch === "function") {
+      return env.ASSETS.fetch(request);
+    }
     return api(request, { env });
   },
 
-  async scheduled(_event: unknown, env: WorkerEnv): Promise<void> {
+  async scheduled(_event: unknown, env: FullWorkerEnv): Promise<void> {
     const report = await moversReport(env);
     if (report) await sendTelegram(env, report);
   },

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+apps/web/dist/
+.wrangler/
+.vercel/
+.cursor/
+.vscode/
+.env
+.env.*
+*.log
+.DS_Store

@@ -13,7 +13,12 @@
     "dev": "npm -w apps/web run dev",
     "build": "npm -w apps/web run build:all",
     "typecheck": "npm -w apps/web run typecheck",
-    "preview": "npm -w apps/web run preview"
+    "preview": "npm -w apps/web run preview",
+    "test": "node --test tests/polytools.test.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.135.0"
   },
   "engines": {
     "node": ">=18"
