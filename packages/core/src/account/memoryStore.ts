@@ -47,7 +47,8 @@ export class MemoryDatasetStore {
   ): () => void {
     this.unbindLifecycle?.();
     const unbind = subscribe((event) => {
-      if (["lock", "wipe", "import", "unlock"].includes(event.type)) this.clear();
+      const type = event.type.toUpperCase();
+      if (["LOCK", "WIPE", "VAULT_CHANGED", "IMPORT", "UNLOCK"].includes(type)) this.clear();
     });
     this.unbindLifecycle = unbind;
     return () => {

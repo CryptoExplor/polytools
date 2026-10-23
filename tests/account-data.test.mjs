@@ -294,7 +294,10 @@ describe("DTO validation and private memory partitions", () => {
       return () => {};
     });
     store.set(partition, { rows: ["must-be-cleared"] });
-    lifecycleListener({ type: "lock" });
+    lifecycleListener({ type: "LOCK" });
+    assert.equal(store.size, 0);
+    store.set(partition, { rows: ["must-be-cleared-on-change"] });
+    lifecycleListener({ type: "VAULT_CHANGED" });
     assert.equal(store.size, 0);
     unbind();
     store.dispose();

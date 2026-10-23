@@ -1,4 +1,4 @@
-import { parseDecimal } from "./decimal";
+import { compare, fromBigInt, parseDecimal } from "./decimal";
 import type { BalanceInput, FillInput } from "./analytics";
 
 export class AccountSchemaError extends Error {
@@ -255,31 +255,189 @@ export function validateFillsResponse(
   return { nextPageToken, fills, quarantined, settlementLegs };
 }
 
+export interface NormalizedTransferSide {
+  kind: string;
+  address: string;
+  accountId?: string;
+  chainId?: number;
+}
+
+export interface NormalizedTransfer {
+  account: string;
+  asset: string;
+  amount: string;
+  balanceAfter: string;
+  destination: NormalizedTransferSide;
+  flowId: string;
+  isDebit: boolean;
+  linkId: string;
+  source: NormalizedTransferSide;
+  timestamp: string;
+  transferCode: string;
+}
+
 export interface NormalizedTransferPage {
   nextPageToken: string;
-  transfers: Record<string, unknown>[];
+  transfers: NormalizedTransfer[];
+  quarantined: unknown[];
+}
+
+const TRANSFER_SIDE_KINDS = new Set([
+  "FUNDING_ACCOUNT",
+  "TRADING_ACCOUNT",
+  "EXTERNAL_ADDRESS",
+  "PRIVATE_COUNTERPARTY",
+  "FEE_ACCOUNT",
+  "SYSTEM_ACCOUNT",
+]);
+
+function transferSide(value: unknown): NormalizedTransferSide {
+  const side = object(value);
+  const kind = string(side.kind);
+  if (!TRANSFER_SIDE_KINDS.has(kind)) fail();
+  const result: NormalizedTransferSide = {
+    kind,
+    address: string(side.address, true),
+  };
+  if (side.accountId !== undefined) result.accountId = base58(side.accountId);
+  if (side.chainId !== undefined) result.chainId = integer(side.chainId);
+  return result;
 }
 
 /** Validate financial representations without inventing a transfer-leg key. */
 export function validateTransfersResponse(value: unknown): NormalizedTransferPage {
   const response = object(value);
   const nextPageToken = string(response.nextPageToken, true);
-  const transfers = array(response.transfers).map((raw) => {
+  const transfers: NormalizedTransfer[] = [];
+  const quarantined: unknown[] = [];
+  for (const raw of array(response.transfers)) {
+    try {
+      const row = object(raw);
+      transfers.push({
+        account: string(row.account),
+        asset: string(row.asset),
+        amount: decimal(row.amount),
+        balanceAfter: decimal(row.balanceAfter),
+        destination: transferSide(row.destination),
+        flowId: string(row.flowId, true),
+        isDebit: boolean(row.isDebit),
+        linkId: digits(row.linkId),
+        source: transferSide(row.source),
+        timestamp: digits(row.timestamp),
+        transferCode: string(row.transferCode),
+      });
+    } catch {
+      quarantined.push(raw);
+    }
+  }
+  return { nextPageToken, transfers, quarantined };
+}
+
+export interface NormalizedOrder {
+  orderId: string;
+  symbol: string;
+  marketSymbol?: string;
+  side: "BUY" | "SELL";
+  status: string;
+  orderType: string;
+  price: string;
+  origQty: string;
+  cumQty: string;
+  leavesQty: string;
+  avgPx: string;
+  createdAt: string;
+  terminalAt?: string;
+  lineageId: string;
+  generation: number;
+  version: number;
+  feeAsset?: "BASE" | "QUOTE";
+}
+
+export interface NormalizedOrderPage {
+  nextPageToken: string;
+  orders: NormalizedOrder[];
+  quarantined: unknown[];
+}
+
+const ORDER_SIDES = new Set(["BUY", "SELL"]);
+const ORDER_STATUSES = new Set(["PENDING", "PENDING_CANCEL", "WORKING", "FILLED", "CANCELED", "REJECTED"]);
+const ORDER_TYPES = new Set(["LIMIT", "MARKET"]);
+
+export function validateOrderHistoryResponse(
+  value: unknown,
+  markets: Readonly<Record<string, FillMarket>> = {},
+): NormalizedOrderPage {
+  const response = object(value);
+  const nextPageToken = string(response.nextPageToken, true);
+  const orders: NormalizedOrder[] = [];
+  const quarantined: unknown[] = [];
+  for (const raw of array(response.orders)) {
+    try {
+      const row = object(raw);
+      const side = string(row.side);
+      const status = string(row.status);
+      const orderType = string(row.orderType);
+      if (!ORDER_SIDES.has(side) || !ORDER_STATUSES.has(status) || !ORDER_TYPES.has(orderType)) fail();
+      const lineage = object(row.lineage);
+      const generation = integer(lineage.generation);
+      if (generation < 1) fail();
+      const symbol = string(row.symbol);
+      const order: NormalizedOrder = {
+        orderId: base58(row.orderId),
+        symbol,
+        marketSymbol: markets[symbol]?.marketSymbol,
+        side: side as "BUY" | "SELL",
+        status,
+        orderType,
+        price: decimal(row.price),
+        origQty: decimal(row.origQty),
+        cumQty: decimal(row.cumQty),
+        leavesQty: decimal(row.leavesQty),
+        avgPx: decimal(row.avgPx),
+        createdAt: string(row.createdAt),
+        lineageId: base58(lineage.id),
+        generation,
+        version: integer(row.version),
+      };
+      if (row.terminalAt !== undefined) order.terminalAt = string(row.terminalAt);
+      if (row.feeAsset !== undefined) {
+        const feeAsset = string(row.feeAsset);
+        if (feeAsset !== "BASE" && feeAsset !== "QUOTE") fail();
+        order.feeAsset = feeAsset;
+      }
+      orders.push(order);
+    } catch {
+      quarantined.push(raw);
+    }
+  }
+  return { nextPageToken, orders, quarantined };
+}
+
+export interface NormalizedFeeRate {
+  symbol: string;
+  makerFeeRatePercent: string;
+  takerFeeRatePercent: string;
+  vipTier: number;
+}
+
+export function validateFeeRatesResponse(value: unknown): { feeRates: NormalizedFeeRate[] } {
+  const response = object(value);
+  const feeRates = array(response.feeRates).map((raw) => {
     const row = object(raw);
-    decimal(row.amount);
-    decimal(row.balanceAfter);
-    digits(row.timestamp);
-    boolean(row.isDebit);
-    string(row.asset);
-    string(row.account);
-    string(row.transferCode);
-    string(row.linkId);
-    string(row.flowId, true);
-    object(row.source);
-    object(row.destination);
-    return row;
+    const maker = decimal(row.makerFeeRatePercent, true);
+    const taker = decimal(row.takerFeeRatePercent);
+    if (compare(parseDecimal(maker), fromBigInt(-100n)) < 0 || compare(parseDecimal(maker), fromBigInt(100n)) > 0) fail();
+    if (compare(parseDecimal(taker), fromBigInt(100n)) > 0) fail();
+    const vipTier = integer(row.vipTier);
+    if (vipTier < 0 || vipTier > 10) fail();
+    return {
+      symbol: string(row.symbol),
+      makerFeeRatePercent: maker,
+      takerFeeRatePercent: taker,
+      vipTier,
+    };
   });
-  return { nextPageToken, transfers };
+  return { feeRates };
 }
 
 export function validateObjectResponse(value: unknown): Record<string, unknown> {

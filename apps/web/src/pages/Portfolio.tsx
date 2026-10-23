@@ -1,8 +1,9 @@
 /**
  * Secure local Ed25519 vault and read-only request-signing foundation.
  *
- * No authenticated request is executed here. Real-key release remains gated on
- * target-browser, deployment, CORS, and owner-controlled verification.
+ * The signer itself never executes requests. Account analytics is isolated in
+ * a deployment-gated panel; live release remains subject to target-browser,
+ * CORS, and owner-controlled read-policy verification.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -26,6 +27,7 @@ import {
   IconTrash,
   IconVault,
 } from "../components/icons";
+import { AccountAnalytics } from "../components/AccountAnalytics";
 
 type CreateMode = "generate" | "import";
 type PendingConfirm =
@@ -306,10 +308,11 @@ export default function Portfolio() {
 
       <div className="notice warn" role="note">
         <div>
-          <strong>Security foundation only — account retrieval is not enabled.</strong>{" "}
-          Do not enter a real key in a development server or shared preview. Real-key use
-          remains blocked until target-browser, dependency/CSP, exact-origin CORS, and
-          owner-controlled read-policy gates pass. This page never sends the signed request.
+          <strong>Real-key use remains deployment-gated.</strong>{" "}
+          Do not enter a real key in a development server or shared preview. Live account
+          reads require an explicit deployment opt-in after target-browser, dependency/CSP,
+          exact-origin CORS, and owner-controlled read-policy gates pass. The local signer
+          below never sends its inspection signatures.
         </div>
       </div>
 
@@ -335,6 +338,8 @@ export default function Portfolio() {
           sub="Fresh monotonic timestamps · no arbitrary writes"
         />
       </MetricStrip>
+
+      <AccountAnalytics accountVault={accountVault} session={session} />
 
       {error && (
         <div className="notice error" role="alert">
@@ -810,7 +815,7 @@ export default function Portfolio() {
         <Card title="Residual Browser Limits" subtitle="AEAD and nonextractable keys reduce exposure; they do not make XSS or a compromised device safe.">
           <div className="kv"><span className="k">Idle lock</span><span className="v">15 minutes of deliberate inactivity</span></div>
           <div className="kv"><span className="k">Cross-tab control</span><span className="v">Random event/generation IDs only</span></div>
-          <div className="kv"><span className="k">Private responses</span><span className="v">None retrieved or persisted by this phase</span></div>
+          <div className="kv"><span className="k">Private responses</span><span className="v">Memory-only after explicit live-read opt-in; never persisted</span></div>
           <p className="faint">
             JavaScript cannot guarantee erasure of every immutable string or garbage-collected copy. Mutable key/passphrase buffers are overwritten where possible; no perfect memory-wiping claim is made.
           </p>
