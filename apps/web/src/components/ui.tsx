@@ -28,10 +28,11 @@ export function PageHeader({
   return (
     <div className="page-header">
       <div className="page-header-info">
-        <h2>
-          {title}
+        <div className="page-eyebrow">
+          <span>Read-only MCP · Testnet</span>
           {badge}
-        </h2>
+        </div>
+        <h2>{title}</h2>
         {subtitle && <p className="page-header-desc">{subtitle}</p>}
       </div>
       {actions && <div className="page-header-actions">{actions}</div>}
@@ -469,8 +470,8 @@ export function assetColor(asset: string): string {
 
 export function SymBadge({ asset }: { asset: string }) {
   return (
-    <span className="sym-badge" style={{ background: assetColor(asset) }} aria-hidden="true">
-      {asset.slice(0, 3)}
+    <span className="sym-badge" aria-hidden="true">
+      {asset.slice(0, 4)}
     </span>
   );
 }

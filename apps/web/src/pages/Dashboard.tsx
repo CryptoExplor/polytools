@@ -301,45 +301,19 @@ export default function Dashboard() {
         <MetricCell
           label="Listed Markets"
           value={summary.count || "—"}
-          sub={`${rows.length} shown by active filter`}
+          sub={
+            summary.count
+              ? `${rows.length} shown · ${summary.gainers} up / ${summary.losers} down`
+              : "Spot markets on Polyester"
+          }
         />
         <MetricCell
           label="24h Turnover (USD)"
           value={summary.count ? fmtCompact(summary.volUsd, "$") : "—"}
           sub={
             summary.topVol
-              ? `Leader: ${summary.topVol.symbol} (${fmtCompact(dec(summary.topVol.volume24hUsd), "$")})`
+              ? `Top: ${summary.topVol.symbol} (${fmtCompact(dec(summary.topVol.volume24hUsd), "$")})`
               : "Aggregate spot volume"
-          }
-        />
-        <MetricCell
-          label="24h Market Breadth"
-          value={
-            summary.count ? (
-              <span>
-                <span className="up">▲ {summary.gainers}</span>
-                <span className="faint"> / </span>
-                <span className="down">▼ {summary.losers}</span>
-              </span>
-            ) : (
-              "—"
-            )
-          }
-          sub={
-            summary.count ? (
-              <div className="imbalance-bar mt-1" title="Advancers vs Decliners">
-                <div
-                  className="imbalance-bid"
-                  style={{ width: `${(summary.gainers / Math.max(1, summary.count)) * 100}%` }}
-                />
-                <div
-                  className="imbalance-ask"
-                  style={{ width: `${(summary.losers / Math.max(1, summary.count)) * 100}%` }}
-                />
-              </div>
-            ) : (
-              "24h advancers vs decliners"
-            )
           }
         />
         <MetricCell
@@ -571,7 +545,14 @@ export default function Dashboard() {
                     }}
                   >
                     <td>
-                      <span className="sym-cell">
+                      <span
+                        className="sym-cell"
+                        title={
+                          pair
+                            ? `Tick size: ${pair.tickSize} · Min order: ${pair.minQtyBase} ${base} (${pair.minNotionalQuote} ${quote})`
+                            : m.symbol
+                        }
+                      >
                         <button
                           type="button"
                           className={`star-btn ${watchlist.includes(m.symbol) ? "active" : ""}`}
@@ -592,23 +573,13 @@ export default function Dashboard() {
                         >
                           {watchlist.includes(m.symbol) ? "★" : "☆"}
                         </button>
-                        <SymBadge asset={base} />
-                        <span>
+                        <span className="mono">
                           {base}
                           <small>/{quote}</small>
-                          {pair && (
-                            <small
-                              className="mono"
-                              style={{ display: "block", fontSize: 10.5 }}
-                              title={`Tick size: ${pair.tickSize} · Min order: ${pair.minQtyBase} ${base} (${pair.minNotionalQuote} ${quote})`}
-                            >
-                              tick {pair.tickSize}
-                            </small>
-                          )}
                         </span>
                       </span>
                     </td>
-                    <td className="mono" style={{ fontWeight: 700 }}>
+                    <td className="mono" style={{ fontWeight: 650 }}>
                       {fmtNum(last)}
                     </td>
                     <td className="mono muted">{fmtNum(idxPx)}</td>
@@ -616,79 +587,77 @@ export default function Dashboard() {
                       <Pill
                         kind={sign === "up" ? "up" : sign === "down" ? "down" : undefined}
                       >
-                        {sign === "up" ? "▲ " : sign === "down" ? "▼ " : ""}
                         {fmtPctFromBps(m.change24hBps)}
                       </Pill>
                     </td>
                     <td>
-                      <div style={{ display: "inline-flex", flexDirection: "column", gap: 3 }}>
-                        <div
-                          className="range"
-                          title={`24h Low: ${fmtNum(lo)} → 24h High: ${fmtNum(hi)}`}
-                        >
-                          <div className="fill" style={{ width: "100%", opacity: 0.55 }} />
+                      <div
+                        className="range-inline"
+                        title={`24h Low: ${fmtNum(lo)} → 24h High: ${fmtNum(hi)}`}
+                      >
+                        <span className="mono faint" style={{ fontSize: 11 }}>
+                          {fmtCompact(lo)}
+                        </span>
+                        <div className="range">
+                          <div
+                            className="fill"
+                            style={{ width: `${(pos * 100).toFixed(1)}%` }}
+                          />
                           <div
                             className="marker"
                             style={{ left: `calc(${(pos * 100).toFixed(1)}% - 1.5px)` }}
                           />
                         </div>
-                        <div className="between mono faint" style={{ fontSize: 10, width: 110 }}>
-                          <span>{fmtCompact(lo)}</span>
-                          <span>{fmtCompact(hi)}</span>
-                        </div>
+                        <span className="mono faint" style={{ fontSize: 11 }}>
+                          {fmtCompact(hi)}
+                        </span>
                       </div>
                     </td>
-                    <td>
-                      <div className="mono" style={{ fontWeight: 600 }}>
-                        {fmtCompact(dec(m.volume24hUsd), "$")}
-                      </div>
-                      <div className="faint mono" style={{ fontSize: 10.5 }}>
-                        {fmtCompact(dec(m.volume24hBase))} {base}
-                      </div>
+                    <td
+                      className="mono"
+                      title={`${fmtCompact(dec(m.volume24hBase))} ${base}`}
+                    >
+                      {fmtCompact(dec(m.volume24hUsd), "$")}
                     </td>
                     <td className="mono muted" title={`Bid ${fmtNum(bid)} / Ask ${fmtNum(ask)}`}>
                       {isFinite(sp) ? `${sp.toFixed(1)} bps` : "—"}
                     </td>
                     <td>
-                      <Sparkline data={spark} width={96} height={24} />
+                      <Sparkline data={spark} width={88} height={22} />
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      <div className="row-flex" style={{ justifyContent: "flex-end", gap: 4 }}>
+                      <div className="row-actions">
                         <button
                           type="button"
-                          className="btn sm ghost"
+                          className="row-action-btn"
                           title={`Open ${m.symbol} Order Book`}
                           onClick={(e) => openTool(m.symbol, "/book", e)}
                         >
-                          <IconBook size={12} />
-                          <span className="hide-sm">Book</span>
+                          Book
                         </button>
                         <button
                           type="button"
-                          className="btn sm ghost"
+                          className="row-action-btn"
                           title={`Open ${m.symbol} Trade Tape`}
                           onClick={(e) => openTool(m.symbol, "/tape", e)}
                         >
-                          <IconTape size={12} />
-                          <span className="hide-sm">Tape</span>
+                          Tape
                         </button>
                         <button
                           type="button"
-                          className="btn sm ghost"
+                          className="row-action-btn"
                           title={`Open ${m.symbol} Candlestick Chart`}
                           onClick={(e) => openTool(m.symbol, "/charts", e)}
                         >
-                          <IconChart size={12} />
-                          <span className="hide-sm">Chart</span>
+                          Chart
                         </button>
                         <button
                           type="button"
-                          className="btn sm ghost"
+                          className="row-action-btn"
                           title={`Open ${m.symbol} Liquidity Heatmap`}
                           onClick={(e) => openTool(m.symbol, "/heatmap", e)}
                         >
-                          <IconActivity size={12} />
-                          <span className="hide-sm">Heat</span>
+                          Heat
                         </button>
                       </div>
                     </td>
