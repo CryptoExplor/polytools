@@ -265,8 +265,8 @@ describe("3. Backend handler allowlists, Node adapter path fix, and bounded TTL 
   });
 });
 
-describe("4. @poly/core Ed25519 vault & 5-field canonical signing (SEC-01, SEC-07)", () => {
-  it("normalizes RFC 3986 query string, handles malformed percent-encoding without throwing, and hashes empty body", async () => {
+describe("4. Shared canonical-request primitives (SEC-01, SEC-07)", () => {
+  it("normalizes the official query example, handles malformed escapes, and hashes actual body bytes", async () => {
     assert.equal(
       core.vault.EMPTY_BODY_SHA256,
       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -281,69 +281,46 @@ describe("4. @poly/core Ed25519 vault & 5-field canonical signing (SEC-01, SEC-0
       "filter=50%25&incomplete=%252",
     );
     assert.equal(await core.vault.sha256Hex(""), core.vault.EMPTY_BODY_SHA256);
+    assert.equal(
+      await core.vault.sha256Hex("abc"),
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
   });
 
-  it("supports 64-hex Ed25519 public keys (with or without 0x) for Polyester 'Bring your own key'", async () => {
-    core.vault.wipeVault();
+  it("blocks prefix-key queries whose documentation and pinned-SDK orderings conflict", () => {
+    assert.throws(
+      () => core.vault.normalizeCanonicalQuery("a=first&a-b=second"),
+      (error) => error?.code === "AMBIGUOUS_QUERY_CONTRACT",
+    );
+    const inspected = core.vault.canonicalizeQuery("a=first&a-b=second", {
+      rejectAmbiguous: false,
+    });
+    assert.equal(inspected.ambiguousOrdering, true);
+    assert.equal(inspected.canonicalQuery, "a=first&a-b=second");
+  });
+
+  it("supports only exact 32-byte public keys for Bring Your Own Key", () => {
     const sampleHex =
       "0efa75cad8790e3c3238b41790658bff5dab2617bd28e30533f35e77bfe190bd";
     assert.equal(core.vault.normalizePublicKeyHex(sampleHex), sampleHex);
     assert.equal(core.vault.normalizePublicKeyHex(`0x${sampleHex.toUpperCase()}`), sampleHex);
     assert.equal(core.vault.normalizePublicKeyHex("0x1234"), null);
-
-    const imported = core.vault.importPublicVaultKey(
-      "byok-bot",
-      `0x${sampleHex}`,
-      "ak_byok_1",
-    );
-    assert.equal(imported.publicKeyHex, sampleHex);
-    assert.equal(core.vault.pubKeyB64ToHex(imported.publicKeyB64), sampleHex);
-    assert.equal(imported.registeredKeyId, "ak_byok_1");
-    core.vault.wipeVault();
+    assert.equal(core.vault.pubKeyB64ToHex(core.vault.pubKeyHexToB64(sampleHex)), sampleHex);
   });
 
-  it("builds and signs the 5-line canonical string and verifies Ed25519 signature (64-hex public key & 128-hex signature)", async () => {
-    core.vault.wipeVault();
-    const entry = await core.vault.generateVaultKey("bot-key-1");
-    assert.match(entry.publicKeyHex, /^[0-9a-f]{64}$/);
-    const sig = await core.vault.signRequest(entry, {
+  it("builds the exact five-line canonical string without a trailing newline", () => {
+    const canonical = core.vault.buildCanonicalString({
       timestamp: "1773964800123",
-      method: "POST",
+      method: "post",
       path: "/v1/orders",
       query: "recvWindow=5000&accountId=acc_1",
-      body: '{"symbol":"BTC-USDT","side":"buy"}',
-      apiKeyId: "ak_live_test_123",
+      bodySha256Hex:
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     });
-
-    const lines = sig.canonicalString.split("\n");
-    assert.equal(lines.length, 5);
-    assert.equal(lines[0], "1773964800123");
-    assert.equal(lines[1], "POST");
-    assert.equal(lines[2], "/v1/orders");
-    assert.equal(lines[3], "accountId=acc_1&recvWindow=5000");
-    assert.equal(lines[4].length, 64);
-    assert.equal(sig.keyId, "ak_live_test_123");
-    assert.equal(sig.label, "bot-key-1");
-    assert.equal(sig.isRegisteredKeyId, true);
-    assert.match(sig.signatureHex, /^[0-9a-f]{128}$/);
-
-    // Verify signature using WebCrypto public key
-    const pubBytes = Uint8Array.from(atob(entry.publicKeyB64), (c) => c.charCodeAt(0));
-    const sigBytes = Uint8Array.from(atob(sig.signatureB64), (c) => c.charCodeAt(0));
-    const pubKey = await crypto.subtle.importKey(
-      "raw",
-      pubBytes,
-      { name: "Ed25519" },
-      false,
-      ["verify"],
+    assert.equal(
+      canonical,
+      "1773964800123\nPOST\n/v1/orders\naccountId=acc_1&recvWindow=5000\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     );
-    const valid = await crypto.subtle.verify(
-      { name: "Ed25519" },
-      pubKey,
-      sigBytes,
-      new TextEncoder().encode(sig.canonicalString),
-    );
-    assert.equal(valid, true);
-    core.vault.wipeVault();
+    assert.equal(canonical.endsWith("\n"), false);
   });
 });

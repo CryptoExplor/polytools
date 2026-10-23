@@ -1,21 +1,11 @@
 /**
- * TOOL 10 — Client-Side Ed25519 Key Vault & Portfolio Foundation (/#/portfolio)
+ * Secure local Ed25519 vault and read-only request-signing foundation.
  *
- * Security boundaries enforced:
- *  - Private keys (privateKeyB64) are NEVER rendered in the DOM, logged,
- *    copied to clipboard, or transmitted over the network.
- *  - All cryptography (Ed25519 keypair generation & request signing) executes
- *    exclusively in-browser via WebCrypto (`@poly/core` vault module).
- *  - Public keys are displayed in 64-character lowercase hex to match
- *    https://testnet.polyester.com/account/api-keys ("Bring your own key":
- *    "Paste 64 hex characters (with or without 0x)") as well as Base64.
- *  - Signing implements the official 5-field newline-separated canonical string:
- *      <timestamp_ms>\n<UPPERCASE_METHOD>\n<path>\n<canonical_query>\n<body_sha256_hex>
- *  - Destructive actions (deleting a key, overwriting a keyId, or wiping the
- *    vault) require explicit modal confirmation (`ConfirmDialog`).
+ * No authenticated request is executed here. Real-key release remains gated on
+ * target-browser, deployment, CORS, and owner-controlled verification.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { NETWORKS, vault } from "@poly/core";
 import {
@@ -29,885 +19,783 @@ import {
   Pill,
   TermTip,
 } from "../components/ui";
-import { IconAlert, IconExternal, IconKey, IconTrash, IconVault } from "../components/icons";
+import {
+  IconAlert,
+  IconExternal,
+  IconKey,
+  IconTrash,
+  IconVault,
+} from "../components/icons";
 
-type VaultKey = vault.VaultKey;
-
+type CreateMode = "generate" | "import";
 type PendingConfirm =
-  | { kind: "delete"; keyId: string }
+  | { kind: "delete"; entryId: string }
   | { kind: "wipe" }
-  | { kind: "overwrite-gen"; keyId: string }
-  | { kind: "overwrite-import"; keyId: string }
+  | { kind: "legacy-delete" }
   | null;
+type SignedOutput = vault.SignedRequestResult & {
+  headers: Record<string, string>;
+};
 
-type CreateTab = "generate" | "bring";
+const PASSPHRASE_HELP =
+  "At least 12 characters. It is never stored and cannot be recovered.";
 
 export default function Portfolio() {
-  const [keys, setKeys] = useState<VaultKey[]>(() => vault.loadVault());
-  const [createTab, setCreateTab] = useState<CreateTab>("generate");
-  const [label, setLabel] = useState<string>("trading-bot-readonly");
-  const [customPubHex, setCustomPubHex] = useState<string>("");
-  const [newRegKeyId, setNewRegKeyId] = useState<string>("");
-  const [lastCreatedKey, setLastCreatedKey] = useState<VaultKey | null>(null);
-  const [busy, setBusy] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [accountVault, setAccountVault] = useState<vault.AccountVault | null>(null);
+  const [entries, setEntries] = useState<vault.VaultEntrySummary[]>([]);
+  const [legacy, setLegacy] = useState<vault.LegacyVaultStatus>({
+    present: false,
+    invalid: false,
+    signCapableCount: 0,
+    publicOnlyCount: 0,
+    canMigrate: false,
+  });
+  const [session, setSession] = useState<vault.VaultSessionInfo | null>(null);
+  const [createMode, setCreateMode] = useState<CreateMode>("generate");
+  const [label, setLabel] = useState("readonly-analytics");
+  const [registeredId, setRegisteredId] = useState("");
+  const [publicKeyInput, setPublicKeyInput] = useState("");
+  const [privateKeyInput, setPrivateKeyInput] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [confirmPassphrase, setConfirmPassphrase] = useState("");
+  const [unlockEntryId, setUnlockEntryId] = useState("");
+  const [unlockPassphrase, setUnlockPassphrase] = useState("");
+  const [migrationPassphrase, setMigrationPassphrase] = useState("");
+  const [updatedRegisteredId, setUpdatedRegisteredId] = useState("");
+  const [updatePassphrase, setUpdatePassphrase] = useState("");
+  const [operation, setOperation] = useState<vault.ReadOnlyOperation>("balances");
+  const [query, setQuery] = useState("");
+  const [signedOutput, setSignedOutput] = useState<SignedOutput | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm>(null);
-
-  // Interactive 5-field Request Signer state (SEC-01 & SEC-07)
-  const [selectedKeyId, setSelectedKeyId] = useState<string>("");
-  const [registeredKeyId, setRegisteredKeyId] = useState<string>("");
-  const [httpMethod, setHttpMethod] = useState<"GET" | "POST" | "DELETE">("GET");
-  const [reqPath, setReqPath] = useState<string>("/v1/account/balances");
-  const [reqQuery, setReqQuery] = useState<string>("asset=USDT&limit=10");
-  const [reqBody, setReqBody] = useState<string>("");
-  const [signingBusy, setSigningBusy] = useState<boolean>(false);
-  const [signedOutput, setSignedOutput] = useState<{
-    keyId: string;
-    label: string;
-    isRegisteredKeyId: boolean;
-    timestamp: string;
-    canonicalString: string;
-    bodySha256Hex: string;
-    signatureB64: string;
-    signatureHex: string;
-    headers: Record<string, string>;
-  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const supported = vault.ed25519Supported();
-  const signCapableKeys = useMemo(
-    () => keys.filter((k) => Boolean(k.privateKeyB64)),
-    [keys],
-  );
 
-  const normalizedBringHex = useMemo(
-    () => vault.normalizePublicKeyHex(customPubHex),
-    [customPubHex],
-  );
+  // Construct in an effect so React StrictMode's development setup/cleanup
+  // cycle cannot reuse a disposed BroadcastChannel or vault session.
+  useEffect(() => {
+    const instance = new vault.AccountVault();
+    setAccountVault(instance);
+    return () => instance.dispose();
+  }, []);
 
-  const refreshVault = () => {
-    const loaded = vault.loadVault();
-    setKeys(loaded);
-  };
+  const refresh = useCallback(async () => {
+    if (!accountVault) return;
+    try {
+      const nextEntries = await accountVault.listEntries();
+      setEntries(nextEntries);
+      setUnlockEntryId((current) =>
+        nextEntries.some((entry) => entry.entryId === current)
+          ? current
+          : (nextEntries[0]?.entryId ?? ""),
+      );
+      setLegacy(accountVault.getLegacyStatus());
+      setSession(accountVault.getSessionInfo());
+    } catch (caught) {
+      setError(vault.vaultErrorMessage(caught));
+      setSession(null);
+    }
+  }, [accountVault]);
 
   useEffect(() => {
-    if (
-      signCapableKeys.length &&
-      !signCapableKeys.some((k) => k.keyId === selectedKeyId)
-    ) {
-      const first = signCapableKeys[0];
-      setSelectedKeyId(first.keyId);
-      setRegisteredKeyId(first.registeredKeyId ?? "");
-    } else if (!signCapableKeys.length) {
-      setSelectedKeyId("");
+    if (!accountVault) return;
+    let active = true;
+    void refresh();
+    const unsubscribe = accountVault.subscribe((event) => {
+      if (!active) return;
+      setSession(accountVault.getSessionInfo());
+      if (event.type !== "UNLOCK") {
+        setSignedOutput(null);
+        setUnlockPassphrase("");
+        setUpdatePassphrase("");
+      }
+      void refresh();
+    });
+    const clearSensitiveOutput = () => {
       setSignedOutput(null);
-    }
-  }, [signCapableKeys, selectedKeyId]);
+      setPrivateKeyInput("");
+      setPassphrase("");
+      setConfirmPassphrase("");
+      setUnlockPassphrase("");
+      setMigrationPassphrase("");
+      setUpdatePassphrase("");
+    };
+    window.addEventListener("pagehide", clearSensitiveOutput);
+    return () => {
+      active = false;
+      unsubscribe();
+      window.removeEventListener("pagehide", clearSensitiveOutput);
+    };
+  }, [accountVault, refresh]);
 
-  const validateLabel = (raw: string): string | null => {
-    const clean = raw.trim() || "key";
-    if (!/^[a-zA-Z0-9._ -]{1,64}$/.test(clean)) {
-      setError(
-        "Key label must be 1–64 characters using letters, numbers, spaces, hyphens, underscores, or dots.",
-      );
-      return null;
-    }
-    return clean;
-  };
+  useEffect(() => {
+    if (!accountVault) return;
+    const activity = () => accountVault.notifyActivity();
+    window.addEventListener("pointerdown", activity, { passive: true });
+    window.addEventListener("keydown", activity);
+    return () => {
+      window.removeEventListener("pointerdown", activity);
+      window.removeEventListener("keydown", activity);
+    };
+  }, [accountVault]);
 
-  const executeGenerate = async (targetLabel: string) => {
+  useEffect(() => {
+    if (!signedOutput) return;
+    const timeout = window.setTimeout(() => setSignedOutput(null), 60_000);
+    return () => window.clearTimeout(timeout);
+  }, [signedOutput]);
+
+  const operationDefinition = useMemo(
+    () => vault.READ_ONLY_OPERATIONS[operation],
+    [operation],
+  );
+
+  const run = async (action: () => Promise<void>) => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      const created = await vault.generateVaultKey(
-        targetLabel,
-        newRegKeyId.trim() || undefined,
-      );
-      refreshVault();
-      setLastCreatedKey(created);
-      setSelectedKeyId(created.keyId);
-      if (created.registeredKeyId) {
-        setRegisteredKeyId(created.registeredKeyId);
-      }
-    } catch {
-      setError(
-        "WebCrypto Ed25519 key generation failed. Ensure you are running in a secure context (HTTPS or localhost) on a modern browser.",
-      );
+      await action();
+    } catch (caught) {
+      setError(vault.vaultErrorMessage(caught));
     } finally {
       setBusy(false);
     }
   };
 
-  const executeImportPublic = (targetLabel: string) => {
-    setError(null);
-    try {
-      const created = vault.importPublicVaultKey(
-        targetLabel,
-        customPubHex,
-        newRegKeyId.trim() || undefined,
-      );
-      refreshVault();
-      setLastCreatedKey(created);
-      setCustomPubHex("");
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Invalid public key: paste 64 hex characters (with or without 0x).",
-      );
-    }
+  const clearCreationSecrets = () => {
+    setPassphrase("");
+    setConfirmPassphrase("");
+    setPrivateKeyInput("");
   };
 
-  const handleCreateSubmit = () => {
-    const clean = validateLabel(label);
-    if (!clean) return;
-    if (createTab === "generate") {
-      if (keys.some((k) => k.keyId === clean)) {
-        setPendingConfirm({ kind: "overwrite-gen", keyId: clean });
+  const createKey = () =>
+    run(async () => {
+      if (!accountVault) {
+        clearCreationSecrets();
         return;
       }
-      void executeGenerate(clean);
-    } else {
-      if (!normalizedBringHex) {
-        setError(
-          "Invalid Public Key: paste 64 hex characters (32-byte Ed25519 public key, with or without 0x).",
+      try {
+        if (passphrase !== confirmPassphrase) {
+          throw new vault.AccountVaultError(
+            "VAULT_INVALID_INPUT",
+            "The passphrase confirmation does not match.",
+          );
+        }
+        if (createMode === "generate") {
+          await accountVault.createKey({
+            label,
+            passphrase,
+            registeredKeyId: registeredId || undefined,
+          });
+        } else {
+          await accountVault.importKey({
+            label,
+            passphrase,
+            registeredKeyId: registeredId || undefined,
+            publicKeyHex: publicKeyInput,
+            privateKeyHex: privateKeyInput,
+          });
+        }
+        setPublicKeyInput("");
+        setRegisteredId("");
+        setNotice(
+          "Encrypted entry created and unlocked in memory only. No account request was sent.",
         );
-        return;
+        await refresh();
+      } finally {
+        clearCreationSecrets();
       }
-      if (keys.some((k) => k.keyId === clean)) {
-        setPendingConfirm({ kind: "overwrite-import", keyId: clean });
-        return;
+    });
+
+  const unlock = () =>
+    run(async () => {
+      if (!accountVault || !unlockEntryId) return;
+      try {
+        await accountVault.unlock(unlockEntryId, unlockPassphrase);
+        setNotice("Entry unlocked. The nonextractable session key exists only in memory.");
+      } finally {
+        setUnlockPassphrase("");
       }
-      executeImportPublic(clean);
-    }
-  };
+    });
 
-  const handleSaveRegisteredId = (keyId: string, regId: string) => {
-    const updated = vault.setVaultKeyRegisteredId(keyId, regId);
-    setKeys(updated);
-    if (selectedKeyId === keyId) {
-      setRegisteredKeyId(regId.trim());
-    }
-  };
+  const lock = () =>
+    run(async () => {
+      if (!accountVault) return;
+      await accountVault.lock();
+      setSignedOutput(null);
+      setNotice("Locked. Signing stopped and the in-memory session was discarded.");
+    });
 
-  const handleSignRequest = async () => {
-    const entry = signCapableKeys.find((k) => k.keyId === selectedKeyId);
-    if (!entry || !reqPath.trim()) return;
-    setSigningBusy(true);
-    setError(null);
-    try {
-      const sig = await vault.signRequest(entry, {
-        method: httpMethod,
-        path: reqPath,
-        query: reqQuery,
-        body: httpMethod === "GET" ? "" : reqBody,
-        apiKeyId: registeredKeyId.trim() || entry.registeredKeyId || undefined,
-      });
-      const headers = vault.signedHeaders(sig);
-      setSignedOutput({
-        ...sig,
-        headers,
-      });
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Failed to sign payload with the selected Ed25519 key.",
+  const saveRegisteredId = () =>
+    run(async () => {
+      if (!accountVault || !session) return;
+      try {
+        await accountVault.setRegisteredKeyId(
+          session.entryId,
+          updatePassphrase,
+          updatedRegisteredId || undefined,
+        );
+        setUpdatedRegisteredId("");
+        setNotice("Registered key ID updated inside the encrypted entry.");
+      } finally {
+        setUpdatePassphrase("");
+      }
+    });
+
+  const sign = () =>
+    run(async () => {
+      if (!accountVault) return;
+      accountVault.notifyActivity();
+      const signed = await accountVault.signReadRequest({ operation, query });
+      setSignedOutput(signed);
+      setNotice(
+        "Local signature created. It was not transmitted and will be cleared after 60 seconds or on lock.",
       );
-    } finally {
-      setSigningBusy(false);
-    }
-  };
+    });
+
+  const migrateLegacy = () =>
+    run(async () => {
+      if (!accountVault) return;
+      try {
+        const count = await accountVault.migrateLegacyVault(migrationPassphrase);
+        setNotice(
+          `${count} legacy signing ${count === 1 ? "entry" : "entries"} migrated to authenticated encryption. The plaintext record was removed after verification.`,
+        );
+        await refresh();
+      } finally {
+        setMigrationPassphrase("");
+      }
+    });
 
   return (
     <div className="page-stack">
       <PageHeader
-        title="Ed25519 API Keys & Request Signer"
+        title="Secure Ed25519 Vault & Read-only Signer"
         badge={
-          <Pill kind={supported ? "up" : "warn"}>
-            {supported ? "WebCrypto Ed25519 Ready" : "WebCrypto Unavailable"}
+          <Pill kind={session ? "up" : supported ? "warn" : "down"}>
+            {session ? "Unlocked · Memory Only" : supported ? "Locked" : "WebCrypto Unavailable"}
           </Pill>
         }
-        subtitle="Generate a 64-hex Ed25519 public key in your browser to register on Polyester via 'Bring your own key', or inspect and sign 5-field canonical REST requests locally."
+        subtitle="Passphrase-encrypted IndexedDB custody, nonextractable local Ed25519 sessions, and signatures restricted to known read-only GET operations."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
+            {session && (
+              <button type="button" className="btn sm" onClick={() => void lock()} disabled={busy}>
+                Lock now
+              </button>
+            )}
             <a
               href={vault.POLYESTER_API_KEYS_URL}
               target="_blank"
               rel="noreferrer"
               className="btn sm"
             >
-              <span>Open Polyester API Keys</span>
+              <span>Official API Keys</span>
               <IconExternal size={12} />
             </a>
             <Link to="/sdk" className="btn sm primary">
               <IconKey size={13} />
-              <span>SDK &amp; Bot Quickstart</span>
+              <span>SDK Quickstart</span>
             </Link>
           </div>
         }
       />
 
-      {/* Explicit Beginner Boundary Notice (UX-T10-01) */}
       <div className="notice warn" role="note">
         <div>
-          <strong>Local Browser Sandbox — How This Works with Polyester:</strong>{" "}
-          Generating a key here keeps the private key in this browser&apos;s{" "}
-          <code className="mono">localStorage</code> (never displayed or sent over the network)
-          and gives you a <strong>64-character hex Public Key</strong>. To activate it on
-          Polyester, open{" "}
-          <a
-            href={vault.POLYESTER_API_KEYS_URL}
-            target="_blank"
-            rel="noreferrer"
-            style={{ textDecoration: "underline", fontWeight: 600 }}
-          >
-            testnet.polyester.com/account/api-keys ↗
-          </a>{" "}
-          → click <strong>Create API Key</strong> → choose{" "}
-          <strong>Bring your own key</strong> → paste the{" "}
-          <strong>64 hex characters</strong>.
+          <strong>Security foundation only — account retrieval is not enabled.</strong>{" "}
+          Do not enter a real key in a development server or shared preview. Real-key use
+          remains blocked until target-browser, dependency/CSP, exact-origin CORS, and
+          owner-controlled read-policy gates pass. This page never sends the signed request.
         </div>
       </div>
 
       <MetricStrip>
         <MetricCell
-          label="Stored Keys"
-          value={keys.length}
-          sub={`${signCapableKeys.length} sign-capable in browser`}
+          label="Encrypted Entries"
+          value={entries.length}
+          sub="Random local references · labels encrypted"
         />
         <MetricCell
-          label="Public Key Format"
-          value="64-Char Hex"
-          sub="32-byte raw Ed25519 (Bring your own key)"
+          label="Session"
+          value={session ? "Unlocked" : "Locked"}
+          sub={session ? "Nonextractable CryptoKey in memory" : "New tabs always start locked"}
         />
         <MetricCell
-          label="Private Key Custody"
-          value="Browser Only"
-          sub="pkcs8 in localStorage · never rendered"
+          label="Persistence"
+          value="AES-GCM · PBKDF2"
+          sub={`${vault.PBKDF2_ITERATIONS.toLocaleString()} iterations · IndexedDB`}
         />
         <MetricCell
-          label="Signing Spec"
-          value="5-Field Canonical"
-          sub="ts · METHOD · path · query · sha256"
+          label="Signing Boundary"
+          value="GET Allowlist"
+          sub="Fresh monotonic timestamps · no arbitrary writes"
         />
       </MetricStrip>
 
-      {/* Create API Key Card — Mirrors Polyester "Create API Key" modal (Generate in browser | Bring your own key) */}
+      {error && (
+        <div className="notice error" role="alert">
+          <IconAlert size={16} />
+          <span>{error}</span>
+        </div>
+      )}
+      {notice && (
+        <div className="notice" role="status">
+          <span>{notice}</span>
+        </div>
+      )}
+
+      {legacy.present && (
+        <Card
+          title="Legacy Plaintext Vault Quarantined"
+          subtitle="poly-tools:vault:v1 is never loaded for signing by the new account foundation."
+          actions={<Pill kind="warn">Action Required</Pill>}
+        >
+          <div className="notice warn" role="note">
+            <div>
+              {legacy.invalid
+                ? "The legacy record is malformed. It cannot be migrated; leave it unused or explicitly delete it."
+                : `${legacy.signCapableCount} signing ${legacy.signCapableCount === 1 ? "entry" : "entries"} and ${legacy.publicOnlyCount} public-only ${legacy.publicOnlyCount === 1 ? "entry" : "entries"} detected. Migration requires a new passphrase and succeeds only after every encrypted write is read back, decrypted, and key-pair verified.`}
+              {legacy.publicOnlyCount > 0 &&
+                " Automatic migration is disabled for mixed/public-only legacy vaults to avoid discarding records."}
+            </div>
+          </div>
+          {legacy.canMigrate && (
+            <div className="row-flex mt-2" style={{ gap: 8, flexWrap: "wrap" }}>
+              <input
+                type="password"
+                className="input"
+                style={{ minWidth: 240, flex: 1 }}
+                value={migrationPassphrase}
+                onChange={(event) => setMigrationPassphrase(event.target.value)}
+                placeholder="New encryption passphrase"
+                aria-label="New passphrase for legacy migration"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy || migrationPassphrase.length < 12}
+                onClick={() => void migrateLegacy()}
+              >
+                Migrate & Remove Plaintext
+              </button>
+            </div>
+          )}
+          <div className="row-flex mt-2" style={{ justifyContent: "space-between", gap: 8 }}>
+            <span className="faint">Leave unused keeps the record quarantined; it does not make it safe.</span>
+            <button
+              type="button"
+              className="btn sm danger"
+              disabled={busy}
+              onClick={() => setPendingConfirm({ kind: "legacy-delete" })}
+            >
+              Delete Legacy Record
+            </button>
+          </div>
+        </Card>
+      )}
+
       <Card
-        title="Create API Key (Local Browser Vault)"
-        subtitle="Generate a sign-capable Ed25519 keypair in WebCrypto or register an existing 64-hex public key."
+        title="Create an Encrypted Key Entry"
+        subtitle="Generate a new Ed25519 pair or import a raw 32-byte seed with its matching public key. Private material is exported only transiently for authenticated encryption, then imported as nonextractable."
         actions={
-          <div className="seg-group" role="tablist" aria-label="API Key creation mode">
+          <div className="seg-group" role="tablist" aria-label="Key creation mode">
             <button
               type="button"
               role="tab"
-              aria-selected={createTab === "generate"}
-              className={`seg-btn ${createTab === "generate" ? "active" : ""}`}
-              onClick={() => {
-                setCreateTab("generate");
-                setError(null);
-              }}
+              aria-selected={createMode === "generate"}
+              className={`seg-btn ${createMode === "generate" ? "active" : ""}`}
+              onClick={() => setCreateMode("generate")}
             >
-              Generate in browser
+              Generate
             </button>
             <button
               type="button"
               role="tab"
-              aria-selected={createTab === "bring"}
-              className={`seg-btn ${createTab === "bring" ? "active" : ""}`}
-              onClick={() => {
-                setCreateTab("bring");
-                setError(null);
-              }}
+              aria-selected={createMode === "import"}
+              className={`seg-btn ${createMode === "import" ? "active" : ""}`}
+              onClick={() => setCreateMode("import")}
             >
-              Bring your own key (64 hex)
+              Import
             </button>
           </div>
         }
       >
         <div className="grid cols-2">
           <div className="field">
-            <label htmlFor="vault-key-label">
-              <span>Label</span>
-              <span className="faint">Helps you identify this key later</span>
-            </label>
+            <label htmlFor="vault-label">Local label (encrypted)</label>
             <input
-              id="vault-key-label"
-              type="text"
-              className="input mono"
-              placeholder="e.g. Trading Bot, Read-only Access"
+              id="vault-label"
+              className="input"
               value={label}
-              onChange={(e) => setLabel(e.target.value)}
+              onChange={(event) => setLabel(event.target.value)}
+              maxLength={64}
+              autoComplete="off"
             />
           </div>
-
           <div className="field">
-            <label htmlFor="vault-reg-id">
+            <label htmlFor="vault-registered-id">
               <TermTip
-                label="Registered Polyester Key ID (optional)"
-                tip="If you already registered this key at testnet.polyester.com/account/api-keys, paste the assigned keyId (e.g. ak_...) here."
+                label="Registered Polyester key ID (optional)"
+                tip="Use only the server-issued ak_... ID. A local label is never accepted as an authentication fallback."
               />
-              <span className="faint">Can also be added later</span>
             </label>
             <input
-              id="vault-reg-id"
-              type="text"
+              id="vault-registered-id"
               className="input mono"
+              value={registeredId}
+              onChange={(event) => setRegisteredId(event.target.value)}
               placeholder="ak_... (optional)"
-              value={newRegKeyId}
-              onChange={(e) => setNewRegKeyId(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="vault-passphrase">Encryption passphrase</label>
+            <input
+              id="vault-passphrase"
+              type="password"
+              className="input"
+              value={passphrase}
+              onChange={(event) => setPassphrase(event.target.value)}
+              autoComplete="new-password"
+            />
+            <span className="faint">{PASSPHRASE_HELP}</span>
+          </div>
+          <div className="field">
+            <label htmlFor="vault-passphrase-confirm">Confirm passphrase</label>
+            <input
+              id="vault-passphrase-confirm"
+              type="password"
+              className="input"
+              value={confirmPassphrase}
+              onChange={(event) => setConfirmPassphrase(event.target.value)}
+              autoComplete="new-password"
             />
           </div>
         </div>
 
-        {createTab === "bring" && (
-          <div className="field mt-2">
-            <label htmlFor="vault-bring-hex">
-              <span>Public Key (64 Hex Characters)</span>
-              <span className="mono">
-                {customPubHex.trim() ? (
-                  normalizedBringHex ? (
-                    <Pill kind="up">Valid 64-hex Ed25519 Public Key ✓</Pill>
-                  ) : (
-                    <Pill kind="down">
-                      Must be 64 hex characters (with or without 0x)
-                    </Pill>
-                  )
-                ) : (
-                  <span className="faint">32-byte raw Ed25519 public key</span>
-                )}
-              </span>
-            </label>
-            <textarea
-              id="vault-bring-hex"
-              rows={2}
-              className="input mono"
-              style={{ width: "100%", resize: "vertical", fontFamily: "var(--font-mono)" }}
-              placeholder="Paste 64 hex characters (with or without 0x)"
-              value={customPubHex}
-              onChange={(e) => setCustomPubHex(e.target.value)}
-            />
-            {normalizedBringHex && (
-              <div className="between mono faint" style={{ fontSize: 11 }}>
-                <span>Normalized 64-hex: {normalizedBringHex}</span>
-                <span>Base64: {vault.pubKeyHexToB64(normalizedBringHex)}</span>
-              </div>
-            )}
+        {createMode === "import" && (
+          <div className="grid cols-2 mt-2">
+            <div className="field">
+              <label htmlFor="vault-public-import">Matching public key (64 hex)</label>
+              <textarea
+                id="vault-public-import"
+                className="input mono"
+                rows={2}
+                value={publicKeyInput}
+                onChange={(event) => setPublicKeyInput(event.target.value)}
+                autoComplete="off"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="vault-private-import">Raw private seed (64 hex)</label>
+              <input
+                id="vault-private-import"
+                type="password"
+                className="input mono"
+                value={privateKeyInput}
+                onChange={(event) => setPrivateKeyInput(event.target.value)}
+                autoComplete="off"
+              />
+              <span className="faint">The pair is signed/verified locally before the encrypted write.</span>
+            </div>
           </div>
         )}
 
-        <div
-          className="row-flex mt-2"
-          style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}
-        >
-          <span className="faint" style={{ fontSize: 12 }}>
-            {createTab === "generate"
-              ? "Generates an Ed25519 keypair in WebCrypto. Private key stays in localStorage and is never shown; copy the 64-hex Public Key into Polyester's 'Bring your own key' tab."
-              : "Saves a public-key-only entry (64 hex chars) to inspect encodings and track your Polyester API keys."}
+        <div className="between mt-3" style={{ gap: 10, flexWrap: "wrap" }}>
+          <span className="faint">
+            No plaintext localStorage fallback, no passphrase recovery, and no network transmission.
           </span>
-          <div className="row-flex" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={
+              busy ||
+              !supported ||
+              !accountVault ||
+              passphrase.length < 12 ||
+              passphrase !== confirmPassphrase ||
+              (createMode === "import" &&
+                (!vault.normalizePrivateKeyHex(privateKeyInput) ||
+                  !vault.normalizePublicKeyHex(publicKeyInput)))
+            }
+            onClick={() => void createKey()}
+          >
+            <IconKey size={14} />
+            {busy ? "Working…" : createMode === "generate" ? "Generate & Encrypt" : "Verify, Import & Encrypt"}
+          </button>
+        </div>
+      </Card>
+
+      <Card
+        title="Encrypted Vault Entries"
+        subtitle="While locked, only random local references and KDF parameters are visible. Labels, public keys, registered IDs, and private material remain inside authenticated ciphertext."
+        actions={
+          (entries.length > 0 || legacy.present) && (
             <button
               type="button"
-              className="btn primary"
-              disabled={
-                busy ||
-                (createTab === "generate" && !supported) ||
-                (createTab === "bring" && !normalizedBringHex)
-              }
-              onClick={handleCreateSubmit}
+              className="btn sm danger"
+              disabled={busy}
+              onClick={() => setPendingConfirm({ kind: "wipe" })}
             >
-              <IconKey size={14} />
-              <span>
-                {busy
-                  ? "Generating…"
-                  : createTab === "generate"
-                    ? "Generate Ed25519 Keypair"
-                    : "Save Public Key (64 Hex)"}
-              </span>
+              <IconTrash size={12} /> Forget All
             </button>
-            {keys.length > 0 && (
-              <button
-                type="button"
-                className="btn danger"
-                onClick={() => setPendingConfirm({ kind: "wipe" })}
-              >
-                <IconTrash size={14} />
-                <span>Wipe All ({keys.length})</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Newly created key highlight banner with 64-hex copy for Polyester "Bring your own key" */}
-        {lastCreatedKey && (
-          <div
-            className="mt-3"
-            style={{
-              padding: 12,
-              background: "var(--bg-shell)",
-              border: "1px solid var(--accent-border)",
-              borderRadius: "var(--radius-sm)",
-            }}
-          >
-            <div className="between mb-1" style={{ flexWrap: "wrap", gap: 8 }}>
-              <div className="row-flex" style={{ gap: 8 }}>
-                <Pill kind="up">Ready for Polyester</Pill>
-                <strong style={{ fontSize: 12.5 }}>
-                  Public Key for &ldquo;{lastCreatedKey.keyId}&rdquo; (64 hex characters)
-                </strong>
-              </div>
-              <div className="row-flex" style={{ gap: 6 }}>
-                <CopyButton
-                  text={lastCreatedKey.publicKeyHex}
-                  label="Copy 64-Hex Public Key"
-                />
-                <CopyButton
-                  text={`0x${lastCreatedKey.publicKeyHex}`}
-                  label="Copy with 0x"
-                />
-                <a
-                  href={vault.POLYESTER_API_KEYS_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn sm primary"
-                >
-                  <span>Paste in Polyester &ldquo;Bring your own key&rdquo;</span>
-                  <IconExternal size={11} />
-                </a>
-              </div>
-            </div>
-            <div
-              className="mono"
-              style={{
-                padding: "8px 10px",
-                background: "var(--bg-card)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: 4,
-                fontSize: 12,
-                wordBreak: "break-all",
-              }}
-            >
-              {lastCreatedKey.publicKeyHex}
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <div className="notice error mt-2" role="alert">
-            <IconAlert size={16} />
-            <span>{error}</span>
-          </div>
-        )}
-      </Card>
-
-      {/* Stored Keys Table */}
-      <Card
-        flush
-        title="Stored Browser Keypairs"
-        subtitle="Copy the 64-character hex Public Key into testnet.polyester.com/account/api-keys ('Bring your own key'). Private keys are never displayed."
-      >
-        {keys.length === 0 ? (
-          <EmptyState
-            icon={<IconVault size={22} />}
-            title="Vault is currently empty"
-            description="Click 'Generate Ed25519 Keypair' above to create a browser-resident Ed25519 keypair and get its 64-character hex Public Key for Polyester."
-          />
-        ) : (
-          <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
-            <table className="data">
-              <thead>
-                <tr>
-                  <th className="align-left">Label</th>
-                  <th className="align-left">
-                    <TermTip
-                      label="Public Key (64 Hex · Bring Your Own Key)"
-                      tip="32-byte raw Ed25519 public key encoded as 64 lowercase hex characters — paste directly into testnet.polyester.com/account/api-keys -> Bring your own key."
-                    />
-                  </th>
-                  <th className="align-left">
-                    <TermTip
-                      label="Registered Polyester keyId"
-                      tip="Optional server-assigned keyId (e.g. ak_...) from testnet.polyester.com/account/api-keys used in the X-API-KEY-ID header."
-                    />
-                  </th>
-                  <th>Created</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {keys.map((k) => {
-                  const isSelected = selectedKeyId === k.keyId;
-                  const canSign = Boolean(k.privateKeyB64);
-                  return (
-                    <tr key={k.keyId}>
-                      <td className="align-left">
-                        <div className="row-flex" style={{ gap: 6 }}>
-                          <span className="mono" style={{ fontWeight: 700 }}>
-                            {k.keyId}
-                          </span>
-                          {isSelected && <Pill kind="accent">Active Signer</Pill>}
-                          {!canSign && <Pill kind="warn">Public-Only</Pill>}
-                        </div>
-                      </td>
-                      <td className="align-left">
-                        <div
-                          className="mono"
-                          style={{
-                            fontSize: 11.5,
-                            wordBreak: "break-all",
-                            color: "var(--text-primary)",
-                          }}
-                        >
-                          {k.publicKeyHex}
-                        </div>
-                        <div
-                          className="row-flex mt-1"
-                          style={{ gap: 6, flexWrap: "wrap" }}
-                        >
-                          <CopyButton
-                            text={k.publicKeyHex}
-                            label="Copy 64-Hex"
-                          />
-                          <CopyButton
-                            text={`0x${k.publicKeyHex}`}
-                            label="Copy 0xHex"
-                          />
-                          <CopyButton
-                            text={k.publicKeyB64}
-                            label="Copy Base64"
-                          />
-                        </div>
-                      </td>
-                      <td className="align-left">
-                        <input
-                          type="text"
-                          className="input mono"
-                          style={{ width: 170, padding: "4px 8px", fontSize: 11.5 }}
-                          placeholder="Paste ak_... keyId"
-                          aria-label={`Registered Polyester keyId for ${k.keyId}`}
-                          value={k.registeredKeyId ?? ""}
-                          onChange={(e) =>
-                            handleSaveRegisteredId(k.keyId, e.target.value)
-                          }
-                        />
-                      </td>
-                      <td className="mono muted">
-                        {new Date(k.createdAt).toISOString().slice(0, 19).replace("T", " ")}{" "}
-                        UTC
-                      </td>
-                      <td>
-                        <div
-                          className="row-flex"
-                          style={{ justifyContent: "flex-end", gap: 6 }}
-                        >
-                          {canSign && (
-                            <button
-                              type="button"
-                              className={`btn sm ${isSelected ? "primary" : "ghost"}`}
-                              onClick={() => {
-                                setSelectedKeyId(k.keyId);
-                                setRegisteredKeyId(k.registeredKeyId ?? "");
-                              }}
-                            >
-                              {isSelected ? "Selected" : "Use in Signer"}
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="btn sm danger"
-                            onClick={() =>
-                              setPendingConfirm({ kind: "delete", keyId: k.keyId })
-                            }
-                            aria-label={`Delete key ${k.keyId}`}
-                          >
-                            <IconTrash size={12} />
-                            <span>Delete</span>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      {/* Interactive 5-Field Canonical Request Signer (SEC-01 & SEC-07) */}
-      <Card
-        title="5-Field Canonical Ed25519 Request Signer"
-        subtitle="Constructs and signs the exact 5-line newline-separated canonical string (<timestamp_ms>\n<METHOD>\n<path>\n<canonical_query>\n<body_sha256_hex>) per the Polyester Ed25519 specification."
-        actions={
-          <Pill kind="info">
-            X-API-KEY-ID · X-API-TIMESTAMP · X-API-SIGNATURE
-          </Pill>
+          )
         }
       >
-        {signCapableKeys.length === 0 ? (
-          <div className="faint">
-            Generate at least one browser keypair above to test local Ed25519 request
-            signing.
-          </div>
+        {entries.length === 0 ? (
+          <EmptyState
+            icon={<IconVault size={22} />}
+            title="No encrypted entries"
+            description="Create or explicitly migrate a key above. An empty vault is not an account connection and shows no balances."
+          />
         ) : (
           <>
+            <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th className="align-left">Random local reference</th>
+                    <th>PBKDF2 iterations</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((entry) => {
+                    const active = session?.entryId === entry.entryId;
+                    return (
+                      <tr key={entry.entryId}>
+                        <td className="align-left mono">{entry.entryId.slice(0, 8)}…</td>
+                        <td className="mono">{entry.iterations.toLocaleString()}</td>
+                        <td>{active ? <Pill kind="up">Unlocked here</Pill> : <Pill>Encrypted</Pill>}</td>
+                        <td>
+                          <div className="row-flex" style={{ justifyContent: "flex-end", gap: 6 }}>
+                            <button
+                              type="button"
+                              className="btn sm"
+                              disabled={busy}
+                              onClick={() => setUnlockEntryId(entry.entryId)}
+                            >
+                              Select
+                            </button>
+                            <button
+                              type="button"
+                              className="btn sm danger"
+                              disabled={busy}
+                              onClick={() => setPendingConfirm({ kind: "delete", entryId: entry.entryId })}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="row-flex" style={{ gap: 8, flexWrap: "wrap", padding: 12 }}>
+              <select
+                className="select mono"
+                value={unlockEntryId}
+                onChange={(event) => setUnlockEntryId(event.target.value)}
+                aria-label="Encrypted entry to unlock"
+              >
+                {entries.map((entry) => (
+                  <option key={entry.entryId} value={entry.entryId}>
+                    Local entry {entry.entryId.slice(0, 8)}…
+                  </option>
+                ))}
+              </select>
+              <input
+                type="password"
+                className="input"
+                style={{ minWidth: 220, flex: 1 }}
+                value={unlockPassphrase}
+                onChange={(event) => setUnlockPassphrase(event.target.value)}
+                placeholder="Entry passphrase"
+                aria-label="Passphrase to unlock selected entry"
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy || !unlockEntryId || unlockPassphrase.length < 12}
+                onClick={() => void unlock()}
+              >
+                Unlock in Memory
+              </button>
+            </div>
+          </>
+        )}
+      </Card>
+
+      {session && (
+        <Card
+          title={`Unlocked: ${session.label}`}
+          subtitle="This metadata is in memory only. Locking aborts the session signal and invalidates late work."
+          actions={<Pill kind="up">Private Key Extractable: {String(session.privateKeyExtractable)}</Pill>}
+        >
+          <div className="kv">
+            <span className="k">Registered key ID</span>
+            <span className="v">
+              {session.registeredKeyId ? <Pill kind="up">Server ID saved</Pill> : <Pill kind="warn">Required before signing</Pill>}
+            </span>
+          </div>
+          <div className="field mt-2">
+            <label htmlFor="session-public-key">Ed25519 public key (safe to register)</label>
+            <div className="row-flex" style={{ gap: 8, alignItems: "flex-start" }}>
+              <code id="session-public-key" className="mono" style={{ wordBreak: "break-all", flex: 1 }}>
+                {session.publicKeyHex}
+              </code>
+              <CopyButton text={session.publicKeyHex} label="Copy Public Key" />
+            </div>
+          </div>
+          <div className="grid cols-2 mt-3">
+            <div className="field">
+              <label htmlFor="update-registered-id">Set/clear registered ak_... key ID</label>
+              <input
+                id="update-registered-id"
+                className="input mono"
+                value={updatedRegisteredId}
+                onChange={(event) => setUpdatedRegisteredId(event.target.value)}
+                placeholder={session.registeredKeyId ? "Enter replacement or leave blank to clear" : "ak_..."}
+                autoComplete="off"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="update-passphrase">Confirm entry passphrase</label>
+              <div className="row-flex" style={{ gap: 8 }}>
+                <input
+                  id="update-passphrase"
+                  type="password"
+                  className="input"
+                  value={updatePassphrase}
+                  onChange={(event) => setUpdatePassphrase(event.target.value)}
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || updatePassphrase.length < 12}
+                  onClick={() => void saveRegisteredId()}
+                >
+                  Re-encrypt
+                </button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      <Card
+        title="Read-only Canonical Request Signer"
+        subtitle="Fixed operation registry only. This creates a local signature for inspection; it does not execute fetch, retry, or authenticate an account."
+        actions={<Pill kind="info">GET · {operationDefinition.path}</Pill>}
+      >
+        {!session ? (
+          <EmptyState
+            title="Vault locked"
+            description="Unlock an encrypted entry to sign. Locked, denied, or unavailable states never become account metrics or a successful connection."
+          />
+        ) : (
+          <>
+            {!session.registeredKeyId && (
+              <div className="notice warn" role="note">
+                Add the server-issued key ID above. The local label “{session.label}” will never be substituted into X-API-KEY-ID.
+              </div>
+            )}
             <div className="grid cols-2">
               <div className="field">
-                <label htmlFor="signer-key-select">Local Vault Keypair</label>
+                <label htmlFor="sign-operation">Allowlisted read operation</label>
                 <select
-                  id="signer-key-select"
-                  className="select mono"
-                  value={selectedKeyId}
-                  onChange={(e) => {
-                    const nextId = e.target.value;
-                    setSelectedKeyId(nextId);
-                    const found = signCapableKeys.find((k) => k.keyId === nextId);
-                    setRegisteredKeyId(found?.registeredKeyId ?? "");
+                  id="sign-operation"
+                  className="select"
+                  value={operation}
+                  onChange={(event) => {
+                    setOperation(event.target.value as vault.ReadOnlyOperation);
+                    setSignedOutput(null);
                   }}
                 >
-                  {signCapableKeys.map((k) => (
-                    <option key={k.keyId} value={k.keyId}>
-                      {k.keyId} ({k.publicKeyHex.slice(0, 12)}…)
+                  {Object.entries(vault.READ_ONLY_OPERATIONS).map(([key, definition]) => (
+                    <option key={key} value={key}>
+                      {definition.label} · {definition.path}
                     </option>
                   ))}
                 </select>
               </div>
-
               <div className="field">
-                <label htmlFor="signer-reg-keyid">
+                <label htmlFor="sign-query">
                   <TermTip
-                    label="Registered Polyester Key ID (X-API-KEY-ID)"
-                    tip="Server-issued keyId (e.g. ak_01H...) from testnet.polyester.com/account/api-keys. Leave blank for local demo mode."
+                    label="Raw query (optional)"
+                    tip="Decoded key/value sorting follows the documented contract. A conflicting SDK sort order blocks signing pending server verification."
                   />
                 </label>
                 <input
-                  id="signer-reg-keyid"
-                  type="text"
+                  id="sign-query"
                   className="input mono"
-                  placeholder="ak_... (leave blank for local demo)"
-                  value={registeredKeyId}
-                  onChange={(e) => setRegisteredKeyId(e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="signer-method-select">HTTP Method &amp; Request Path</label>
-                <div className="row-flex" style={{ gap: 8 }}>
-                  <select
-                    id="signer-method-select"
-                    className="select mono"
-                    style={{ width: 96 }}
-                    value={httpMethod}
-                    onChange={(e) =>
-                      setHttpMethod(e.target.value as "GET" | "POST" | "DELETE")
-                    }
-                  >
-                    <option value="GET">GET</option>
-                    <option value="POST">POST</option>
-                    <option value="DELETE">DELETE</option>
-                  </select>
-                  <input
-                    type="text"
-                    className="input mono"
-                    style={{ flex: 1 }}
-                    placeholder="/v1/account/balances"
-                    aria-label="Request path"
-                    value={reqPath}
-                    onChange={(e) => setReqPath(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="field">
-                <label htmlFor="signer-query-input">
-                  <TermTip
-                    label="Query String (auto-sorted per RFC 3986)"
-                    tip="Query pairs are sorted by decoded key then decoded value and RFC 3986 percent-encoded before signing."
-                  />
-                </label>
-                <input
-                  id="signer-query-input"
-                  type="text"
-                  className="input mono"
-                  placeholder="symbol=BTC-USDT&limit=10"
-                  value={reqQuery}
-                  onChange={(e) => setReqQuery(e.target.value)}
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setSignedOutput(null);
+                  }}
+                  placeholder="Repeated, empty, reserved, Unicode, and cursor values are preserved"
+                  autoComplete="off"
                 />
               </div>
             </div>
-
-            {httpMethod !== "GET" && (
-              <div className="field">
-                <label htmlFor="signer-body-input">
-                  <span>Request Body (UTF-8 JSON · hashed with SHA-256)</span>
-                </label>
-                <input
-                  id="signer-body-input"
-                  type="text"
-                  className="input mono"
-                  placeholder='{"symbol":"BTC-USDT","side":"buy","qty":"0.001"}'
-                  value={reqBody}
-                  onChange={(e) => setReqBody(e.target.value)}
-                />
-              </div>
-            )}
-
-            <div className="row-flex" style={{ justifyContent: "space-between" }}>
-              <span className="faint">
-                Signs the 5-line UTF-8 canonical string in WebCrypto without exposing the
-                private key.
-              </span>
+            <div className="between" style={{ gap: 8, flexWrap: "wrap" }}>
+              <span className="faint">Exact empty-body SHA-256 · fresh monotonic timestamp · standard Base64 signature</span>
               <button
                 type="button"
                 className="btn primary"
-                disabled={signingBusy || !selectedKeyId || !reqPath.trim()}
-                onClick={() => void handleSignRequest()}
+                disabled={busy || !session.registeredKeyId}
+                onClick={() => void sign()}
               >
-                {signingBusy ? "Signing…" : "Sign 5-Field Payload"}
+                Sign Locally — Do Not Send
               </button>
             </div>
-
             {signedOutput && (
-              <div
-                className="mt-3"
-                style={{
-                  padding: 12,
-                  background: "var(--bg-shell)",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: "var(--radius-sm)",
-                }}
-              >
-                <div className="between mb-2" style={{ flexWrap: "wrap", gap: 8 }}>
-                  <div className="row-flex" style={{ gap: 8 }}>
-                    <strong style={{ fontSize: 12 }}>
-                      Generated Authentication Headers
-                    </strong>
-                    {!signedOutput.isRegisteredKeyId && (
-                      <Pill kind="warn">
-                        DEMO — local label ({signedOutput.label}) not registered on
-                        Polyester
-                      </Pill>
-                    )}
-                  </div>
-                  <div className="row-flex" style={{ gap: 6 }}>
-                    <CopyButton
-                      text={JSON.stringify(signedOutput.headers, null, 2)}
-                      label="Copy Headers (Base64 Sig)"
-                    />
-                    <CopyButton
-                      text={JSON.stringify(
-                        {
-                          ...signedOutput.headers,
-                          "X-API-SIGNATURE": signedOutput.signatureHex,
-                        },
-                        null,
-                        2,
-                      )}
-                      label="Copy Headers (128-Hex Sig)"
-                    />
-                  </div>
+              <div className="mt-3">
+                <div className="between mb-1" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <strong>Generated authentication headers (sensitive; auto-clear)</strong>
+                  <CopyButton text={JSON.stringify(signedOutput.headers, null, 2)} label="Copy Headers" />
                 </div>
-                {Object.entries(signedOutput.headers).map(([hdr, val]) => (
-                  <div key={hdr} className="kv">
-                    <span className="k mono">{hdr}</span>
-                    <span className="v mono row-flex" style={{ justifyContent: "flex-end" }}>
-                      <span>{val}</span>
-                      <CopyButton text={val} label="Copy" />
-                    </span>
+                {Object.entries(signedOutput.headers).map(([header, value]) => (
+                  <div className="kv" key={header}>
+                    <span className="k mono">{header}</span>
+                    <span className="v mono" style={{ wordBreak: "break-all" }}>{value}</span>
                   </div>
                 ))}
-                <div className="kv">
-                  <span className="k mono">X-API-SIGNATURE (128-Hex alt)</span>
-                  <span className="v mono row-flex" style={{ justifyContent: "flex-end" }}>
-                    <span style={{ wordBreak: "break-all" }}>
-                      {signedOutput.signatureHex}
-                    </span>
-                    <CopyButton text={signedOutput.signatureHex} label="Copy Hex" />
-                  </span>
+                <div className="between mt-2 mb-1">
+                  <span className="faint">Exact five-line canonical string</span>
+                  <CopyButton text={signedOutput.canonicalString} label="Copy Canonical String" />
                 </div>
-
-                <div className="mt-2">
-                  <div className="between mb-1">
-                    <span className="faint">
-                      Exact 5-Line Canonical String Signed (UTF-8):
-                    </span>
-                    <CopyButton
-                      text={signedOutput.canonicalString}
-                      label="Copy Canonical String"
-                    />
-                  </div>
-                  <pre
-                    className="mono"
-                    style={{
-                      margin: 0,
-                      padding: 10,
-                      background: "var(--bg-card)",
-                      border: "1px solid var(--border-subtle)",
-                      borderRadius: 4,
-                      fontSize: 11.5,
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-all",
-                    }}
-                  >
-                    {signedOutput.canonicalString}
-                  </pre>
-                </div>
+                <pre className="mono" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                  {signedOutput.canonicalString}
+                </pre>
               </div>
             )}
           </>
         )}
       </Card>
 
-      {/* Registration & Security Checklist (SEC-06) */}
       <div className="grid cols-2">
-        <Card
-          title="How to Register Your 64-Hex Public Key on Polyester"
-          subtitle="Matches https://testnet.polyester.com/account/api-keys ('Bring your own key')"
-        >
-          <ol
-            style={{
-              margin: 0,
-              paddingLeft: 18,
-              color: "var(--text-secondary)",
-              fontSize: 13,
-              lineHeight: 1.75,
-            }}
-          >
-            <li>
-              Click <strong>Generate Ed25519 Keypair</strong> above and click{" "}
-              <strong>Copy 64-Hex Public Key</strong> (64 hexadecimal characters).
-            </li>
-            <li>
-              Open{" "}
-              <a
-                href={vault.POLYESTER_API_KEYS_URL}
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: "var(--accent)", textDecoration: "underline" }}
-              >
-                testnet.polyester.com/account/api-keys ↗
-              </a>{" "}
-              and click <strong>Create API Key</strong>.
-            </li>
-            <li>
-              Select the <strong>Bring your own key</strong> tab and paste your{" "}
-              <strong>64 hex characters</strong> into the Public Key box.
-            </li>
-            <li>
-              Copy the assigned <code className="mono">ak_...</code> key ID returned by
-              Polyester and paste it into the <strong>Registered Polyester keyId</strong>{" "}
-              column above. Configure an <strong>IP allowlist</strong> for any trading key.
-            </li>
+        <Card title="Registration & Permission Boundary" subtitle="Key creation and policy attachment remain in Polyester's official UI.">
+          <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+            <li>Generate locally and copy only the public key into official “Bring your own key”.</li>
+            <li>Attach only verified read policies; never add trading, transfer, or withdrawal writes for analytics.</li>
+            <li>Save the resulting server-issued ak_... ID here with the entry passphrase.</li>
+            <li>Lock clears local use; revoke a compromised key in the official UI.</li>
           </ol>
-          <div className="row-flex mt-3" style={{ gap: 8 }}>
-            <a
-              href={vault.POLYESTER_API_KEYS_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="btn sm primary"
-            >
-              <span>Open Polyester API Keys</span>
-              <IconExternal size={12} />
+          <div className="row-flex mt-2" style={{ gap: 8 }}>
+            <a href={vault.POLYESTER_API_KEYS_URL} target="_blank" rel="noreferrer" className="btn sm primary">
+              Official Key UI <IconExternal size={11} />
             </a>
             <a
               href={`${NETWORKS.testnet.docsUrl}/developer-docs/authentication-security/ed25519-api-keys`}
@@ -915,109 +803,64 @@ export default function Portfolio() {
               rel="noreferrer"
               className="btn sm"
             >
-              <span>Ed25519 API Keys Docs</span>
-              <IconExternal size={12} />
+              Signing Docs <IconExternal size={11} />
             </a>
           </div>
         </Card>
-
-        <Card
-          title="Security Model & Threat Boundaries"
-          subtitle="Understand what browser localStorage protects against — and what it does not"
-        >
-          <div className="kv">
-            <span className="k">Network Transmission</span>
-            <span className="v up">Zero (100% client-side WebCrypto)</span>
-          </div>
-          <div className="kv">
-            <span className="k">Public Key Export</span>
-            <span className="v mono">64-char Hex (32 bytes) &amp; Base64</span>
-          </div>
-          <div className="kv">
-            <span className="k">Private Key DOM Rendering</span>
-            <span className="v up">Blocked (Never rendered or copied)</span>
-          </div>
-          <div className="kv">
-            <span className="k">Storage Persistence</span>
-            <span className="v mono">localStorage (&quot;poly-tools:vault:v1&quot;)</span>
-          </div>
-          <div className="notice warn mt-2" style={{ fontSize: 12 }}>
-            <div>
-              <strong>Security Reminder:</strong> Keys stored in{" "}
-              <code className="mono">localStorage</code> are accessible to JavaScript
-              running on the same origin. Prefer <strong>Read-Only</strong> permissions and{" "}
-              <strong>IP allowlists</strong> when registering keys at{" "}
-              <code className="mono">testnet.polyester.com/account/api-keys</code>, and wipe
-              keys when using shared machines.
-            </div>
-          </div>
+        <Card title="Residual Browser Limits" subtitle="AEAD and nonextractable keys reduce exposure; they do not make XSS or a compromised device safe.">
+          <div className="kv"><span className="k">Idle lock</span><span className="v">15 minutes of deliberate inactivity</span></div>
+          <div className="kv"><span className="k">Cross-tab control</span><span className="v">Random event/generation IDs only</span></div>
+          <div className="kv"><span className="k">Private responses</span><span className="v">None retrieved or persisted by this phase</span></div>
+          <p className="faint">
+            JavaScript cannot guarantee erasure of every immutable string or garbage-collected copy. Mutable key/passphrase buffers are overwritten where possible; no perfect memory-wiping claim is made.
+          </p>
         </Card>
       </div>
 
-      {/* Confirmation Modals */}
       <ConfirmDialog
         open={pendingConfirm?.kind === "delete"}
-        title="Delete Ed25519 Keypair?"
-        message={
-          pendingConfirm?.kind === "delete"
-            ? `Permanently remove keypair "${pendingConfirm.keyId}" from this browser's localStorage? Because there is no server backup, this keypair cannot be recovered.`
-            : ""
-        }
-        confirmLabel="Delete Keypair"
-        danger
+        title="Delete encrypted entry?"
+        message="This deletes the selected encrypted private-key record. There is no passphrase recovery or server backup. Other entries and public preferences are untouched."
+        confirmLabel="Delete Encrypted Entry"
         onCancel={() => setPendingConfirm(null)}
         onConfirm={() => {
-          if (pendingConfirm?.kind === "delete") {
-            vault.deleteVaultKey(pendingConfirm.keyId);
-            if (lastCreatedKey?.keyId === pendingConfirm.keyId) {
-              setLastCreatedKey(null);
-            }
-            refreshVault();
-          }
+          const target = pendingConfirm;
           setPendingConfirm(null);
-        }}
-      />
-
-      <ConfirmDialog
-        open={
-          pendingConfirm?.kind === "overwrite-gen" ||
-          pendingConfirm?.kind === "overwrite-import"
-        }
-        title="Overwrite Existing Key Label?"
-        message={
-          pendingConfirm?.kind === "overwrite-gen" ||
-          pendingConfirm?.kind === "overwrite-import"
-            ? `A key with label "${pendingConfirm.keyId}" already exists in your browser vault. Replacing it will permanently destroy the existing keypair.`
-            : ""
-        }
-        confirmLabel="Replace Key"
-        danger
-        onCancel={() => setPendingConfirm(null)}
-        onConfirm={() => {
-          if (pendingConfirm?.kind === "overwrite-gen") {
-            const target = pendingConfirm.keyId;
-            setPendingConfirm(null);
-            void executeGenerate(target);
-          } else if (pendingConfirm?.kind === "overwrite-import") {
-            const target = pendingConfirm.keyId;
-            setPendingConfirm(null);
-            executeImportPublic(target);
+          if (target?.kind === "delete") {
+            void run(async () => {
+              await accountVault?.deleteEntry(target.entryId);
+              await refresh();
+            });
           }
         }}
       />
-
       <ConfirmDialog
         open={pendingConfirm?.kind === "wipe"}
-        title="Wipe Entire Browser Key Vault?"
-        message={`Permanently erase all ${keys.length} Ed25519 keypair(s) from this browser's localStorage? This action is immediate and irreversible.`}
-        confirmLabel="Wipe All Keys"
-        danger
+        title="Forget all local vault data?"
+        message="This locks every tab, deletes all encrypted entries and any quarantined legacy vault, and clears displayed signatures. It does not revoke keys at Polyester; revoke compromised keys in the official UI."
+        confirmLabel="Forget All Local Keys"
         onCancel={() => setPendingConfirm(null)}
         onConfirm={() => {
-          vault.wipeVault();
-          setLastCreatedKey(null);
-          refreshVault();
           setPendingConfirm(null);
+          void run(async () => {
+            await accountVault?.wipeAll({ includeLegacy: true });
+            setSignedOutput(null);
+            await refresh();
+          });
+        }}
+      />
+      <ConfirmDialog
+        open={pendingConfirm?.kind === "legacy-delete"}
+        title="Delete quarantined plaintext record?"
+        message="This permanently deletes poly-tools:vault:v1 without migrating it. Other local preferences and encrypted entries are not removed."
+        confirmLabel="Delete Legacy Plaintext"
+        onCancel={() => setPendingConfirm(null)}
+        onConfirm={() => {
+          setPendingConfirm(null);
+          void run(async () => {
+            accountVault?.deleteLegacy();
+            await refresh();
+          });
         }}
       />
     </div>
