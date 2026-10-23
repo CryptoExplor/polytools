@@ -1,0 +1,23 @@
+# Full-stack Cloudflare Worker + Static Assets configuration (root deploy).
+# Runs after `npm run build` and deploys both the SPA (`apps/web/dist`)
+# and the serverless `/api/*` backend (`backend/adapters/worker.ts`) in one step.
+name = "polytools"
+main = "backend/adapters/worker.ts"
+compatibility_date = "2025-10-01"
+
+[assets]
+directory = "./apps/web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+# Optional explicit override (defaults to the testnet MCP endpoint in code):
+# [vars]
+# MCP_URL = "https://polyester-mcp-testnet.fabriclabs.workers.dev/mcp"
+# ALERT_MIN_BPS = "300"
+
+# Secrets (set once, never in this file):
+#   npx wrangler secret put TELEGRAM_BOT_TOKEN
+#   npx wrangler secret put TELEGRAM_CHAT_ID
