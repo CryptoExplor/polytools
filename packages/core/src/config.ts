@@ -42,13 +42,28 @@ export type NetworkId = keyof typeof NETWORKS;
 /**
  * Resolve the MCP URL for a network, allowing env overrides everywhere
  * (Vite build env, worker env vars, or explicit argument).
+ * SEC-10: Reject non-HTTPS overrides unless targeting localhost/127.0.0.1 for local dev.
  */
 export function resolveMcpUrl(
   network: NetworkId = "testnet",
   override?: string | null,
 ): string {
-  if (override && override.trim()) return override.trim();
-  return NETWORKS[network].mcpUrl;
+  if (override && override.trim()) {
+    const trimmed = override.trim();
+    try {
+      const parsed = new URL(trimmed);
+      const isHttps = parsed.protocol === "https:";
+      const isLocalHttp =
+        parsed.protocol === "http:" &&
+        (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1");
+      if (isHttps || isLocalHttp) {
+        return trimmed;
+      }
+    } catch {
+      // Ignore malformed URL and fall back to network default
+    }
+  }
+  return NETWORKS[network].mcpUrl || NETWORKS.testnet.mcpUrl;
 }
 
 /** MCP tool names, kept as constants so renames are one-line fixes. */

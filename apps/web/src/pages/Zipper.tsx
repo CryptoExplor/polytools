@@ -72,6 +72,7 @@ export default function Zipper() {
   const { assets } = useApp();
   const [asset, setAsset] = useState<string>("USDT");
   const [compareBy, setCompareBy] = useState<"networkFee" | "depositMinAmount">("networkFee");
+  const [chainFilter, setChainFilter] = useState<string>("");
   const [estAmount, setEstAmount] = useState<number>(100);
   const [chainQuery, setChainQuery] = useState<string>("");
   const [showContracts, setShowContracts] = useState<boolean>(false);
@@ -92,7 +93,11 @@ export default function Zipper() {
     refreshing: cmpRefreshing,
     updatedAt: cmpAt,
     refresh: refreshCmp,
-  } = usePollData(() => api.zipperCompare(asset, compareBy), 60_000, [asset, compareBy]);
+  } = usePollData(
+    () => api.zipperCompare(asset, compareBy, chainFilter || undefined),
+    60_000,
+    [asset, compareBy, chainFilter],
+  );
 
   const cfgAssets = useMemo(() => cfg?.assets ?? [], [cfg]);
 
@@ -274,6 +279,21 @@ export default function Zipper() {
                 ))}
               </select>
             </div>
+
+            <select
+              className="select mono"
+              style={{ width: "auto" }}
+              aria-label="Filter routes by network"
+              value={chainFilter}
+              onChange={(e) => setChainFilter(e.target.value)}
+            >
+              <option value="">All Networks</option>
+              {(cfg?.chains ?? []).map((c) => (
+                <option key={c.chainId} value={c.code}>
+                  {c.name} ({c.code})
+                </option>
+              ))}
+            </select>
 
             <div className="seg-group" role="group" aria-label="Rank routes by">
               <button

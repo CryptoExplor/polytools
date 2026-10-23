@@ -14,20 +14,22 @@ endpoint is announced you update one config slot, nothing else.
 
 ---
 
-## What's inside (10 tools, one codebase)
+## What's inside (12 tools, one codebase)
 
 | # | Tool | Route | Data |
 |---|------|-------|------|
-| 1 | Market dashboard | `/#/` | overview (3s) — prices, 24h stats, sparklines, sortable |
-| 2 | Order book & depth | `/#/book` | L2 ladder depth 50 + cumulative depth chart + wall detection |
+| 1 | Market dashboard | `/#/` | overview (3s) — prices, 24h stats, sparklines, watchlist, CSV export |
+| 2 | Order book & depth | `/#/book` | L2 ladder depth (5–100) + cumulative depth chart + wall detection |
 | 3 | Trades & whale alerts | `/#/tape` | live tape, threshold alerts: sound / toast / desktop notification |
 | 4 | Charts | `/#/charts` | all 11 candle timeframes, volume, crosshair, live refresh |
 | 5 | Venue compare | `/#/compare` | Polyester index vs CoinGecko, premium/discount in bps |
-| 6 | Zipper routes | `/#/zipper` | chains, fees, minimums, cheapest-route ranker |
-| 7 | Calculators | `/#/calc` | position size, liquidation estimate, PnL & fees, converter |
+| 6 | Zipper routes | `/#/zipper` | chains, fees, minimums, cheapest-route ranker + network filter |
+| 7 | Calculators | `/#/calc` | position size, isolated-margin sketch, PnL & fees, converter |
 | 8 | Testnet hub | `/#/hub` | daily claim countdown (00:00 UTC), onboarding checklist, faucets |
-| 9 | Tx explorer | `/#/flow` | trace deposits/withdrawals by tx hash or flow id |
-| 10 | Key vault | `/#/portfolio` | in-browser Ed25519 keypairs (WebCrypto) — Portfolio foundation |
+| 9 | Tx explorer | `/#/flow` | trace deposits/withdrawals by tx hash (`any`/`source`) or flow id |
+| 10 | Key vault | `/#/portfolio` | in-browser Ed25519 keypairs (WebCrypto) + 5-field canonical signer |
+| 11 | Liquidity heatmap | `/#/heatmap` | order book depth bucket density & imbalance across time |
+| 12 | SDK Quickstart Studio | `/#/sdk` | interactive TypeScript, Python & Rust SDK code generator |
 
 ## Architecture — modular & reusable
 
@@ -35,14 +37,14 @@ endpoint is announced you update one config slot, nothing else.
 polyester-tools
 ├── packages/core/          @poly/core — zero-dep TypeScript core
 │   ├── config.ts             networks + tool names (THE mainnet switch)
-│   ├── mcp.ts                MCP streamable-HTTP client (sessions, SSE, retry)
-│   ├── tools.ts              typed wrappers for all 13 read-only tools
+│   ├── mcp.ts                MCP streamable-HTTP client (sessions, SSE, isError handling)
+│   ├── tools.ts              typed wrappers for 12 active MCP data tools (search_docs excluded)
 │   ├── normalize.ts          scaled-integer prices (÷10³), bps, depth, walls
 │   ├── format.ts poll.ts     display helpers, visibility-aware poller
-│   └── keys.ts               Ed25519 vault (generate/sign/wipe, WebCrypto)
+│   └── keys.ts               Ed25519 vault + 5-field canonical request signer (WebCrypto)
 │
 ├── backend/                @poly/backend — ONE pure Web-API handler, 5 adapters
-│   ├── src/handler.ts          api(Request) → Response: 13 GET routes, TTL cache, CORS *
+│   ├── src/handler.ts          api(Request) → Response: 14 GET routes, bounded TTL cache, CORS *
 │   ├── src/mcpServer.ts        MCP session pool (server side)
 │   ├── adapters/
 │   │   ├── cloudflare-pages.ts → backend/functions/api/[[path]].ts (Pages Functions)
@@ -52,8 +54,8 @@ polyester-tools
 │   └── wrangler.toml
 │
 └── apps/web/               @poly/web — Vite + React 18 SPA (static build)
-    ├── src/components/         reusable UI: DepthChart, CandleChart (zero chart deps)
-    ├── src/pages/              the 10 tools
+    ├── src/components/         reusable UI: DepthChart, CandleChart, Glossary (zero chart deps)
+    ├── src/pages/              the 12 tools
     └── vite.config.ts          dev server MOUNTS the same backend handler → full-stack preview
 ```
 
@@ -69,6 +71,8 @@ server config — including GitHub Pages.
 ```bash
 npm install
 npm run dev          # http://localhost:5173 — frontend + backend in one process
+npm test             # run unit test suite (normalize, mcp, backend handler, Ed25519 vault)
+npm run typecheck    # TypeScript verification across core, backend, and web
 npm run build        # typecheck + static build → apps/web/dist
 ```
 

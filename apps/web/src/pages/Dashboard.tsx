@@ -37,7 +37,7 @@ import {
   SymBadge,
   TermTip,
 } from "../components/ui";
-import { IconBook, IconChart, IconSearch, IconTape } from "../components/icons";
+import { IconActivity, IconBook, IconChart, IconSearch, IconTape } from "../components/icons";
 
 type SortKey = "symbol" | "last" | "index" | "change" | "vol" | "spread";
 type TrendFilter = "all" | "up" | "down";
@@ -221,6 +221,51 @@ export default function Dashboard() {
     nav(path);
   };
 
+  const exportCsv = () => {
+    if (!rows.length) return;
+    const headers = [
+      "symbol",
+      "lastPrice",
+      "indexPrice",
+      "bestBid",
+      "bestAsk",
+      "spreadBps",
+      "change24hPct",
+      "high24h",
+      "low24h",
+      "volume24hBase",
+      "volume24hUsd",
+    ];
+    const lines = [
+      headers.join(","),
+      ...rows.map((m) => {
+        const bid = price(m.bestBid);
+        const ask = price(m.bestAsk);
+        const sp = spreadBps(bid, ask);
+        return [
+          m.symbol,
+          price(m.lastPrice),
+          price(m.indexPrice),
+          bid,
+          ask,
+          isFinite(sp) ? sp.toFixed(2) : "",
+          bpsToPct(m.change24hBps).toFixed(2),
+          price(m.high24h),
+          price(m.low24h),
+          dec(m.volume24hBase),
+          dec(m.volume24hUsd),
+        ].join(",");
+      }),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `polyester-markets-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="page-stack">
       <PageHeader
@@ -385,6 +430,16 @@ export default function Dashboard() {
                 ▼ Losers
               </button>
             </div>
+
+            <button
+              type="button"
+              className="btn sm ghost"
+              onClick={exportCsv}
+              disabled={!rows.length}
+              title="Download filtered spot markets as CSV"
+            >
+              Export CSV
+            </button>
           </div>
         }
         footer={
@@ -616,6 +671,15 @@ export default function Dashboard() {
                         >
                           <IconChart size={12} />
                           <span className="hide-sm">Chart</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn sm ghost"
+                          title={`Open ${m.symbol} Liquidity Heatmap`}
+                          onClick={(e) => openTool(m.symbol, "/heatmap", e)}
+                        >
+                          <IconActivity size={12} />
+                          <span className="hide-sm">Heat</span>
                         </button>
                       </div>
                     </td>

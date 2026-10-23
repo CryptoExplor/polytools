@@ -73,6 +73,9 @@ export default function Flow() {
   const initialQ = searchParams.get("q") ?? "";
 
   const [mode, setMode] = useState<LookupMode>(initialMode);
+  const [lookupKind, setLookupKind] = useState<"any" | "source">(() =>
+    searchParams.get("lookupKind") === "source" ? "source" : "any",
+  );
   const [input, setInput] = useState<string>(initialQ);
   const [busy, setBusy] = useState<boolean>(false);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
@@ -128,7 +131,11 @@ export default function Flow() {
       if (!q || /\s/.test(q)) return;
 
       if (syncUrl) {
-        setSearchParams({ mode: activeMode, q }, { replace: true });
+        const params: Record<string, string> = { mode: activeMode, q };
+        if (activeMode !== "flow" && lookupKind !== "any") {
+          params.lookupKind = lookupKind;
+        }
+        setSearchParams(params, { replace: true });
       }
 
       setBusy(true);
@@ -139,9 +146,9 @@ export default function Flow() {
       try {
         const res =
           activeMode === "explain"
-            ? await api.flowExplain(q)
+            ? await api.flowExplain(q, lookupKind)
             : activeMode === "by-tx"
-              ? await api.flowByTx(q)
+              ? await api.flowByTx(q, lookupKind)
               : await api.flow(q);
         setResult((res ?? {}) as Record<string, unknown>);
         setHistory((prev) => {
@@ -165,7 +172,7 @@ export default function Flow() {
         setBusy(false);
       }
     },
-    [input, mode, setSearchParams],
+    [input, lookupKind, mode, setSearchParams],
   );
 
   // Run lookup automatically if URL has ?q=... on initial load
@@ -295,17 +302,42 @@ export default function Flow() {
         title="Lifecycle Trace Query"
         subtitle={MODE_LABELS[mode].hint}
         actions={
-          <div className="seg-group" role="group" aria-label="Lifecycle lookup mode">
-            {(Object.keys(MODE_LABELS) as LookupMode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                className={`seg-btn ${mode === m ? "active" : ""}`}
-                onClick={() => setMode(m)}
+          <div className="row-flex" style={{ gap: 8 }}>
+            {mode !== "flow" && (
+              <div
+                className="seg-group"
+                role="group"
+                aria-label="Transaction lookup scope"
+                title="Scope txHash lookup to any chain transaction or source-chain deposit transaction only"
               >
-                {MODE_LABELS[m].label}
-              </button>
-            ))}
+                <button
+                  type="button"
+                  className={`seg-btn ${lookupKind === "any" ? "active" : ""}`}
+                  onClick={() => setLookupKind("any")}
+                >
+                  Any tx
+                </button>
+                <button
+                  type="button"
+                  className={`seg-btn ${lookupKind === "source" ? "active" : ""}`}
+                  onClick={() => setLookupKind("source")}
+                >
+                  Source tx only
+                </button>
+              </div>
+            )}
+            <div className="seg-group" role="group" aria-label="Lifecycle lookup mode">
+              {(Object.keys(MODE_LABELS) as LookupMode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`seg-btn ${mode === m ? "active" : ""}`}
+                  onClick={() => setMode(m)}
+                >
+                  {MODE_LABELS[m].label}
+                </button>
+              ))}
+            </div>
           </div>
         }
       >

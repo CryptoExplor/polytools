@@ -229,6 +229,25 @@ describe("3. Backend handler allowlists, Node adapter path fix, and bounded TTL 
     assert.ok(stats.keys <= 200, `Expected cache keys <= 200, got ${stats.keys}`);
     cacheMod.clearCache();
   });
+  it("enforces HTTPS or localhost in resolveMcpUrl (SEC-10)", () => {
+    assert.equal(
+      core.resolveMcpUrl("testnet", "https://custom.polyester.com/mcp"),
+      "https://custom.polyester.com/mcp",
+    );
+    assert.equal(
+      core.resolveMcpUrl("testnet", "http://localhost:8787/mcp"),
+      "http://localhost:8787/mcp",
+    );
+    // Reject non-HTTPS external URLs and fall back to default testnet MCP URL
+    assert.equal(
+      core.resolveMcpUrl("testnet", "http://evil.example.com/mcp"),
+      core.NETWORKS.testnet.mcpUrl,
+    );
+    assert.equal(
+      core.resolveMcpUrl("testnet", "javascript:alert(1)"),
+      core.NETWORKS.testnet.mcpUrl,
+    );
+  });
 });
 
 describe("4. @poly/core Ed25519 vault & 5-field canonical signing (SEC-01, SEC-07)", () => {
