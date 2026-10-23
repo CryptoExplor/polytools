@@ -223,6 +223,14 @@ export default function Dashboard() {
 
   const exportCsv = () => {
     if (!rows.length) return;
+    const csvNum = (n: number, decimals?: number): string => {
+      if (!Number.isFinite(n)) return "";
+      return decimals !== undefined ? n.toFixed(decimals) : String(n);
+    };
+    const csvCell = (val: string): string => {
+      const safe = /^[=+\-@]/.test(val) ? `'${val}` : val;
+      return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+    };
     const headers = [
       "symbol",
       "lastPrice",
@@ -243,17 +251,17 @@ export default function Dashboard() {
         const ask = price(m.bestAsk);
         const sp = spreadBps(bid, ask);
         return [
-          m.symbol,
-          price(m.lastPrice),
-          price(m.indexPrice),
-          bid,
-          ask,
-          isFinite(sp) ? sp.toFixed(2) : "",
-          bpsToPct(m.change24hBps).toFixed(2),
-          price(m.high24h),
-          price(m.low24h),
-          dec(m.volume24hBase),
-          dec(m.volume24hUsd),
+          csvCell(m.symbol),
+          csvNum(price(m.lastPrice)),
+          csvNum(price(m.indexPrice)),
+          csvNum(bid),
+          csvNum(ask),
+          csvNum(sp, 2),
+          csvNum(bpsToPct(m.change24hBps), 2),
+          csvNum(price(m.high24h)),
+          csvNum(price(m.low24h)),
+          csvNum(dec(m.volume24hBase)),
+          csvNum(dec(m.volume24hUsd)),
         ].join(",");
       }),
     ];

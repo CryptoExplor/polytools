@@ -19,6 +19,20 @@ function sweepExpired(now: number): void {
   }
 }
 
+function evictSoonestExpiring(): void {
+  let targetKey: string | undefined;
+  let minExpiresAt = Infinity;
+  for (const [k, v] of store.entries()) {
+    if (v.expiresAt < minExpiresAt) {
+      minExpiresAt = v.expiresAt;
+      targetKey = k;
+    }
+  }
+  if (targetKey !== undefined) {
+    store.delete(targetKey);
+  }
+}
+
 export async function cached<T>(
   key: string,
   ttlMs: number,
@@ -37,9 +51,7 @@ export async function cached<T>(
       if (store.size >= MAX_KEYS) {
         sweepExpired(writeNow);
         while (store.size >= MAX_KEYS) {
-          const oldest = store.keys().next().value;
-          if (oldest === undefined) break;
-          store.delete(oldest);
+          evictSoonestExpiring();
         }
       }
       store.set(key, { value, expiresAt: writeNow + ttlMs });

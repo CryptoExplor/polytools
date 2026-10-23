@@ -65,7 +65,9 @@ export default function Charts() {
     refresh,
   } = usePollData(
     () => {
-      const endTsSec = rangeHours ? Math.floor(Date.now() / 1000) : undefined;
+      const endTsSec = rangeHours
+        ? Math.floor(Date.now() / 60_000) * 60
+        : undefined;
       const startTsSec =
         rangeHours && endTsSec ? endTsSec - rangeHours * 3600 : undefined;
       return api.candles(symbol, tf, limit, startTsSec, endTsSec);

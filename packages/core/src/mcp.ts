@@ -169,6 +169,7 @@ export class McpClient {
     _retried = false,
   ): Promise<T> {
     await this.ensureSession();
+    const usedSessionId = this.sessionId;
     const res = await this.post({
       jsonrpc: "2.0",
       id: Date.now(),
@@ -186,7 +187,9 @@ export class McpClient {
     } catch (e) {
       // Rebuild session and retry once ONLY when the session expired / was not found.
       if (!_retried && this.isSessionError(e, res.status)) {
-        this.sessionId = null;
+        if (this.sessionId === usedSessionId) {
+          this.sessionId = null;
+        }
         return this.callTool<T>(name, args, true);
       }
       throw e;

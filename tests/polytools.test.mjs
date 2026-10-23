@@ -204,14 +204,18 @@ describe("3. Backend handler allowlists, Node adapter path fix, and bounded TTL 
     assert.equal(body.ok, true);
   });
 
-  it("rejects non-allowlisted depth, timeframe, side, interval, compareBy, and empty strings with 400 (DEF-03, DEF-11)", async () => {
+  it("rejects non-allowlisted depth, timeframe, side, interval, compareBy, invalid numeric/range params, and empty strings with 400 (DEF-03, DEF-11)", async () => {
     const cases = [
       "http://localhost/api/orderbook?symbol=BTC-USDT&depth=7",
       "http://localhost/api/candles?symbol=BTC-USDT&tf=2h",
+      "http://localhost/api/candles?symbol=BTC-USDT&tf=1h&limit=abc",
+      "http://localhost/api/candles?symbol=BTC-USDT&tf=1h&startTsSec=1700000500&endTsSec=1700000000",
       "http://localhost/api/trades?symbol=BTC-USDT&side=hold",
       "http://localhost/api/heatmap?symbol=BTC-USDT&interval=10m",
       "http://localhost/api/heatmap?symbol=BTC-USDT&depth=15",
       "http://localhost/api/zipper/compare?asset=USDT&compareBy=speed",
+      "http://localhost/api/flow?flowId=invalid-flow-id",
+      "http://localhost/api/flow/explain?txHash=0xdeadbeef",
       "http://localhost/api/flow/explain?txHash=%20%20",
     ];
     for (const url of cases) {
@@ -220,13 +224,24 @@ describe("3. Backend handler allowlists, Node adapter path fix, and bounded TTL 
     }
   });
 
-  it("caps cache size at 200 keys (DEF-12)", async () => {
+  it("caps cache size at 200 keys and preserves long-TTL entries over short-TTL entries (DEF-12)", async () => {
     cacheMod.clearCache();
+    let longCalls = 0;
+    await cacheMod.cached("zipper:config", 300_000, async () => {
+      longCalls++;
+      return "long-lived";
+    });
     for (let i = 0; i < 245; i++) {
-      await cacheMod.cached(`k-${i}`, 60_000, async () => i);
+      await cacheMod.cached(`k-${i}`, 1_500, async () => i);
     }
     const stats = cacheMod.cacheStats();
     assert.ok(stats.keys <= 200, `Expected cache keys <= 200, got ${stats.keys}`);
+    const retained = await cacheMod.cached("zipper:config", 300_000, async () => {
+      longCalls++;
+      return "recomputed";
+    });
+    assert.equal(retained, "long-lived");
+    assert.equal(longCalls, 1);
     cacheMod.clearCache();
   });
   it("enforces HTTPS or localhost in resolveMcpUrl (SEC-10)", () => {
@@ -251,7 +266,7 @@ describe("3. Backend handler allowlists, Node adapter path fix, and bounded TTL 
 });
 
 describe("4. @poly/core Ed25519 vault & 5-field canonical signing (SEC-01, SEC-07)", () => {
-  it("normalizes RFC 3986 query string and hashes empty body per official Polyester spec", async () => {
+  it("normalizes RFC 3986 query string, handles malformed percent-encoding without throwing, and hashes empty body", async () => {
     assert.equal(
       core.vault.EMPTY_BODY_SHA256,
       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -261,12 +276,36 @@ describe("4. @poly/core Ed25519 vault & 5-field canonical signing (SEC-01, SEC-0
       core.vault.normalizeCanonicalQuery(rawQuery),
       "empty=&literal=%2B&q=hello%20world&tag=a&tag=z",
     );
+    assert.equal(
+      core.vault.normalizeCanonicalQuery("filter=50%&incomplete=%2"),
+      "filter=50%25&incomplete=%252",
+    );
     assert.equal(await core.vault.sha256Hex(""), core.vault.EMPTY_BODY_SHA256);
   });
 
-  it("builds and signs the 5-line canonical string and verifies Ed25519 signature", async () => {
+  it("supports 64-hex Ed25519 public keys (with or without 0x) for Polyester 'Bring your own key'", async () => {
+    core.vault.wipeVault();
+    const sampleHex =
+      "0efa75cad8790e3c3238b41790658bff5dab2617bd28e30533f35e77bfe190bd";
+    assert.equal(core.vault.normalizePublicKeyHex(sampleHex), sampleHex);
+    assert.equal(core.vault.normalizePublicKeyHex(`0x${sampleHex.toUpperCase()}`), sampleHex);
+    assert.equal(core.vault.normalizePublicKeyHex("0x1234"), null);
+
+    const imported = core.vault.importPublicVaultKey(
+      "byok-bot",
+      `0x${sampleHex}`,
+      "ak_byok_1",
+    );
+    assert.equal(imported.publicKeyHex, sampleHex);
+    assert.equal(core.vault.pubKeyB64ToHex(imported.publicKeyB64), sampleHex);
+    assert.equal(imported.registeredKeyId, "ak_byok_1");
+    core.vault.wipeVault();
+  });
+
+  it("builds and signs the 5-line canonical string and verifies Ed25519 signature (64-hex public key & 128-hex signature)", async () => {
     core.vault.wipeVault();
     const entry = await core.vault.generateVaultKey("bot-key-1");
+    assert.match(entry.publicKeyHex, /^[0-9a-f]{64}$/);
     const sig = await core.vault.signRequest(entry, {
       timestamp: "1773964800123",
       method: "POST",
@@ -286,6 +325,7 @@ describe("4. @poly/core Ed25519 vault & 5-field canonical signing (SEC-01, SEC-0
     assert.equal(sig.keyId, "ak_live_test_123");
     assert.equal(sig.label, "bot-key-1");
     assert.equal(sig.isRegisteredKeyId, true);
+    assert.match(sig.signatureHex, /^[0-9a-f]{128}$/);
 
     // Verify signature using WebCrypto public key
     const pubBytes = Uint8Array.from(atob(entry.publicKeyB64), (c) => c.charCodeAt(0));

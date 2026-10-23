@@ -6,17 +6,18 @@
  *    copied to clipboard, or transmitted over the network.
  *  - All cryptography (Ed25519 keypair generation & request signing) executes
  *    exclusively in-browser via WebCrypto (`@poly/core` vault module).
+ *  - Public keys are displayed in 64-character lowercase hex to match
+ *    https://testnet.polyester.com/account/api-keys ("Bring your own key":
+ *    "Paste 64 hex characters (with or without 0x)") as well as Base64.
  *  - Signing implements the official 5-field newline-separated canonical string:
  *      <timestamp_ms>\n<UPPERCASE_METHOD>\n<path>\n<canonical_query>\n<body_sha256_hex>
  *  - Destructive actions (deleting a key, overwriting a keyId, or wiping the
  *    vault) require explicit modal confirmation (`ConfirmDialog`).
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { NETWORKS, vault } from "@poly/core";
-
-type VaultKey = vault.VaultKey;
 import {
   Card,
   ConfirmDialog,
@@ -30,15 +31,24 @@ import {
 } from "../components/ui";
 import { IconAlert, IconExternal, IconKey, IconTrash, IconVault } from "../components/icons";
 
+type VaultKey = vault.VaultKey;
+
 type PendingConfirm =
   | { kind: "delete"; keyId: string }
   | { kind: "wipe" }
-  | { kind: "overwrite"; keyId: string }
+  | { kind: "overwrite-gen"; keyId: string }
+  | { kind: "overwrite-import"; keyId: string }
   | null;
+
+type CreateTab = "generate" | "bring";
 
 export default function Portfolio() {
   const [keys, setKeys] = useState<VaultKey[]>(() => vault.loadVault());
-  const [label, setLabel] = useState<string>("my-readonly-key");
+  const [createTab, setCreateTab] = useState<CreateTab>("generate");
+  const [label, setLabel] = useState<string>("trading-bot-readonly");
+  const [customPubHex, setCustomPubHex] = useState<string>("");
+  const [newRegKeyId, setNewRegKeyId] = useState<string>("");
+  const [lastCreatedKey, setLastCreatedKey] = useState<VaultKey | null>(null);
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm>(null);
@@ -59,10 +69,20 @@ export default function Portfolio() {
     canonicalString: string;
     bodySha256Hex: string;
     signatureB64: string;
+    signatureHex: string;
     headers: Record<string, string>;
   } | null>(null);
 
   const supported = vault.ed25519Supported();
+  const signCapableKeys = useMemo(
+    () => keys.filter((k) => Boolean(k.privateKeyB64)),
+    [keys],
+  );
+
+  const normalizedBringHex = useMemo(
+    () => vault.normalizePublicKeyHex(customPubHex),
+    [customPubHex],
+  );
 
   const refreshVault = () => {
     const loaded = vault.loadVault();
@@ -70,21 +90,44 @@ export default function Portfolio() {
   };
 
   useEffect(() => {
-    if (keys.length && !keys.some((k) => k.keyId === selectedKeyId)) {
-      setSelectedKeyId(keys[0].keyId);
-    } else if (!keys.length) {
+    if (
+      signCapableKeys.length &&
+      !signCapableKeys.some((k) => k.keyId === selectedKeyId)
+    ) {
+      const first = signCapableKeys[0];
+      setSelectedKeyId(first.keyId);
+      setRegisteredKeyId(first.registeredKeyId ?? "");
+    } else if (!signCapableKeys.length) {
       setSelectedKeyId("");
       setSignedOutput(null);
     }
-  }, [keys, selectedKeyId]);
+  }, [signCapableKeys, selectedKeyId]);
+
+  const validateLabel = (raw: string): string | null => {
+    const clean = raw.trim() || "key";
+    if (!/^[a-zA-Z0-9._ -]{1,64}$/.test(clean)) {
+      setError(
+        "Key label must be 1–64 characters using letters, numbers, spaces, hyphens, underscores, or dots.",
+      );
+      return null;
+    }
+    return clean;
+  };
 
   const executeGenerate = async (targetLabel: string) => {
     setBusy(true);
     setError(null);
     try {
-      await vault.generateVaultKey(targetLabel);
+      const created = await vault.generateVaultKey(
+        targetLabel,
+        newRegKeyId.trim() || undefined,
+      );
       refreshVault();
-      setSelectedKeyId(targetLabel);
+      setLastCreatedKey(created);
+      setSelectedKeyId(created.keyId);
+      if (created.registeredKeyId) {
+        setRegisteredKeyId(created.registeredKeyId);
+      }
     } catch {
       setError(
         "WebCrypto Ed25519 key generation failed. Ensure you are running in a secure context (HTTPS or localhost) on a modern browser.",
@@ -94,23 +137,60 @@ export default function Portfolio() {
     }
   };
 
-  const handleGenerateClick = () => {
-    const clean = label.trim() || "key";
-    if (!/^[a-zA-Z0-9._-]{1,64}$/.test(clean)) {
-      setError(
-        "Key label must be 1–64 characters using letters, numbers, hyphens, underscores, or dots.",
+  const executeImportPublic = (targetLabel: string) => {
+    setError(null);
+    try {
+      const created = vault.importPublicVaultKey(
+        targetLabel,
+        customPubHex,
+        newRegKeyId.trim() || undefined,
       );
-      return;
+      refreshVault();
+      setLastCreatedKey(created);
+      setCustomPubHex("");
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Invalid public key: paste 64 hex characters (with or without 0x).",
+      );
     }
-    if (keys.some((k) => k.keyId === clean)) {
-      setPendingConfirm({ kind: "overwrite", keyId: clean });
-      return;
+  };
+
+  const handleCreateSubmit = () => {
+    const clean = validateLabel(label);
+    if (!clean) return;
+    if (createTab === "generate") {
+      if (keys.some((k) => k.keyId === clean)) {
+        setPendingConfirm({ kind: "overwrite-gen", keyId: clean });
+        return;
+      }
+      void executeGenerate(clean);
+    } else {
+      if (!normalizedBringHex) {
+        setError(
+          "Invalid Public Key: paste 64 hex characters (32-byte Ed25519 public key, with or without 0x).",
+        );
+        return;
+      }
+      if (keys.some((k) => k.keyId === clean)) {
+        setPendingConfirm({ kind: "overwrite-import", keyId: clean });
+        return;
+      }
+      executeImportPublic(clean);
     }
-    void executeGenerate(clean);
+  };
+
+  const handleSaveRegisteredId = (keyId: string, regId: string) => {
+    const updated = vault.setVaultKeyRegisteredId(keyId, regId);
+    setKeys(updated);
+    if (selectedKeyId === keyId) {
+      setRegisteredKeyId(regId.trim());
+    }
   };
 
   const handleSignRequest = async () => {
-    const entry = keys.find((k) => k.keyId === selectedKeyId);
+    const entry = signCapableKeys.find((k) => k.keyId === selectedKeyId);
     if (!entry || !reqPath.trim()) return;
     setSigningBusy(true);
     setError(null);
@@ -120,15 +200,19 @@ export default function Portfolio() {
         path: reqPath,
         query: reqQuery,
         body: httpMethod === "GET" ? "" : reqBody,
-        apiKeyId: registeredKeyId.trim() || undefined,
+        apiKeyId: registeredKeyId.trim() || entry.registeredKeyId || undefined,
       });
       const headers = vault.signedHeaders(sig);
       setSignedOutput({
         ...sig,
         headers,
       });
-    } catch {
-      setError("Failed to sign payload with the selected Ed25519 key.");
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Failed to sign payload with the selected Ed25519 key.",
+      );
     } finally {
       setSigningBusy(false);
     }
@@ -137,321 +221,433 @@ export default function Portfolio() {
   return (
     <div className="page-stack">
       <PageHeader
-        title="Ed25519 Key Vault & Portfolio Foundation"
+        title="Ed25519 API Keys & Request Signer"
         badge={
           <Pill kind={supported ? "up" : "warn"}>
             {supported ? "WebCrypto Ed25519 Ready" : "WebCrypto Unavailable"}
           </Pill>
         }
-        subtitle="Creates an Ed25519 keypair in your browser and keeps it in this browser's localStorage. This is not a Polyester login and not a funding wallet. No request is sent to Polyester."
+        subtitle="Generate a 64-hex Ed25519 public key in your browser to register on Polyester via 'Bring your own key', or inspect and sign 5-field canonical REST requests locally."
         actions={
-          <Link to="/sdk" className="btn sm primary">
-            <IconKey size={13} />
-            <span>SDK &amp; Bot Quickstart (TS · Python · Rust)</span>
-          </Link>
+          <div className="row-flex" style={{ gap: 8 }}>
+            <a
+              href={vault.POLYESTER_API_KEYS_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="btn sm"
+            >
+              <span>Open Polyester API Keys</span>
+              <IconExternal size={12} />
+            </a>
+            <Link to="/sdk" className="btn sm primary">
+              <IconKey size={13} />
+              <span>SDK &amp; Bot Quickstart</span>
+            </Link>
+          </div>
         }
       />
 
       {/* Explicit Beginner Boundary Notice (UX-T10-01) */}
       <div className="notice warn" role="note">
         <div>
-          <strong>For developers &amp; API users only:</strong> This is not a Polyester login
-          and not a funding wallet. It only stores a local Ed25519 keypair in your browser.
-          No request is sent to Polyester. Your local label is <strong>not</strong> a
-          Polyester key ID until you register the public key in the official Polyester app or
-          via <code className="mono">POST /v1/auth/api-keys</code> (which returns a
-          server-assigned <code className="mono">ak_...</code> keyId).
+          <strong>Local Browser Sandbox — How This Works with Polyester:</strong>{" "}
+          Generating a key here keeps the private key in this browser&apos;s{" "}
+          <code className="mono">localStorage</code> (never displayed or sent over the network)
+          and gives you a <strong>64-character hex Public Key</strong>. To activate it on
+          Polyester, open{" "}
+          <a
+            href={vault.POLYESTER_API_KEYS_URL}
+            target="_blank"
+            rel="noreferrer"
+            style={{ textDecoration: "underline", fontWeight: 600 }}
+          >
+            testnet.polyester.com/account/api-keys ↗
+          </a>{" "}
+          → click <strong>Create API Key</strong> → choose{" "}
+          <strong>Bring your own key</strong> → paste the{" "}
+          <strong>64 hex characters</strong>.
         </div>
       </div>
 
       <MetricStrip>
         <MetricCell
-          label="Stored Keypairs"
+          label="Stored Keys"
           value={keys.length}
-          sub="In this browser's vault"
+          sub={`${signCapableKeys.length} sign-capable in browser`}
         />
         <MetricCell
-          label="Cryptographic Primitive"
-          value="Ed25519"
-          sub="Native WebCrypto ( SubtleCrypto )"
+          label="Public Key Format"
+          value="64-Char Hex"
+          sub="32-byte raw Ed25519 (Bring your own key)"
         />
         <MetricCell
-          label="Secret Persistence"
-          value="localStorage Only"
-          sub="Never transmitted or logged"
+          label="Private Key Custody"
+          value="Browser Only"
+          sub="pkcs8 in localStorage · never rendered"
         />
         <MetricCell
-          label="Canonical Format"
-          trend="up"
-          value="5-Line Spec"
-          sub="ts · method · path · query · sha256"
+          label="Signing Spec"
+          value="5-Field Canonical"
+          sub="ts · METHOD · path · query · sha256"
         />
       </MetricStrip>
 
-      {!supported && (
-        <div className="notice error" role="alert">
-          <div className="row-flex" style={{ gap: 10 }}>
-            <IconAlert size={16} />
-            <span>
-              <strong>WebCrypto Ed25519 Not Detected:</strong> Key generation and signing
-              require a secure browser context (`https://` or `http://localhost`) and a
-              browser with native Ed25519 WebCrypto support.
-            </span>
+      {/* Create API Key Card — Mirrors Polyester "Create API Key" modal (Generate in browser | Bring your own key) */}
+      <Card
+        title="Create API Key (Local Browser Vault)"
+        subtitle="Generate a sign-capable Ed25519 keypair in WebCrypto or register an existing 64-hex public key."
+        actions={
+          <div className="seg-group" role="tablist" aria-label="API Key creation mode">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={createTab === "generate"}
+              className={`seg-btn ${createTab === "generate" ? "active" : ""}`}
+              onClick={() => {
+                setCreateTab("generate");
+                setError(null);
+              }}
+            >
+              Generate in browser
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={createTab === "bring"}
+              className={`seg-btn ${createTab === "bring" ? "active" : ""}`}
+              onClick={() => {
+                setCreateTab("bring");
+                setError(null);
+              }}
+            >
+              Bring your own key (64 hex)
+            </button>
           </div>
-        </div>
-      )}
-
-      {error && (
-        <div className="notice error" role="alert">
-          <span>⚠ {error}</span>
-          <button type="button" className="btn sm ghost" onClick={() => setError(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Honest Capabilities & Security Boundaries Matrix */}
-      <div className="grid cols-2">
-        <Card
-          title="What Works Today (Implemented & Active)"
-          actions={<Pill kind="up">Active in Browser</Pill>}
-        >
-          <div className="kv">
-            <span className="k">Ed25519 Keypair Generation</span>
-            <span className="v up">✓ Native WebCrypto</span>
-          </div>
-          <div className="kv">
-            <span className="k">Public Key Export (Base64 raw 32-byte)</span>
-            <span className="v up">✓ Ready for API registration</span>
-          </div>
-          <div className="kv">
-            <span className="k">5-Field Canonical Request Signing</span>
-            <span className="v up">✓ SHA-256 body + RFC 3986 query</span>
-          </div>
-          <div className="kv">
-            <span className="k">Instant Key Deletion &amp; Full Vault Wipe</span>
-            <span className="v up">✓ Immediate local removal</span>
-          </div>
-        </Card>
-
-        <Card
-          title="Current Limitations & Security Best Practices"
-          actions={<Pill kind="warn">Important Disclosures</Pill>}
-        >
-          <div className="kv">
-            <span className="k">Local Label vs Polyester Key ID</span>
-            <span className="v warn">Register pubkey to receive `ak_...` ID</span>
-          </div>
-          <div className="kv">
-            <span className="k">Storage Encryption at Rest</span>
-            <span className="v">Unencrypted browser localStorage</span>
-          </div>
-          <div className="kv">
-            <span className="k">API Key IP Allowlists (Recommended)</span>
-            <span className="v">
-              <a
-                href={`${NETWORKS.testnet.docsUrl}/developer-docs/authentication-security/api-key-ip-allowlists`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Official IP Allowlist Guide <IconExternal size={11} />
-              </a>
-            </span>
-          </div>
-          <div className="kv">
-            <span className="k">Order Placement / Withdrawals</span>
-            <span className="v">Never — PolyTools is strictly read-only</span>
-          </div>
-        </Card>
-      </div>
-
-      {/* Key Generation + Vault Status */}
-      <div className="grid cols-2">
-        <Card
-          title="1. Generate New Ed25519 Keypair"
-          subtitle="Creates a fresh Ed25519 keypair in browser memory and stores it in localStorage."
-        >
+        }
+      >
+        <div className="grid cols-2">
           <div className="field">
             <label htmlFor="vault-key-label">
-              <span>Local Vault Label (not yet a Polyester `ak_...` keyId)</span>
-              <span className="mono faint">1–64 chars (A-Z, 0-9, -, _, .)</span>
+              <span>Label</span>
+              <span className="faint">Helps you identify this key later</span>
             </label>
             <input
               id="vault-key-label"
               type="text"
               className="input mono"
+              placeholder="e.g. Trading Bot, Read-only Access"
               value={label}
-              maxLength={64}
-              spellCheck={false}
               onChange={(e) => setLabel(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleGenerateClick();
-                }
-              }}
             />
           </div>
 
-          <button
-            type="button"
-            className="btn primary"
-            onClick={handleGenerateClick}
-            disabled={busy || !supported}
-          >
-            <IconKey size={14} />
-            <span>{busy ? "Generating Keypair…" : "Generate Ed25519 Keypair"}</span>
-          </button>
-
-          <div className="faint mt-2">
-            Only the <strong>public key</strong> is ever displayed below. The private key
-            remains sealed inside `localStorage` (`poly-tools:vault:v1`) for local
-            WebCrypto signing and is never logged or exported.
+          <div className="field">
+            <label htmlFor="vault-reg-id">
+              <TermTip
+                label="Registered Polyester Key ID (optional)"
+                tip="If you already registered this key at testnet.polyester.com/account/api-keys, paste the assigned keyId (e.g. ak_...) here."
+              />
+              <span className="faint">Can also be added later</span>
+            </label>
+            <input
+              id="vault-reg-id"
+              type="text"
+              className="input mono"
+              placeholder="ak_... (optional)"
+              value={newRegKeyId}
+              onChange={(e) => setNewRegKeyId(e.target.value)}
+            />
           </div>
-        </Card>
+        </div>
 
-        <Card
-          title="2. Vault Security & Storage Status"
-          subtitle="Inspect storage state or permanently wipe all local key material."
+        {createTab === "bring" && (
+          <div className="field mt-2">
+            <label htmlFor="vault-bring-hex">
+              <span>Public Key (64 Hex Characters)</span>
+              <span className="mono">
+                {customPubHex.trim() ? (
+                  normalizedBringHex ? (
+                    <Pill kind="up">Valid 64-hex Ed25519 Public Key ✓</Pill>
+                  ) : (
+                    <Pill kind="down">
+                      Must be 64 hex characters (with or without 0x)
+                    </Pill>
+                  )
+                ) : (
+                  <span className="faint">32-byte raw Ed25519 public key</span>
+                )}
+              </span>
+            </label>
+            <textarea
+              id="vault-bring-hex"
+              rows={2}
+              className="input mono"
+              style={{ width: "100%", resize: "vertical", fontFamily: "var(--font-mono)" }}
+              placeholder="Paste 64 hex characters (with or without 0x)"
+              value={customPubHex}
+              onChange={(e) => setCustomPubHex(e.target.value)}
+            />
+            {normalizedBringHex && (
+              <div className="between mono faint" style={{ fontSize: 11 }}>
+                <span>Normalized 64-hex: {normalizedBringHex}</span>
+                <span>Base64: {vault.pubKeyHexToB64(normalizedBringHex)}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div
+          className="row-flex mt-2"
+          style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}
         >
-          <div className="kv">
-            <span className="k">Stored Keys Count</span>
-            <span className="v mono">{keys.length}</span>
-          </div>
-          <div className="kv">
-            <span className="k">Browser Storage Slot</span>
-            <span className="v mono">localStorage[&quot;poly-tools:vault:v1&quot;]</span>
-          </div>
-          <div className="kv">
-            <span className="k">Network Transmission</span>
-            <span className="v up">Zero outbound requests</span>
-          </div>
-          <div className="kv">
-            <span className="k">Recovery Policy</span>
-            <span className="v warn">Irreversible once deleted</span>
-          </div>
-
-          <div className="mt-3 between">
-            <span className="faint">
-              Wiping removes all stored keypairs from this browser immediately.
-            </span>
+          <span className="faint" style={{ fontSize: 12 }}>
+            {createTab === "generate"
+              ? "Generates an Ed25519 keypair in WebCrypto. Private key stays in localStorage and is never shown; copy the 64-hex Public Key into Polyester's 'Bring your own key' tab."
+              : "Saves a public-key-only entry (64 hex chars) to inspect encodings and track your Polyester API keys."}
+          </span>
+          <div className="row-flex" style={{ gap: 8 }}>
             <button
               type="button"
-              className="btn sm danger"
-              disabled={keys.length === 0}
-              onClick={() => setPendingConfirm({ kind: "wipe" })}
+              className="btn primary"
+              disabled={
+                busy ||
+                (createTab === "generate" && !supported) ||
+                (createTab === "bring" && !normalizedBringHex)
+              }
+              onClick={handleCreateSubmit}
             >
-              <IconTrash size={13} />
-              <span>Wipe Entire Vault</span>
+              <IconKey size={14} />
+              <span>
+                {busy
+                  ? "Generating…"
+                  : createTab === "generate"
+                    ? "Generate Ed25519 Keypair"
+                    : "Save Public Key (64 Hex)"}
+              </span>
             </button>
-          </div>
-        </Card>
-      </div>
-
-      {/* Stored Keys List */}
-      <Card
-        title={`3. Stored Public Keys (${keys.length})`}
-        subtitle="Register the Base64 Public Key below in your Polyester account's API settings to receive an official ak_... keyId."
-      >
-        {keys.length === 0 ? (
-          <EmptyState
-            icon={<IconVault size={18} />}
-            title="No Ed25519 keys in vault"
-            description="Generate a keypair above to obtain a Base64 public key and unlock the local request signer."
-          />
-        ) : (
-          <div className="grid" style={{ gap: 10 }}>
-            {keys.map((k) => (
-              <div
-                key={k.keyId}
-                className="card"
-                style={{ background: "var(--bg-elevated)", padding: "12px 14px" }}
+            {keys.length > 0 && (
+              <button
+                type="button"
+                className="btn danger"
+                onClick={() => setPendingConfirm({ kind: "wipe" })}
               >
-                <div className="between mb-2">
-                  <div className="row-flex" style={{ gap: 8 }}>
-                    <Pill kind="accent">Local label: {k.keyId}</Pill>
-                    <span className="faint mono" style={{ fontSize: 11.5 }}>
-                      Created {new Date(k.createdAt).toISOString().replace("T", " ").slice(0, 19)} UTC
-                    </span>
-                  </div>
-                  <div className="row-flex" style={{ gap: 6 }}>
-                    <button
-                      type="button"
-                      className="btn sm ghost"
-                      onClick={() => setSelectedKeyId(k.keyId)}
-                    >
-                      Use in Signer
-                    </button>
-                    <button
-                      type="button"
-                      className="btn sm danger"
-                      onClick={() => setPendingConfirm({ kind: "delete", keyId: k.keyId })}
-                    >
-                      <IconTrash size={12} /> Delete Key
-                    </button>
-                  </div>
-                </div>
+                <IconTrash size={14} />
+                <span>Wipe All ({keys.length})</span>
+              </button>
+            )}
+          </div>
+        </div>
 
-                <div className="field mb-0">
-                  <label htmlFor={`pub-key-${k.keyId}`}>
-                    <span>Public Key (Base64 raw 32-byte · safe to share)</span>
-                    <span className="faint">Private key hidden &amp; non-exportable</span>
-                  </label>
-                  <div className="row-flex" style={{ gap: 8 }}>
-                    <input
-                      id={`pub-key-${k.keyId}`}
-                      type="text"
-                      className="input mono"
-                      style={{ flex: 1 }}
-                      readOnly
-                      value={k.publicKeyB64}
-                      onFocus={(e) => e.target.select()}
-                    />
-                    <CopyButton
-                      text={k.publicKeyB64}
-                      label="Copy Public Key"
-                      size="md"
-                    />
-                    <CopyButton
-                      text={JSON.stringify(
-                        { label: k.keyId, publicKeyEd25519: k.publicKeyB64 },
-                        null,
-                        2,
-                      )}
-                      label="Copy POST /v1/auth/api-keys JSON"
-                      size="md"
-                    />
-                  </div>
-                </div>
+        {/* Newly created key highlight banner with 64-hex copy for Polyester "Bring your own key" */}
+        {lastCreatedKey && (
+          <div
+            className="mt-3"
+            style={{
+              padding: 12,
+              background: "var(--bg-shell)",
+              border: "1px solid var(--accent-border)",
+              borderRadius: "var(--radius-sm)",
+            }}
+          >
+            <div className="between mb-1" style={{ flexWrap: "wrap", gap: 8 }}>
+              <div className="row-flex" style={{ gap: 8 }}>
+                <Pill kind="up">Ready for Polyester</Pill>
+                <strong style={{ fontSize: 12.5 }}>
+                  Public Key for &ldquo;{lastCreatedKey.keyId}&rdquo; (64 hex characters)
+                </strong>
               </div>
-            ))}
+              <div className="row-flex" style={{ gap: 6 }}>
+                <CopyButton
+                  text={lastCreatedKey.publicKeyHex}
+                  label="Copy 64-Hex Public Key"
+                />
+                <CopyButton
+                  text={`0x${lastCreatedKey.publicKeyHex}`}
+                  label="Copy with 0x"
+                />
+                <a
+                  href={vault.POLYESTER_API_KEYS_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn sm primary"
+                >
+                  <span>Paste in Polyester &ldquo;Bring your own key&rdquo;</span>
+                  <IconExternal size={11} />
+                </a>
+              </div>
+            </div>
+            <div
+              className="mono"
+              style={{
+                padding: "8px 10px",
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: 4,
+                fontSize: 12,
+                wordBreak: "break-all",
+              }}
+            >
+              {lastCreatedKey.publicKeyHex}
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="notice error mt-2" role="alert">
+            <IconAlert size={16} />
+            <span>{error}</span>
           </div>
         )}
       </Card>
 
-      {/* Interactive 5-Field Request Signer (SEC-01 & SEC-07) */}
+      {/* Stored Keys Table */}
       <Card
-        title="4. Official 5-Field Ed25519 Request Signer"
-        subtitle="Builds and signs <timestamp_ms>\n<UPPERCASE_METHOD>\n<path>\n<canonical_query>\n<body_sha256_hex> per official Polyester docs."
-        actions={
-          <Pill kind={registeredKeyId.trim() ? "up" : "warn"}>
-            {registeredKeyId.trim()
-              ? "Registered Key ID Supplied"
-              : "DEMO — Local Label Only"}
-          </Pill>
-        }
-        footer={
-          <span>
-            Empty body SHA-256 is{" "}
-            <code className="mono">{vault.EMPTY_BODY_SHA256.slice(0, 16)}…</code>. Headers
-            will only authenticate against Polyester after the public key is registered and
-            its server-assigned <code className="mono">ak_...</code> ID is used.
-          </span>
-        }
+        flush
+        title="Stored Browser Keypairs"
+        subtitle="Copy the 64-character hex Public Key into testnet.polyester.com/account/api-keys ('Bring your own key'). Private keys are never displayed."
       >
         {keys.length === 0 ? (
+          <EmptyState
+            icon={<IconVault size={22} />}
+            title="Vault is currently empty"
+            description="Click 'Generate Ed25519 Keypair' above to create a browser-resident Ed25519 keypair and get its 64-character hex Public Key for Polyester."
+          />
+        ) : (
+          <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
+            <table className="data">
+              <thead>
+                <tr>
+                  <th className="align-left">Label</th>
+                  <th className="align-left">
+                    <TermTip
+                      label="Public Key (64 Hex · Bring Your Own Key)"
+                      tip="32-byte raw Ed25519 public key encoded as 64 lowercase hex characters — paste directly into testnet.polyester.com/account/api-keys -> Bring your own key."
+                    />
+                  </th>
+                  <th className="align-left">
+                    <TermTip
+                      label="Registered Polyester keyId"
+                      tip="Optional server-assigned keyId (e.g. ak_...) from testnet.polyester.com/account/api-keys used in the X-API-KEY-ID header."
+                    />
+                  </th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {keys.map((k) => {
+                  const isSelected = selectedKeyId === k.keyId;
+                  const canSign = Boolean(k.privateKeyB64);
+                  return (
+                    <tr key={k.keyId}>
+                      <td className="align-left">
+                        <div className="row-flex" style={{ gap: 6 }}>
+                          <span className="mono" style={{ fontWeight: 700 }}>
+                            {k.keyId}
+                          </span>
+                          {isSelected && <Pill kind="accent">Active Signer</Pill>}
+                          {!canSign && <Pill kind="warn">Public-Only</Pill>}
+                        </div>
+                      </td>
+                      <td className="align-left">
+                        <div
+                          className="mono"
+                          style={{
+                            fontSize: 11.5,
+                            wordBreak: "break-all",
+                            color: "var(--text-primary)",
+                          }}
+                        >
+                          {k.publicKeyHex}
+                        </div>
+                        <div
+                          className="row-flex mt-1"
+                          style={{ gap: 6, flexWrap: "wrap" }}
+                        >
+                          <CopyButton
+                            text={k.publicKeyHex}
+                            label="Copy 64-Hex"
+                          />
+                          <CopyButton
+                            text={`0x${k.publicKeyHex}`}
+                            label="Copy 0xHex"
+                          />
+                          <CopyButton
+                            text={k.publicKeyB64}
+                            label="Copy Base64"
+                          />
+                        </div>
+                      </td>
+                      <td className="align-left">
+                        <input
+                          type="text"
+                          className="input mono"
+                          style={{ width: 170, padding: "4px 8px", fontSize: 11.5 }}
+                          placeholder="Paste ak_... keyId"
+                          aria-label={`Registered Polyester keyId for ${k.keyId}`}
+                          value={k.registeredKeyId ?? ""}
+                          onChange={(e) =>
+                            handleSaveRegisteredId(k.keyId, e.target.value)
+                          }
+                        />
+                      </td>
+                      <td className="mono muted">
+                        {new Date(k.createdAt).toISOString().slice(0, 19).replace("T", " ")}{" "}
+                        UTC
+                      </td>
+                      <td>
+                        <div
+                          className="row-flex"
+                          style={{ justifyContent: "flex-end", gap: 6 }}
+                        >
+                          {canSign && (
+                            <button
+                              type="button"
+                              className={`btn sm ${isSelected ? "primary" : "ghost"}`}
+                              onClick={() => {
+                                setSelectedKeyId(k.keyId);
+                                setRegisteredKeyId(k.registeredKeyId ?? "");
+                              }}
+                            >
+                              {isSelected ? "Selected" : "Use in Signer"}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="btn sm danger"
+                            onClick={() =>
+                              setPendingConfirm({ kind: "delete", keyId: k.keyId })
+                            }
+                            aria-label={`Delete key ${k.keyId}`}
+                          >
+                            <IconTrash size={12} />
+                            <span>Delete</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* Interactive 5-Field Canonical Request Signer (SEC-01 & SEC-07) */}
+      <Card
+        title="5-Field Canonical Ed25519 Request Signer"
+        subtitle="Constructs and signs the exact 5-line newline-separated canonical string (<timestamp_ms>\n<METHOD>\n<path>\n<canonical_query>\n<body_sha256_hex>) per the Polyester Ed25519 specification."
+        actions={
+          <Pill kind="info">
+            X-API-KEY-ID · X-API-TIMESTAMP · X-API-SIGNATURE
+          </Pill>
+        }
+      >
+        {signCapableKeys.length === 0 ? (
           <div className="faint">
-            Generate at least one keypair above to test local Ed25519 request signing.
+            Generate at least one browser keypair above to test local Ed25519 request
+            signing.
           </div>
         ) : (
           <>
@@ -462,11 +658,16 @@ export default function Portfolio() {
                   id="signer-key-select"
                   className="select mono"
                   value={selectedKeyId}
-                  onChange={(e) => setSelectedKeyId(e.target.value)}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    setSelectedKeyId(nextId);
+                    const found = signCapableKeys.find((k) => k.keyId === nextId);
+                    setRegisteredKeyId(found?.registeredKeyId ?? "");
+                  }}
                 >
-                  {keys.map((k) => (
+                  {signCapableKeys.map((k) => (
                     <option key={k.keyId} value={k.keyId}>
-                      {k.keyId}
+                      {k.keyId} ({k.publicKeyHex.slice(0, 12)}…)
                     </option>
                   ))}
                 </select>
@@ -475,8 +676,8 @@ export default function Portfolio() {
               <div className="field">
                 <label htmlFor="signer-reg-keyid">
                   <TermTip
-                    label="Registered Polyester Key ID (optional)"
-                    tip="Server-issued keyId (e.g. ak_01H...) returned when you register your public key on Polyester. Leave blank for local demo mode."
+                    label="Registered Polyester Key ID (X-API-KEY-ID)"
+                    tip="Server-issued keyId (e.g. ak_01H...) from testnet.polyester.com/account/api-keys. Leave blank for local demo mode."
                   />
                 </label>
                 <input
@@ -576,7 +777,7 @@ export default function Portfolio() {
                   borderRadius: "var(--radius-sm)",
                 }}
               >
-                <div className="between mb-2">
+                <div className="between mb-2" style={{ flexWrap: "wrap", gap: 8 }}>
                   <div className="row-flex" style={{ gap: 8 }}>
                     <strong style={{ fontSize: 12 }}>
                       Generated Authentication Headers
@@ -588,10 +789,23 @@ export default function Portfolio() {
                       </Pill>
                     )}
                   </div>
-                  <CopyButton
-                    text={JSON.stringify(signedOutput.headers, null, 2)}
-                    label="Copy All Headers (JSON)"
-                  />
+                  <div className="row-flex" style={{ gap: 6 }}>
+                    <CopyButton
+                      text={JSON.stringify(signedOutput.headers, null, 2)}
+                      label="Copy Headers (Base64 Sig)"
+                    />
+                    <CopyButton
+                      text={JSON.stringify(
+                        {
+                          ...signedOutput.headers,
+                          "X-API-SIGNATURE": signedOutput.signatureHex,
+                        },
+                        null,
+                        2,
+                      )}
+                      label="Copy Headers (128-Hex Sig)"
+                    />
+                  </div>
                 </div>
                 {Object.entries(signedOutput.headers).map(([hdr, val]) => (
                   <div key={hdr} className="kv">
@@ -602,6 +816,15 @@ export default function Portfolio() {
                     </span>
                   </div>
                 ))}
+                <div className="kv">
+                  <span className="k mono">X-API-SIGNATURE (128-Hex alt)</span>
+                  <span className="v mono row-flex" style={{ justifyContent: "flex-end" }}>
+                    <span style={{ wordBreak: "break-all" }}>
+                      {signedOutput.signatureHex}
+                    </span>
+                    <CopyButton text={signedOutput.signatureHex} label="Copy Hex" />
+                  </span>
+                </div>
 
                 <div className="mt-2">
                   <div className="between mb-1">
@@ -617,12 +840,13 @@ export default function Portfolio() {
                     className="mono"
                     style={{
                       margin: 0,
-                      padding: "8px 10px",
-                      background: "var(--bg-elevated)",
+                      padding: 10,
+                      background: "var(--bg-card)",
                       border: "1px solid var(--border-subtle)",
-                      borderRadius: "var(--radius-xs)",
+                      borderRadius: 4,
                       fontSize: 11.5,
-                      overflowX: "auto",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-all",
                     }}
                   >
                     {signedOutput.canonicalString}
@@ -634,50 +858,166 @@ export default function Portfolio() {
         )}
       </Card>
 
-      {/* Accessible Confirmation Dialog for Destructive Actions */}
+      {/* Registration & Security Checklist (SEC-06) */}
+      <div className="grid cols-2">
+        <Card
+          title="How to Register Your 64-Hex Public Key on Polyester"
+          subtitle="Matches https://testnet.polyester.com/account/api-keys ('Bring your own key')"
+        >
+          <ol
+            style={{
+              margin: 0,
+              paddingLeft: 18,
+              color: "var(--text-secondary)",
+              fontSize: 13,
+              lineHeight: 1.75,
+            }}
+          >
+            <li>
+              Click <strong>Generate Ed25519 Keypair</strong> above and click{" "}
+              <strong>Copy 64-Hex Public Key</strong> (64 hexadecimal characters).
+            </li>
+            <li>
+              Open{" "}
+              <a
+                href={vault.POLYESTER_API_KEYS_URL}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: "var(--accent)", textDecoration: "underline" }}
+              >
+                testnet.polyester.com/account/api-keys ↗
+              </a>{" "}
+              and click <strong>Create API Key</strong>.
+            </li>
+            <li>
+              Select the <strong>Bring your own key</strong> tab and paste your{" "}
+              <strong>64 hex characters</strong> into the Public Key box.
+            </li>
+            <li>
+              Copy the assigned <code className="mono">ak_...</code> key ID returned by
+              Polyester and paste it into the <strong>Registered Polyester keyId</strong>{" "}
+              column above. Configure an <strong>IP allowlist</strong> for any trading key.
+            </li>
+          </ol>
+          <div className="row-flex mt-3" style={{ gap: 8 }}>
+            <a
+              href={vault.POLYESTER_API_KEYS_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="btn sm primary"
+            >
+              <span>Open Polyester API Keys</span>
+              <IconExternal size={12} />
+            </a>
+            <a
+              href={`${NETWORKS.testnet.docsUrl}/developer-docs/authentication-security/ed25519-api-keys`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn sm"
+            >
+              <span>Ed25519 API Keys Docs</span>
+              <IconExternal size={12} />
+            </a>
+          </div>
+        </Card>
+
+        <Card
+          title="Security Model & Threat Boundaries"
+          subtitle="Understand what browser localStorage protects against — and what it does not"
+        >
+          <div className="kv">
+            <span className="k">Network Transmission</span>
+            <span className="v up">Zero (100% client-side WebCrypto)</span>
+          </div>
+          <div className="kv">
+            <span className="k">Public Key Export</span>
+            <span className="v mono">64-char Hex (32 bytes) &amp; Base64</span>
+          </div>
+          <div className="kv">
+            <span className="k">Private Key DOM Rendering</span>
+            <span className="v up">Blocked (Never rendered or copied)</span>
+          </div>
+          <div className="kv">
+            <span className="k">Storage Persistence</span>
+            <span className="v mono">localStorage (&quot;poly-tools:vault:v1&quot;)</span>
+          </div>
+          <div className="notice warn mt-2" style={{ fontSize: 12 }}>
+            <div>
+              <strong>Security Reminder:</strong> Keys stored in{" "}
+              <code className="mono">localStorage</code> are accessible to JavaScript
+              running on the same origin. Prefer <strong>Read-Only</strong> permissions and{" "}
+              <strong>IP allowlists</strong> when registering keys at{" "}
+              <code className="mono">testnet.polyester.com/account/api-keys</code>, and wipe
+              keys when using shared machines.
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Confirmation Modals */}
       <ConfirmDialog
-        open={pendingConfirm !== null}
-        title={
-          pendingConfirm?.kind === "wipe"
-            ? "Permanently Wipe Key Vault?"
-            : pendingConfirm?.kind === "overwrite"
-              ? `Overwrite Existing Key "${pendingConfirm.keyId}"?`
-              : `Delete Key "${pendingConfirm?.keyId ?? ""}"?`
-        }
+        open={pendingConfirm?.kind === "delete"}
+        title="Delete Ed25519 Keypair?"
         message={
-          pendingConfirm?.kind === "wipe"
-            ? "This will permanently erase all stored Ed25519 keypairs from this browser's localStorage. Because PolyTools never backs up or exports private keys, wiped keys cannot be recovered."
-            : pendingConfirm?.kind === "overwrite"
-              ? `A keypair labeled "${pendingConfirm.keyId}" already exists in this browser. Generating a new keypair with the same label will permanently replace the existing keypair.`
-              : `This will permanently delete the Ed25519 keypair "${
-                  pendingConfirm?.keyId ?? ""
-                }" from browser storage. This action cannot be undone.`
+          pendingConfirm?.kind === "delete"
+            ? `Permanently remove keypair "${pendingConfirm.keyId}" from this browser's localStorage? Because there is no server backup, this keypair cannot be recovered.`
+            : ""
         }
-        confirmLabel={
-          pendingConfirm?.kind === "wipe"
-            ? "Yes, Wipe All Keys"
-            : pendingConfirm?.kind === "overwrite"
-              ? "Overwrite Keypair"
-              : "Delete Keypair"
-        }
+        confirmLabel="Delete Keypair"
         danger
         onCancel={() => setPendingConfirm(null)}
         onConfirm={() => {
-          const action = pendingConfirm;
-          setPendingConfirm(null);
-          if (!action) return;
-          if (action.kind === "wipe") {
-            vault.wipeVault();
-            setSignedOutput(null);
+          if (pendingConfirm?.kind === "delete") {
+            vault.deleteVaultKey(pendingConfirm.keyId);
+            if (lastCreatedKey?.keyId === pendingConfirm.keyId) {
+              setLastCreatedKey(null);
+            }
             refreshVault();
-          } else if (action.kind === "delete") {
-            vault.deleteVaultKey(action.keyId);
-            if (signedOutput?.label === action.keyId) setSignedOutput(null);
-            refreshVault();
-          } else if (action.kind === "overwrite") {
-            if (signedOutput?.label === action.keyId) setSignedOutput(null);
-            void executeGenerate(action.keyId);
           }
+          setPendingConfirm(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={
+          pendingConfirm?.kind === "overwrite-gen" ||
+          pendingConfirm?.kind === "overwrite-import"
+        }
+        title="Overwrite Existing Key Label?"
+        message={
+          pendingConfirm?.kind === "overwrite-gen" ||
+          pendingConfirm?.kind === "overwrite-import"
+            ? `A key with label "${pendingConfirm.keyId}" already exists in your browser vault. Replacing it will permanently destroy the existing keypair.`
+            : ""
+        }
+        confirmLabel="Replace Key"
+        danger
+        onCancel={() => setPendingConfirm(null)}
+        onConfirm={() => {
+          if (pendingConfirm?.kind === "overwrite-gen") {
+            const target = pendingConfirm.keyId;
+            setPendingConfirm(null);
+            void executeGenerate(target);
+          } else if (pendingConfirm?.kind === "overwrite-import") {
+            const target = pendingConfirm.keyId;
+            setPendingConfirm(null);
+            executeImportPublic(target);
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingConfirm?.kind === "wipe"}
+        title="Wipe Entire Browser Key Vault?"
+        message={`Permanently erase all ${keys.length} Ed25519 keypair(s) from this browser's localStorage? This action is immediate and irreversible.`}
+        confirmLabel="Wipe All Keys"
+        danger
+        onCancel={() => setPendingConfirm(null)}
+        onConfirm={() => {
+          vault.wipeVault();
+          setLastCreatedKey(null);
+          refreshVault();
+          setPendingConfirm(null);
         }}
       />
     </div>

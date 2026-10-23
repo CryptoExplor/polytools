@@ -112,6 +112,7 @@ function devWireSampleFallback(url: URL): { status: number; body: unknown } | nu
   if (p === "/api/zipper/compare") {
     const cfg = readWireSample("get_deposit_withdraw_config.json") as any;
     const asset = q.get("asset") ?? "USDT";
+    const chainFilter = q.get("chainFilter");
     const compareBy =
       q.get("compareBy") === "depositMinAmount" ? "depositMinAmount" : "networkFee";
     const assetCfg = Array.isArray(cfg?.assets)
@@ -119,6 +120,10 @@ function devWireSampleFallback(url: URL): { status: number; body: unknown } | nu
       : null;
     if (assetCfg && Array.isArray(assetCfg.variants)) {
       const routes = assetCfg.variants
+        .filter(
+          (v: any) =>
+            !chainFilter || v.chain === chainFilter || v.chainCode === chainFilter,
+        )
         .map((v: any) => ({ asset, ...v }))
         .sort(
           (a: any, b: any) =>
@@ -129,7 +134,7 @@ function devWireSampleFallback(url: URL): { status: number; body: unknown } | nu
         body: {
           apiEnv: cfg.apiEnv ?? "testnet",
           asset,
-          chainFilter: null,
+          chainFilter: chainFilter ?? null,
           compareBy,
           routes,
           dataSource: "wire-samples",
