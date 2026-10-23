@@ -374,24 +374,45 @@ export default function Dashboard() {
       <Card
         flush
         title="Spot Markets"
-        subtitle="Click any market row to open its chart, or use the quick-launch buttons on the right."
+        subtitle="Click any row to open its chart, or jump directly to Book, Tape, Chart, or Heatmap."
         actions={
-          <div className="row-flex" style={{ gap: 8 }}>
-            <div className="input-group" style={{ width: 210 }}>
-              <span className="input-icon">
-                <IconSearch size={14} />
-              </span>
-              <input
-                id="market-search"
-                type="search"
-                className="input with-icon"
-                placeholder="Search symbol (e.g. BTC)…"
-                aria-label="Filter markets by symbol"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
+          <button
+            type="button"
+            className="btn sm ghost"
+            onClick={exportCsv}
+            disabled={!rows.length}
+            title="Download filtered spot markets as CSV"
+          >
+            Export CSV
+          </button>
+        }
+        footer={
+          <>
+            <span>
+              Wire prices are decoded from scaled integers (<code className="mono">raw ÷ 10³</code>).
+              Session sparklines accumulate live observed ticks in your browser with zero extra API calls.
+            </span>
+            {updatedAt && <span>Snapshot synced {fmtAgo(updatedAt, now)}</span>}
+          </>
+        }
+      >
+        <div className="table-toolbar">
+          <div className="input-group" style={{ width: 220 }}>
+            <span className="input-icon">
+              <IconSearch size={14} />
+            </span>
+            <input
+              id="market-search"
+              type="search"
+              className="input with-icon"
+              placeholder="Search symbol (e.g. BTC)…"
+              aria-label="Filter markets by symbol"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
 
+          <div className="row-flex" style={{ gap: 8 }}>
             <button
               type="button"
               className={`btn sm ${watchOnly ? "primary" : "ghost"}`}
@@ -438,28 +459,8 @@ export default function Dashboard() {
                 ▼ Losers
               </button>
             </div>
-
-            <button
-              type="button"
-              className="btn sm ghost"
-              onClick={exportCsv}
-              disabled={!rows.length}
-              title="Download filtered spot markets as CSV"
-            >
-              Export CSV
-            </button>
           </div>
-        }
-        footer={
-          <>
-            <span>
-              Wire prices are decoded from scaled integers (<code className="mono">raw ÷ 10³</code>).
-              Session sparklines accumulate live observed ticks in your browser with zero extra API calls.
-            </span>
-            {updatedAt && <span>Snapshot synced {fmtAgo(updatedAt, now)}</span>}
-          </>
-        }
-      >
+        </div>
         <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
           <table className="data">
             <thead>

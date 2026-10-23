@@ -31,7 +31,6 @@ import {
 interface NavItem {
   to: string;
   label: string;
-  shortTag?: string;
   icon: ReactNode;
 }
 
@@ -39,59 +38,56 @@ const INTRO_STORAGE_KEY = "poly-tools:intro:v1";
 
 const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
   {
-    group: "Watch",
+    group: "Market Data",
     items: [
-      { to: "/", label: "Markets", shortTag: "MKT", icon: <IconDashboard size={16} /> },
-      { to: "/book", label: "Order book", shortTag: "L2", icon: <IconBook size={16} /> },
-      { to: "/tape", label: "Recent trades", shortTag: "TAPE", icon: <IconTape size={16} /> },
-      { to: "/charts", label: "Price chart", shortTag: "OHLC", icon: <IconChart size={16} /> },
-      { to: "/heatmap", label: "Liquidity heatmap", shortTag: "HEAT", icon: <IconActivity size={16} /> },
-      { to: "/compare", label: "vs CoinGecko", shortTag: "ARB", icon: <IconCompare size={16} /> },
+      { to: "/", label: "Markets", icon: <IconDashboard size={15} /> },
+      { to: "/book", label: "Order book", icon: <IconBook size={15} /> },
+      { to: "/tape", label: "Recent trades", icon: <IconTape size={15} /> },
+      { to: "/charts", label: "Price chart", icon: <IconChart size={15} /> },
+      { to: "/heatmap", label: "Liquidity heatmap", icon: <IconActivity size={15} /> },
+      { to: "/compare", label: "Venue compare", icon: <IconCompare size={15} /> },
     ],
   },
   {
-    group: "Move (info only)",
+    group: "Cross-Chain",
     items: [
-      { to: "/zipper", label: "Deposit networks", shortTag: "BRIDGE", icon: <IconZipper size={16} /> },
-      { to: "/flow", label: "Track a deposit", shortTag: "FLOW", icon: <IconFlow size={16} /> },
+      { to: "/zipper", label: "Zipper routes", icon: <IconZipper size={15} /> },
+      { to: "/flow", label: "Tx explorer", icon: <IconFlow size={15} /> },
     ],
   },
   {
-    group: "Learn",
+    group: "Toolkit & Docs",
     items: [
-      { to: "/calc", label: "Calculators", shortTag: "CALC", icon: <IconCalc size={16} /> },
-      { to: "/hub", label: "Testnet setup", shortTag: "UTC", icon: <IconHub size={16} /> },
-      { to: "/sdk", label: "SDK & Bot Guide", shortTag: "SDK", icon: <IconKey size={16} /> },
-    ],
-  },
-  {
-    group: "Keys",
-    items: [
-      { to: "/portfolio", label: "Key vault", shortTag: "KEYS", icon: <IconVault size={16} /> },
+      { to: "/calc", label: "Calculators", icon: <IconCalc size={15} /> },
+      { to: "/hub", label: "Testnet hub", icon: <IconHub size={15} /> },
+      { to: "/sdk", label: "SDK quickstart", icon: <IconKey size={15} /> },
+      { to: "/portfolio", label: "API keys (Local)", icon: <IconVault size={15} /> },
     ],
   },
 ];
 
-const ROUTE_META: Record<string, { title: string; routeTag: string; showSymbolSelector: boolean }> = {
-  "/": { title: "Markets Overview", routeTag: "/#/", showSymbolSelector: true },
-  "/book": { title: "L2 Order Book & Depth", routeTag: "/#/book", showSymbolSelector: true },
-  "/tape": { title: "Recent Trades & Large Prints", routeTag: "/#/tape", showSymbolSelector: true },
-  "/charts": { title: "Candlestick Price Chart", routeTag: "/#/charts", showSymbolSelector: true },
-  "/heatmap": { title: "Order Book Liquidity Heatmap", routeTag: "/#/heatmap", showSymbolSelector: true },
-  "/compare": { title: "Polyester vs CoinGecko Reference", routeTag: "/#/compare", showSymbolSelector: false },
-  "/zipper": { title: "Deposit & Withdrawal Networks (Zipper)", routeTag: "/#/zipper", showSymbolSelector: false },
-  "/calc": { title: "Position, Break-Even & Risk Calculators", routeTag: "/#/calc", showSymbolSelector: true },
-  "/flow": { title: "Track a Deposit or Withdrawal", routeTag: "/#/flow", showSymbolSelector: false },
-  "/portfolio": { title: "Local Ed25519 API Key Vault", routeTag: "/#/portfolio", showSymbolSelector: false },
-  "/sdk": { title: "Beginner SDK & Bot Quickstart", routeTag: "/#/sdk", showSymbolSelector: true },
-  "/hub": { title: "Testnet Setup & Daily Claim Hub", routeTag: "/#/hub", showSymbolSelector: false },
+const ROUTE_META: Record<
+  string,
+  { title: string; group: string; showSymbolSelector: boolean }
+> = {
+  "/": { title: "Markets", group: "Market Data", showSymbolSelector: true },
+  "/book": { title: "Order book", group: "Market Data", showSymbolSelector: true },
+  "/tape": { title: "Recent trades", group: "Market Data", showSymbolSelector: true },
+  "/charts": { title: "Price chart", group: "Market Data", showSymbolSelector: true },
+  "/heatmap": { title: "Liquidity heatmap", group: "Market Data", showSymbolSelector: true },
+  "/compare": { title: "Venue compare", group: "Market Data", showSymbolSelector: false },
+  "/zipper": { title: "Zipper routes", group: "Cross-Chain", showSymbolSelector: false },
+  "/flow": { title: "Tx explorer", group: "Cross-Chain", showSymbolSelector: false },
+  "/calc": { title: "Calculators", group: "Toolkit & Docs", showSymbolSelector: true },
+  "/hub": { title: "Testnet hub", group: "Toolkit & Docs", showSymbolSelector: false },
+  "/sdk": { title: "SDK quickstart", group: "Toolkit & Docs", showSymbolSelector: true },
+  "/portfolio": { title: "API keys (Local)", group: "Toolkit & Docs", showSymbolSelector: false },
 };
 
 export function Layout() {
   const {
     apiEnv,
     dataSource,
-    envInfo,
     symbol,
     setSymbol,
     theme,
@@ -119,13 +115,9 @@ export function Layout() {
 
   const meta = ROUTE_META[loc.pathname] ?? {
     title: "PolyTools",
-    routeTag: `/#${loc.pathname}`,
+    group: "Workspace",
     showSymbolSelector: false,
   };
-
-  const mainnetReady = Boolean(
-    NETWORKS.mainnet.mcpUrl || envInfo?.networks.mainnet.mcpConfigured,
-  );
 
   const dismissIntro = useCallback(() => {
     setIntroDismissed(true);
@@ -146,13 +138,11 @@ export function Layout() {
     }, 60);
   };
 
-  // Dynamic document title for browser tabs & history
   useEffect(() => {
     const prefix = meta.showSymbolSelector ? `${symbol} · ` : "";
     document.title = `${prefix}${meta.title} — PolyTools`;
   }, [meta.title, meta.showSymbolSelector, symbol]);
 
-  // Close mobile nav on Escape or route change
   useEffect(() => {
     setNavOpen(false);
   }, [loc.pathname]);
@@ -171,7 +161,7 @@ export function Layout() {
   return (
     <div className="shell">
       <a href="#main-workspace" className="skip-link">
-        Skip to main workspace
+        Skip to main content
       </a>
 
       <div
@@ -183,10 +173,10 @@ export function Layout() {
       <aside className={`sidebar ${navOpen ? "open" : ""}`} aria-label="Primary navigation">
         <div className="sidebar-header">
           <NavLink to="/" className="brand" onClick={() => setNavOpen(false)}>
-            <span className="logo">PT</span>
+            <span className="logo">P</span>
             <span className="brand-meta">
               <span>PolyTools</span>
-              <span className="brand-sub">Testnet · Read-only</span>
+              <span className="brand-sub">Read-only · {apiEnv}</span>
             </span>
           </NavLink>
           <button
@@ -195,13 +185,13 @@ export function Layout() {
             onClick={() => setNavOpen(false)}
             aria-label="Close navigation menu"
           >
-            <IconClose size={16} />
+            <IconClose size={15} />
           </button>
         </div>
 
-        <nav className="sidebar-nav" aria-label="Analytics tools">
+        <nav className="sidebar-nav" aria-label="Tools">
           {NAV_GROUPS.map((g) => (
-            <div key={g.group}>
+            <div key={g.group} className="nav-section">
               <div className="nav-group">{g.group}</div>
               {g.items.map((item) => (
                 <NavLink
@@ -212,7 +202,6 @@ export function Layout() {
                 >
                   <span className="ico">{item.icon}</span>
                   <span>{item.label}</span>
-                  {item.shortTag && <span className="nav-badge">{item.shortTag}</span>}
                 </NavLink>
               ))}
             </div>
@@ -220,23 +209,16 @@ export function Layout() {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="between mb-2">
-            <span className="mono" style={{ fontSize: 11 }}>
-              {pairs.length ? `${pairs.length} pairs · ${assets.length} assets` : "Read-only MCP"}
-            </span>
-            <span
-              className={`pill ${apiEnv === "testnet" ? "warn" : "up"}`}
-              style={{ fontSize: 10.5, padding: "1px 6px" }}
-            >
-              {apiEnv.toUpperCase()}
-            </span>
+          <div className="sidebar-meta-line">
+            <span>{pairs.length ? `${pairs.length} pairs · ${assets.length} assets` : "MCP read-only"}</span>
+            <span className="mono">{apiEnv}</span>
           </div>
-          <div>
-            Read-only testnet analytics for{" "}
+          <div className="sidebar-disclaimer">
+            Public analytics for{" "}
             <a href={NETWORKS.testnet.appUrl} target="_blank" rel="noreferrer">
-              Polyester <IconExternal size={11} />
+              Polyester ↗
             </a>
-            . Keys never leave your browser.
+            . No wallet or login.
           </div>
         </div>
       </aside>
@@ -253,40 +235,42 @@ export function Layout() {
             <IconMenu size={16} />
           </button>
 
-          <div className="topbar-title-group">
-            <h1>{meta.title}</h1>
-            <span className="topbar-route-tag">{meta.routeTag}</span>
+          <div className="topbar-breadcrumb">
+            <span className="topbar-crumb-group">{meta.group}</span>
+            <span className="topbar-crumb-sep">/</span>
+            <span className="topbar-crumb-current">{meta.title}</span>
+            <span className="topbar-eyebrow hide-sm">
+              Read-only · {apiEnv}
+            </span>
           </div>
 
           <div className="spacer" />
 
           <div className="topbar-controls">
-            {/* Active market switcher — only shown on market-scoped pages (FE-NAV-02 / DEF-05) */}
             {meta.showSymbolSelector && (
               <SymbolSelect
                 value={symbol}
                 onChange={setSymbol}
-                ariaLabel="Global active market symbol"
+                ariaLabel="Active market symbol"
               />
             )}
 
-            {/* Real Backend Connection Indicator */}
             {connectionStatus === "connected" ? (
               <span
-                className={`pill ${dataSource === "wire-samples" ? "info" : "up"} hide-xs`}
+                className={`pill ${dataSource === "wire-samples" ? "warn" : "up"} hide-xs`}
                 title={
                   dataSource === "wire-samples"
                     ? "Serving captured testnet wire samples (sandbox offline fallback)"
                     : marketsUpdatedAt
-                      ? `Backend connected · Metadata synced ${fmtAgo(marketsUpdatedAt, now)}`
+                      ? `Backend connected · Synced ${fmtAgo(marketsUpdatedAt, now)}`
                       : "Backend connected"
                 }
               >
                 <span className="dot live" />
-                {dataSource === "wire-samples" ? "Cached sample" : "API Live"}
+                {dataSource === "wire-samples" ? "Sample data" : "Live MCP"}
               </span>
             ) : connectionStatus === "connecting" ? (
-              <span className="pill hide-xs" title="Connecting to Polyester MCP backend facade">
+              <span className="pill hide-xs">
                 <span className="dot" />
                 Syncing…
               </span>
@@ -295,47 +279,23 @@ export function Layout() {
                 type="button"
                 className="btn sm danger"
                 onClick={refreshMarkets}
-                title={`Upstream connection issue: ${marketsError ?? "unreachable"}. Click to retry.`}
+                title={`Connection issue: ${marketsError ?? "unreachable"}. Click to retry.`}
               >
                 <IconRefresh size={12} />
-                <span>Upstream Retry</span>
+                <span>Retry</span>
               </button>
             )}
 
-            {/* Data-driven Environment Badge */}
-            <span
-              className={`pill ${apiEnv === "testnet" ? "warn" : "up"}`}
-              title={`Serving environment reported by live API payloads (apiEnv="${apiEnv}")`}
-            >
-              <span className="dot" />
-              {apiEnv}
-            </span>
-
-            {/* Mainnet Switch Readiness */}
-            <span
-              className="pill hide-sm"
-              title={
-                mainnetReady
-                  ? "Mainnet endpoint configured — set MCP_URL_MAINNET to switch"
-                  : "Mainnet endpoint pending announcement — configure in packages/core/src/config.ts or MCP_URL_MAINNET"
-              }
-            >
-              mainnet: {mainnetReady ? "ready" : "pending"}
-            </span>
-
-            {/* Glossary / Definitions Drawer Trigger (UX-02 / FEAT-09) */}
             <button
               type="button"
               className="btn sm ghost"
               onClick={() => setGlossaryOpen(true)}
               title="Open plain-English definitions glossary"
-              aria-label="Open plain-English definitions glossary"
             >
               <IconInfo size={13} />
-              <span className="hide-sm">Definitions</span>
+              <span className="hide-sm">Glossary</span>
             </button>
 
-            {/* Theme Selector (Dark / Light Terminal) */}
             <button
               type="button"
               className="btn sm ghost"
@@ -344,65 +304,66 @@ export function Layout() {
               aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
             >
               {theme === "dark" ? <IconSun size={14} /> : <IconMoon size={14} />}
-              <span className="hide-sm">{theme === "dark" ? "Light" : "Dark"}</span>
             </button>
           </div>
         </header>
 
-        {/* First-Visit Dismissible Intent Bar (UX-01 / A11Y-01) */}
-        {!introDismissed && (
-          <section className="intent-bar" aria-label="About PolyTools">
-            <div className="intent-bar-copy">
-              <strong>PolyTools is a read-only map of Polyester testnet.</strong>{" "}
-              It cannot place orders, move funds, or see your balances. Open a market to
-              watch prices, or follow the Testnet Hub to trade in the official app.
-            </div>
-            <div className="intent-bar-actions">
-              <button
-                type="button"
-                className="btn sm primary"
-                onClick={handleBrowseMarkets}
-              >
-                Browse markets
-              </button>
-              <NavLink to="/hub" className="btn sm">
-                Open Testnet Hub
-              </NavLink>
-              <button
-                type="button"
-                className="btn sm ghost"
-                onClick={dismissIntro}
-                aria-label="Dismiss introduction banner"
-              >
-                <IconX size={13} />
-                <span>Dismiss</span>
-              </button>
-            </div>
-          </section>
-        )}
-
         <main id="main-workspace" className="content" tabIndex={-1}>
+          {!introDismissed && (
+            <section className="intent-bar" aria-label="About PolyTools">
+              <div className="intent-bar-copy">
+                <span className="intent-eyebrow">Read-only toolkit · Testnet</span>
+                <strong>PolyTools is a read-only map of Polyester.</strong>{" "}
+                <span>
+                  Watch live prices, order book depth, trades, and bridge fees without
+                  connecting a wallet. It never places orders or touches funds.
+                </span>
+              </div>
+              <div className="intent-bar-actions">
+                <button
+                  type="button"
+                  className="btn sm primary"
+                  onClick={handleBrowseMarkets}
+                >
+                  Browse markets
+                </button>
+                <NavLink to="/hub" className="btn sm">
+                  Testnet setup
+                </NavLink>
+                <button
+                  type="button"
+                  className="btn sm ghost"
+                  onClick={dismissIntro}
+                  aria-label="Dismiss introduction banner"
+                >
+                  <IconX size={13} />
+                  <span>Dismiss</span>
+                </button>
+              </div>
+            </section>
+          )}
+
           <Outlet />
         </main>
 
         <footer className="foot">
           <span>
-            <strong>PolyTools v0.1</strong> · Read-only testnet analytics. Trade in the official app ·
-            Prices decoded via <code className="mono">raw ÷ 10³</code> (`PRICE_SCALE = 3`)
+            PolyTools · Read-only companion for Polyester ({apiEnv}) · Prices decoded via{" "}
+            <code className="mono">raw ÷ 10³</code>
           </span>
-          <span className="row-flex" style={{ gap: 14 }}>
+          <span className="row-flex" style={{ gap: 16 }}>
             <button
               type="button"
-              className="btn sm ghost"
+              className="foot-link-btn"
               onClick={() => setGlossaryOpen(true)}
             >
-              Definitions
+              Glossary
             </button>
             <a href={NETWORKS.testnet.appUrl} target="_blank" rel="noreferrer">
-              Exchange App ↗
+              Polyester App ↗
             </a>
             <a href={NETWORKS.testnet.docsUrl} target="_blank" rel="noreferrer">
-              Developer Docs ↗
+              Docs ↗
             </a>
           </span>
         </footer>

@@ -511,13 +511,18 @@ export function SymbolSelect({
   const [base] = splitSymbol(value);
 
   return (
-    <div className="row-flex" style={{ gap: 6 }}>
+    <div className="row-flex" style={{ gap: 6, flexWrap: "nowrap" }}>
       <SymBadge asset={base} />
       <select
         className="select mono"
         style={{ width: "auto", fontWeight: 600, paddingRight: 28 }}
         value={value}
         aria-label={ariaLabel}
+        title={
+          pair
+            ? `Tick size: ${pair.tickSize} · Step size: ${pair.stepSize} · Min notional: ${pair.minNotionalQuote} ${pair.quoteAsset}`
+            : value
+        }
         onChange={(e) => onChange(e.target.value)}
       >
         {!options.includes(value) && <option value={value}>{value}</option>}
@@ -532,14 +537,6 @@ export function SymbolSelect({
           );
         })}
       </select>
-      {pair && (
-        <span
-          className="faint mono hide-sm"
-          title={`Tick size: ${pair.tickSize} · Step size: ${pair.stepSize} · Min notional: ${pair.minNotionalQuote} ${pair.quoteAsset}`}
-        >
-          tick {pair.tickSize}
-        </span>
-      )}
     </div>
   );
 }
