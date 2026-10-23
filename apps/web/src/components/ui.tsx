@@ -3,6 +3,11 @@ import { fmtAgo, splitSymbol } from "@poly/core";
 import { useApp } from "../lib/store";
 import { useNow } from "../lib/hooks";
 import {
+  getTokenBrandSpec,
+  getTokenPackshotUrl,
+  type TokenViewAngle,
+} from "../brand";
+import {
   IconAlert,
   IconCheck,
   IconCopy,
@@ -463,15 +468,79 @@ const PALETTE = [
 ];
 
 export function assetColor(asset: string): string {
+  const spec = getTokenBrandSpec(asset);
+  if (spec) return spec.color;
   let h = 0;
   for (let i = 0; i < asset.length; i++) h = (h * 31 + asset.charCodeAt(i)) >>> 0;
   return PALETTE[h % PALETTE.length];
 }
 
-export function SymBadge({ asset }: { asset: string }) {
+export function SymBadge({
+  asset,
+  size = 22,
+  angle = "front",
+}: {
+  asset: string;
+  size?: number;
+  angle?: TokenViewAngle;
+}) {
+  const spec = getTokenBrandSpec(asset);
+  const packshotUrl = getTokenPackshotUrl(asset, angle);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [asset, angle]);
+
   return (
-    <span className="sym-badge" aria-hidden="true">
-      {asset.slice(0, 4)}
+    <span
+      className="sym-badge"
+      style={{
+        width: size,
+        height: size,
+        flex: `0 0 ${size}px`,
+        background: spec ? spec.bgSoft : undefined,
+        borderColor: spec ? `${spec.color}40` : undefined,
+      }}
+      title={spec ? `${spec.name} (${spec.symbol})` : asset}
+      aria-hidden="true"
+    >
+      {packshotUrl && !imgFailed ? (
+        <img
+          src={packshotUrl}
+          alt={spec?.name ?? asset}
+          className="sym-badge-img"
+          loading="lazy"
+          onError={() => setImgFailed(true)}
+        />
+      ) : (
+        <span
+          className="sym-badge-glyph"
+          style={{ color: spec?.color ?? "var(--text-secondary)" }}
+        >
+          {spec ? spec.glyph : asset.slice(0, 3)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+export function PairLogo({
+  base,
+  quote,
+  size = 22,
+}: {
+  base: string;
+  quote: string;
+  size?: number;
+}) {
+  const quoteSize = Math.max(14, Math.round(size * 0.68));
+  return (
+    <span className="pair-logo" aria-hidden="true">
+      <SymBadge asset={base} size={size} />
+      <span className="pair-logo-quote">
+        <SymBadge asset={quote} size={quoteSize} />
+      </span>
     </span>
   );
 }

@@ -13,6 +13,7 @@ import Hub from "./pages/Hub";
 import Flow from "./pages/Flow";
 import Portfolio from "./pages/Portfolio";
 import SdkGuide from "./pages/SdkGuide";
+import { BrandKitPage } from "./pages/BrandKit";
 
 /**
  * HashRouter on purpose: deep links then survive every static host
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="flow" element={<Flow />} />
             <Route path="portfolio" element={<Portfolio />} />
             <Route path="sdk" element={<SdkGuide />} />
+            <Route path="brand-kit" element={<BrandKitPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

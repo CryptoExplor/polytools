@@ -573,6 +573,7 @@ export default function Dashboard() {
                         >
                           {watchlist.includes(m.symbol) ? "★" : "☆"}
                         </button>
+                        <SymBadge asset={base} size={22} />
                         <span className="mono">
                           {base}
                           <small>/{quote}</small>

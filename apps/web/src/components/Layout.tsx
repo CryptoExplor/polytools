@@ -3,6 +3,11 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { NETWORKS, fmtAgo } from "@poly/core";
 import { useApp } from "../lib/store";
 import { useNow } from "../lib/hooks";
+import {
+  BRAND_KIT_ZIP_URL,
+  POLYESTER_FULL_LOGO_DARK_SVG,
+  POLYESTER_LOGOMARK_SVG,
+} from "../brand";
 import { SymbolSelect } from "./ui";
 import { GlossaryDrawer } from "./Glossary";
 import {
@@ -18,6 +23,7 @@ import {
   IconHub,
   IconInfo,
   IconKey,
+  IconLayers,
   IconMenu,
   IconMoon,
   IconRefresh,
@@ -62,6 +68,7 @@ const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
       { to: "/hub", label: "Testnet hub", icon: <IconHub size={15} /> },
       { to: "/sdk", label: "SDK quickstart", icon: <IconKey size={15} /> },
       { to: "/portfolio", label: "API keys (Local)", icon: <IconVault size={15} /> },
+      { to: "/brand-kit", label: "Brand kit", icon: <IconLayers size={15} /> },
     ],
   },
 ];
@@ -82,6 +89,7 @@ const ROUTE_META: Record<
   "/hub": { title: "Testnet hub", group: "Toolkit & Docs", showSymbolSelector: false },
   "/sdk": { title: "SDK quickstart", group: "Toolkit & Docs", showSymbolSelector: true },
   "/portfolio": { title: "API keys (Local)", group: "Toolkit & Docs", showSymbolSelector: false },
+  "/brand-kit": { title: "Brand kit", group: "Toolkit & Docs", showSymbolSelector: false },
 };
 
 export function Layout() {
@@ -101,6 +109,8 @@ export function Layout() {
   } = useApp();
   const [navOpen, setNavOpen] = useState(false);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
+  const [brandMenuOpen, setBrandMenuOpen] = useState(false);
+  const [brandCopiedNote, setBrandCopiedNote] = useState<string | null>(null);
   const [introDismissed, setIntroDismissed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(INTRO_STORAGE_KEY) === "dismissed";
@@ -128,6 +138,17 @@ export function Layout() {
     }
   }, []);
 
+  const copyBrandSvg = async (svg: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(svg);
+      setBrandCopiedNote(label);
+      window.setTimeout(() => setBrandCopiedNote(null), 1800);
+    } catch {
+      /* ignore */
+    }
+    setBrandMenuOpen(false);
+  };
+
   const handleBrowseMarkets = () => {
     if (loc.pathname !== "/") {
       navigate("/");
@@ -145,18 +166,27 @@ export function Layout() {
 
   useEffect(() => {
     setNavOpen(false);
+    setBrandMenuOpen(false);
   }, [loc.pathname]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (navOpen) setNavOpen(false);
+        if (brandMenuOpen) setBrandMenuOpen(false);
+        else if (navOpen) setNavOpen(false);
         else if (!introDismissed) dismissIntro();
       }
     };
+    const onDocClick = () => {
+      if (brandMenuOpen) setBrandMenuOpen(false);
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [navOpen, introDismissed, dismissIntro]);
+    window.addEventListener("click", onDocClick);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("click", onDocClick);
+    };
+  }, [brandMenuOpen, navOpen, introDismissed, dismissIntro]);
 
   return (
     <div className="shell">
@@ -171,12 +201,24 @@ export function Layout() {
       />
 
       <aside className={`sidebar ${navOpen ? "open" : ""}`} aria-label="Primary navigation">
-        <div className="sidebar-header">
-          <NavLink to="/" className="brand" onClick={() => setNavOpen(false)}>
-            <span className="logo">P</span>
+        <div className="sidebar-header" style={{ position: "relative" }}>
+          <NavLink
+            to="/"
+            className="brand"
+            title="Left-click for Markets · Right-click for Polyester Brand Kit menu"
+            onClick={() => setNavOpen(false)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setBrandMenuOpen((v) => !v);
+            }}
+          >
+            <img src="/favicon.svg" alt="Polyester symbol" className="logo-img" />
             <span className="brand-meta">
               <span>PolyTools</span>
-              <span className="brand-sub">Read-only · {apiEnv}</span>
+              <span className="brand-sub">
+                {brandCopiedNote ? `✓ ${brandCopiedNote}` : `Read-only · ${apiEnv}`}
+              </span>
             </span>
           </NavLink>
           <button
@@ -187,6 +229,54 @@ export function Layout() {
           >
             <IconClose size={15} />
           </button>
+
+          {brandMenuOpen && (
+            <div
+              className="brand-context-menu"
+              role="menu"
+              aria-label="Polyester Brand Kit quick actions"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="brand-context-title mono">Polyester Brand Kit</div>
+              <button
+                type="button"
+                role="menuitem"
+                className="brand-context-item"
+                onClick={() => copyBrandSvg(POLYESTER_FULL_LOGO_DARK_SVG, "Copied full logo")}
+              >
+                Copy full logo SVG
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="brand-context-item"
+                onClick={() => copyBrandSvg(POLYESTER_LOGOMARK_SVG, "Copied symbol")}
+              >
+                Copy symbol SVG
+              </button>
+              <a
+                href={BRAND_KIT_ZIP_URL}
+                target="_blank"
+                rel="noreferrer"
+                role="menuitem"
+                className="brand-context-item"
+                onClick={() => setBrandMenuOpen(false)}
+              >
+                Download brand assets (.zip) ↗
+              </a>
+              <button
+                type="button"
+                role="menuitem"
+                className="brand-context-item"
+                onClick={() => {
+                  setBrandMenuOpen(false);
+                  navigate("/brand-kit");
+                }}
+              >
+                Open Brand Kit & Guidelines →
+              </button>
+            </div>
+          )}
         </div>
 
         <nav className="sidebar-nav" aria-label="Tools">
@@ -352,6 +442,7 @@ export function Layout() {
             <code className="mono">raw ÷ 10³</code>
           </span>
           <span className="row-flex" style={{ gap: 16 }}>
+            <NavLink to="/brand-kit">Brand Kit</NavLink>
             <button
               type="button"
               className="foot-link-btn"
