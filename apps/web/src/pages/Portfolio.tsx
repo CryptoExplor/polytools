@@ -6,12 +6,15 @@
  *    copied to clipboard, or transmitted over the network.
  *  - All cryptography (Ed25519 keypair generation & request signing) executes
  *    exclusively in-browser via WebCrypto (`@poly/core` vault module).
+ *  - Signing implements the official 5-field newline-separated canonical string:
+ *      <timestamp_ms>\n<UPPERCASE_METHOD>\n<path>\n<canonical_query>\n<body_sha256_hex>
  *  - Destructive actions (deleting a key, overwriting a keyId, or wiping the
  *    vault) require explicit modal confirmation (`ConfirmDialog`).
  */
 
 import { useEffect, useState } from "react";
-import { vault } from "@poly/core";
+import { Link } from "react-router-dom";
+import { NETWORKS, vault } from "@poly/core";
 
 type VaultKey = vault.VaultKey;
 import {
@@ -25,7 +28,7 @@ import {
   Pill,
   TermTip,
 } from "../components/ui";
-import { IconAlert, IconKey, IconTrash, IconVault } from "../components/icons";
+import { IconAlert, IconExternal, IconKey, IconTrash, IconVault } from "../components/icons";
 
 type PendingConfirm =
   | { kind: "delete"; keyId: string }
@@ -40,13 +43,21 @@ export default function Portfolio() {
   const [error, setError] = useState<string | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm>(null);
 
-  // Interactive Request Signer state (uses vault.signRequest & vault.signedHeaders)
+  // Interactive 5-field Request Signer state (SEC-01 & SEC-07)
   const [selectedKeyId, setSelectedKeyId] = useState<string>("");
-  const [canonicalInput, setCanonicalInput] = useState<string>("GET/api/v1/account");
+  const [registeredKeyId, setRegisteredKeyId] = useState<string>("");
+  const [httpMethod, setHttpMethod] = useState<"GET" | "POST" | "DELETE">("GET");
+  const [reqPath, setReqPath] = useState<string>("/v1/account/balances");
+  const [reqQuery, setReqQuery] = useState<string>("asset=USDT&limit=10");
+  const [reqBody, setReqBody] = useState<string>("");
   const [signingBusy, setSigningBusy] = useState<boolean>(false);
   const [signedOutput, setSignedOutput] = useState<{
     keyId: string;
+    label: string;
+    isRegisteredKeyId: boolean;
     timestamp: string;
+    canonicalString: string;
+    bodySha256Hex: string;
     signatureB64: string;
     headers: Record<string, string>;
   } | null>(null);
@@ -100,16 +111,20 @@ export default function Portfolio() {
 
   const handleSignRequest = async () => {
     const entry = keys.find((k) => k.keyId === selectedKeyId);
-    if (!entry || !canonicalInput.trim()) return;
+    if (!entry || !reqPath.trim()) return;
     setSigningBusy(true);
     setError(null);
     try {
-      const sig = await vault.signRequest(entry, canonicalInput);
+      const sig = await vault.signRequest(entry, {
+        method: httpMethod,
+        path: reqPath,
+        query: reqQuery,
+        body: httpMethod === "GET" ? "" : reqBody,
+        apiKeyId: registeredKeyId.trim() || undefined,
+      });
       const headers = vault.signedHeaders(sig);
       setSignedOutput({
-        keyId: sig.keyId,
-        timestamp: sig.timestamp,
-        signatureB64: sig.signatureB64,
+        ...sig,
         headers,
       });
     } catch {
@@ -128,8 +143,26 @@ export default function Portfolio() {
             {supported ? "WebCrypto Ed25519 Ready" : "WebCrypto Unavailable"}
           </Pill>
         }
-        subtitle="Generate client-side Ed25519 API keypairs, export public keys for Polyester account registration, and sign canonical request strings locally."
+        subtitle="Creates an Ed25519 keypair in your browser and keeps it in this browser's localStorage. This is not a Polyester login and not a funding wallet. No request is sent to Polyester."
+        actions={
+          <Link to="/sdk" className="btn sm primary">
+            <IconKey size={13} />
+            <span>SDK &amp; Bot Quickstart (TS · Python · Rust)</span>
+          </Link>
+        }
       />
+
+      {/* Explicit Beginner Boundary Notice (UX-T10-01) */}
+      <div className="notice warn" role="note">
+        <div>
+          <strong>For developers &amp; API users only:</strong> This is not a Polyester login
+          and not a funding wallet. It only stores a local Ed25519 keypair in your browser.
+          No request is sent to Polyester. Your local label is <strong>not</strong> a
+          Polyester key ID until you register the public key in the official Polyester app or
+          via <code className="mono">POST /v1/auth/api-keys</code> (which returns a
+          server-assigned <code className="mono">ak_...</code> keyId).
+        </div>
+      </div>
 
       <MetricStrip>
         <MetricCell
@@ -148,10 +181,10 @@ export default function Portfolio() {
           sub="Never transmitted or logged"
         />
         <MetricCell
-          label="Private Portfolio Feed"
-          trend="warn"
-          value="Phase 2 Pending"
-          sub="Awaiting public private-REST docs"
+          label="Canonical Format"
+          trend="up"
+          value="5-Line Spec"
+          sub="ts · method · path · query · sha256"
         />
       </MetricStrip>
 
@@ -192,30 +225,38 @@ export default function Portfolio() {
             <span className="v up">✓ Ready for API registration</span>
           </div>
           <div className="kv">
-            <span className="k">Local Request Signing (`signRequest`)</span>
-            <span className="v up">✓ Generates `X-API-*` headers</span>
+            <span className="k">5-Field Canonical Request Signing</span>
+            <span className="v up">✓ SHA-256 body + RFC 3986 query</span>
           </div>
           <div className="kv">
-            <span className="k">Instant Key Deletion & Full Vault Wipe</span>
+            <span className="k">Instant Key Deletion &amp; Full Vault Wipe</span>
             <span className="v up">✓ Immediate local removal</span>
           </div>
         </Card>
 
         <Card
-          title="Current Limitations & Recovery Boundaries"
+          title="Current Limitations & Security Best Practices"
           actions={<Pill kind="warn">Important Disclosures</Pill>}
         >
           <div className="kv">
-            <span className="k">Private REST Portfolio Balances/Orders</span>
-            <span className="v warn">Blocked on public endpoint spec</span>
-          </div>
-          <div className="kv">
-            <span className="k">Key Backup / Cloud Sync / Recovery</span>
-            <span className="v">Not supported (no recovery if wiped)</span>
+            <span className="k">Local Label vs Polyester Key ID</span>
+            <span className="v warn">Register pubkey to receive `ak_...` ID</span>
           </div>
           <div className="kv">
             <span className="k">Storage Encryption at Rest</span>
             <span className="v">Unencrypted browser localStorage</span>
+          </div>
+          <div className="kv">
+            <span className="k">API Key IP Allowlists (Recommended)</span>
+            <span className="v">
+              <a
+                href={`${NETWORKS.testnet.docsUrl}/developer-docs/authentication-security/api-key-ip-allowlists`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Official IP Allowlist Guide <IconExternal size={11} />
+              </a>
+            </span>
           </div>
           <div className="kv">
             <span className="k">Order Placement / Withdrawals</span>
@@ -232,7 +273,7 @@ export default function Portfolio() {
         >
           <div className="field">
             <label htmlFor="vault-key-label">
-              <span>Key Label (`X-API-KEY-ID`)</span>
+              <span>Local Vault Label (not yet a Polyester `ak_...` keyId)</span>
               <span className="mono faint">1–64 chars (A-Z, 0-9, -, _, .)</span>
             </label>
             <input
@@ -310,7 +351,7 @@ export default function Portfolio() {
       {/* Stored Keys List */}
       <Card
         title={`3. Stored Public Keys (${keys.length})`}
-        subtitle="Register the Base64 Public Key below in your Polyester account's API settings."
+        subtitle="Register the Base64 Public Key below in your Polyester account's API settings to receive an official ak_... keyId."
       >
         {keys.length === 0 ? (
           <EmptyState
@@ -328,7 +369,7 @@ export default function Portfolio() {
               >
                 <div className="between mb-2">
                   <div className="row-flex" style={{ gap: 8 }}>
-                    <Pill kind="accent">{k.keyId}</Pill>
+                    <Pill kind="accent">Local label: {k.keyId}</Pill>
                     <span className="faint mono" style={{ fontSize: 11.5 }}>
                       Created {new Date(k.createdAt).toISOString().replace("T", " ").slice(0, 19)} UTC
                     </span>
@@ -354,7 +395,7 @@ export default function Portfolio() {
                 <div className="field mb-0">
                   <label htmlFor={`pub-key-${k.keyId}`}>
                     <span>Public Key (Base64 raw 32-byte · safe to share)</span>
-                    <span className="faint">Private key hidden & non-exportable</span>
+                    <span className="faint">Private key hidden &amp; non-exportable</span>
                   </label>
                   <div className="row-flex" style={{ gap: 8 }}>
                     <input
@@ -371,6 +412,15 @@ export default function Portfolio() {
                       label="Copy Public Key"
                       size="md"
                     />
+                    <CopyButton
+                      text={JSON.stringify(
+                        { label: k.keyId, publicKeyEd25519: k.publicKeyB64 },
+                        null,
+                        2,
+                      )}
+                      label="Copy POST /v1/auth/api-keys JSON"
+                      size="md"
+                    />
                   </div>
                 </div>
               </div>
@@ -379,14 +429,23 @@ export default function Portfolio() {
         )}
       </Card>
 
-      {/* Interactive Request Signer (Uses vault.signRequest & vault.signedHeaders) */}
+      {/* Interactive 5-Field Request Signer (SEC-01 & SEC-07) */}
       <Card
-        title="4. Interactive Local Request Signer"
-        subtitle="Test Ed25519 header signing in-browser using vault.signRequest() and vault.signedHeaders()."
+        title="4. Official 5-Field Ed25519 Request Signer"
+        subtitle="Builds and signs <timestamp_ms>\n<UPPERCASE_METHOD>\n<path>\n<canonical_query>\n<body_sha256_hex> per official Polyester docs."
+        actions={
+          <Pill kind={registeredKeyId.trim() ? "up" : "warn"}>
+            {registeredKeyId.trim()
+              ? "Registered Key ID Supplied"
+              : "DEMO — Local Label Only"}
+          </Pill>
+        }
         footer={
           <span>
-            Signs <code className="mono">{`$\{canonicalString}$\{timestamp}`}</code> with
-            your selected Ed25519 keypair in WebCrypto without exposing the private key.
+            Empty body SHA-256 is{" "}
+            <code className="mono">{vault.EMPTY_BODY_SHA256.slice(0, 16)}…</code>. Headers
+            will only authenticate against Polyester after the public key is registered and
+            its server-assigned <code className="mono">ak_...</code> ID is used.
           </span>
         }
       >
@@ -398,7 +457,7 @@ export default function Portfolio() {
           <>
             <div className="grid cols-2">
               <div className="field">
-                <label htmlFor="signer-key-select">Signing Key (`X-API-KEY-ID`)</label>
+                <label htmlFor="signer-key-select">Local Vault Keypair</label>
                 <select
                   id="signer-key-select"
                   className="select mono"
@@ -414,36 +473,102 @@ export default function Portfolio() {
               </div>
 
               <div className="field">
-                <label htmlFor="signer-canonical-input">
+                <label htmlFor="signer-reg-keyid">
                   <TermTip
-                    label="Canonical Request String"
-                    tip="Method + Path + Body string to sign before appending the millisecond timestamp"
+                    label="Registered Polyester Key ID (optional)"
+                    tip="Server-issued keyId (e.g. ak_01H...) returned when you register your public key on Polyester. Leave blank for local demo mode."
                   />
                 </label>
+                <input
+                  id="signer-reg-keyid"
+                  type="text"
+                  className="input mono"
+                  placeholder="ak_... (leave blank for local demo)"
+                  value={registeredKeyId}
+                  onChange={(e) => setRegisteredKeyId(e.target.value)}
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="signer-method-select">HTTP Method &amp; Request Path</label>
                 <div className="row-flex" style={{ gap: 8 }}>
+                  <select
+                    id="signer-method-select"
+                    className="select mono"
+                    style={{ width: 96 }}
+                    value={httpMethod}
+                    onChange={(e) =>
+                      setHttpMethod(e.target.value as "GET" | "POST" | "DELETE")
+                    }
+                  >
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="DELETE">DELETE</option>
+                  </select>
                   <input
-                    id="signer-canonical-input"
                     type="text"
                     className="input mono"
                     style={{ flex: 1 }}
-                    value={canonicalInput}
-                    onChange={(e) => setCanonicalInput(e.target.value)}
+                    placeholder="/v1/account/balances"
+                    aria-label="Request path"
+                    value={reqPath}
+                    onChange={(e) => setReqPath(e.target.value)}
                   />
-                  <button
-                    type="button"
-                    className="btn primary"
-                    disabled={signingBusy || !selectedKeyId || !canonicalInput.trim()}
-                    onClick={() => void handleSignRequest()}
-                  >
-                    {signingBusy ? "Signing…" : "Sign Payload"}
-                  </button>
                 </div>
               </div>
+
+              <div className="field">
+                <label htmlFor="signer-query-input">
+                  <TermTip
+                    label="Query String (auto-sorted per RFC 3986)"
+                    tip="Query pairs are sorted by decoded key then decoded value and RFC 3986 percent-encoded before signing."
+                  />
+                </label>
+                <input
+                  id="signer-query-input"
+                  type="text"
+                  className="input mono"
+                  placeholder="symbol=BTC-USDT&limit=10"
+                  value={reqQuery}
+                  onChange={(e) => setReqQuery(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {httpMethod !== "GET" && (
+              <div className="field">
+                <label htmlFor="signer-body-input">
+                  <span>Request Body (UTF-8 JSON · hashed with SHA-256)</span>
+                </label>
+                <input
+                  id="signer-body-input"
+                  type="text"
+                  className="input mono"
+                  placeholder='{"symbol":"BTC-USDT","side":"buy","qty":"0.001"}'
+                  value={reqBody}
+                  onChange={(e) => setReqBody(e.target.value)}
+                />
+              </div>
+            )}
+
+            <div className="row-flex" style={{ justifyContent: "space-between" }}>
+              <span className="faint">
+                Signs the 5-line UTF-8 canonical string in WebCrypto without exposing the
+                private key.
+              </span>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={signingBusy || !selectedKeyId || !reqPath.trim()}
+                onClick={() => void handleSignRequest()}
+              >
+                {signingBusy ? "Signing…" : "Sign 5-Field Payload"}
+              </button>
             </div>
 
             {signedOutput && (
               <div
-                className="mt-2"
+                className="mt-3"
                 style={{
                   padding: 12,
                   background: "var(--bg-shell)",
@@ -452,9 +577,17 @@ export default function Portfolio() {
                 }}
               >
                 <div className="between mb-2">
-                  <strong style={{ fontSize: 12 }}>
-                    Generated Authentication Headers
-                  </strong>
+                  <div className="row-flex" style={{ gap: 8 }}>
+                    <strong style={{ fontSize: 12 }}>
+                      Generated Authentication Headers
+                    </strong>
+                    {!signedOutput.isRegisteredKeyId && (
+                      <Pill kind="warn">
+                        DEMO — local label ({signedOutput.label}) not registered on
+                        Polyester
+                      </Pill>
+                    )}
+                  </div>
                   <CopyButton
                     text={JSON.stringify(signedOutput.headers, null, 2)}
                     label="Copy All Headers (JSON)"
@@ -469,6 +602,32 @@ export default function Portfolio() {
                     </span>
                   </div>
                 ))}
+
+                <div className="mt-2">
+                  <div className="between mb-1">
+                    <span className="faint">
+                      Exact 5-Line Canonical String Signed (UTF-8):
+                    </span>
+                    <CopyButton
+                      text={signedOutput.canonicalString}
+                      label="Copy Canonical String"
+                    />
+                  </div>
+                  <pre
+                    className="mono"
+                    style={{
+                      margin: 0,
+                      padding: "8px 10px",
+                      background: "var(--bg-elevated)",
+                      border: "1px solid var(--border-subtle)",
+                      borderRadius: "var(--radius-xs)",
+                      fontSize: 11.5,
+                      overflowX: "auto",
+                    }}
+                  >
+                    {signedOutput.canonicalString}
+                  </pre>
+                </div>
               </div>
             )}
           </>
@@ -509,11 +668,14 @@ export default function Portfolio() {
           if (!action) return;
           if (action.kind === "wipe") {
             vault.wipeVault();
+            setSignedOutput(null);
             refreshVault();
           } else if (action.kind === "delete") {
             vault.deleteVaultKey(action.keyId);
+            if (signedOutput?.label === action.keyId) setSignedOutput(null);
             refreshVault();
           } else if (action.kind === "overwrite") {
+            if (signedOutput?.label === action.keyId) setSignedOutput(null);
             void executeGenerate(action.keyId);
           }
         }}

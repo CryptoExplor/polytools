@@ -5,16 +5,22 @@
  *   1. /api/flow/explain?txHash=... (explain_transaction)
  *   2. /api/flow/by-tx?txHash=...   (get_lifecycle_flow_by_tx)
  *   3. /api/flow?flowId=...         (get_lifecycle_flow)
- * Preserves identifiers verbatim and distinguishes unindexed/missing queries
- * from failed on-chain transactions.
+ *
+ * Preserves identifiers verbatim, syncs shareable URL search params (?mode=&q=),
+ * and cleanly distinguishes:
+ *   - HTTP 400 invalid argument / validation errors (ErrorBox kind="invalid")
+ *   - HTTP 200 found === false ("No public flow indexed" EmptyState)
+ *   - HTTP 200 found === true (structured summary + explanation + JSON inspector)
  */
 
-import { useMemo, useState } from "react";
-import { api } from "../lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { ApiError, api } from "../lib/api";
 import {
   Card,
   CopyButton,
   EmptyState,
+  ErrorBox,
   JsonView,
   Loading,
   MetricCell,
@@ -37,31 +43,41 @@ const MODE_LABELS: Record<
   { label: string; endpoint: string; placeholder: string; hint: string }
 > = {
   explain: {
-    label: "Explain Tx (by Hash)",
+    label: "Explain",
     endpoint: "/api/flow/explain",
-    placeholder: "Paste source or destination tx hash (e.g. 0x… or chain txid)",
-    hint: "Calls explain_transaction — returns a structured human-readable lifecycle summary.",
+    placeholder: "Paste 0x… transaction hash (66 chars)",
+    hint: "Calls explain_transaction — returns a plain-English lifecycle summary and matched flows.",
   },
   "by-tx": {
-    label: "Raw Flow (by Tx Hash)",
+    label: "Find by tx hash",
     endpoint: "/api/flow/by-tx",
-    placeholder: "Paste source or destination tx hash (e.g. 0x… or chain txid)",
-    hint: "Calls get_lifecycle_flow_by_tx — looks up the raw lifecycle flow state by transaction hash.",
+    placeholder: "Paste 0x… transaction hash (66 chars)",
+    hint: "Calls get_lifecycle_flow_by_tx — looks up raw lifecycle flow records by transaction hash.",
   },
   flow: {
-    label: "Raw Flow (by Flow ID)",
+    label: "Find by flow id",
     endpoint: "/api/flow",
-    placeholder: "Paste exact base58 flow / intent ID",
-    hint: "Calls get_lifecycle_flow — looks up lifecycle state by opaque base58 flowId (case-sensitive).",
+    placeholder: "Paste UUID or exact flow identifier",
+    hint: "Calls get_lifecycle_flow — looks up lifecycle state by exact flowId (case-sensitive).",
   },
 };
 
+function parseMode(raw: string | null): LookupMode {
+  if (raw === "by-tx" || raw === "flow" || raw === "explain") return raw;
+  return "explain";
+}
+
 export default function Flow() {
-  const [mode, setMode] = useState<LookupMode>("explain");
-  const [input, setInput] = useState<string>("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialMode = parseMode(searchParams.get("mode"));
+  const initialQ = searchParams.get("q") ?? "";
+
+  const [mode, setMode] = useState<LookupMode>(initialMode);
+  const [input, setInput] = useState<string>(initialQ);
   const [busy, setBusy] = useState<boolean>(false);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<"invalid" | "unavailable">("unavailable");
   const [queriedInfo, setQueriedInfo] = useState<{
     mode: LookupMode;
     query: string;
@@ -69,6 +85,7 @@ export default function Flow() {
   } | null>(null);
   const [showRawJson, setShowRawJson] = useState<boolean>(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const autoRanRef = useRef<string | null>(null);
 
   // Input validation without mutating the user's identifier
   const validation = useMemo(() => {
@@ -79,60 +96,99 @@ export default function Flow() {
     if (/\s/.test(trimmed)) {
       return {
         valid: false,
-        warning: "Identifier contains whitespace characters. Remove spaces before tracing.",
+        warning:
+          "Identifier contains whitespace characters. Remove spaces before tracing.",
       };
     }
     if ((mode === "explain" || mode === "by-tx") && trimmed.length < 8) {
       return {
         valid: true,
         warning:
-          "Input looks shorter than a typical transaction hash — if this is a Polyester flow ID, switch to 'Raw Flow (by Flow ID)'.",
+          "Input looks shorter than a typical transaction hash — if this is a Polyester flow ID, switch to 'Find by flow id'.",
       };
     }
     if (mode === "flow" && trimmed.startsWith("0x") && trimmed.length >= 64) {
       return {
         valid: true,
         warning:
-          "Input starts with 0x and looks like an EVM transaction hash — consider using 'Explain Tx (by Hash)' or 'Raw Flow (by Tx Hash)'.",
+          "Input starts with 0x and looks like an EVM transaction hash — consider using 'Explain' or 'Find by tx hash'.",
       };
     }
     return { valid: true, warning: null };
   }, [input, mode]);
 
-  const executeLookup = async (overrideMode?: LookupMode, overrideQuery?: string) => {
-    const activeMode = overrideMode ?? mode;
-    const q = (overrideQuery ?? input).trim();
-    if (!q || /\s/.test(q)) return;
+  const executeLookup = useCallback(
+    async (
+      overrideMode?: LookupMode,
+      overrideQuery?: string,
+      syncUrl = true,
+    ) => {
+      const activeMode = overrideMode ?? mode;
+      const q = (overrideQuery ?? input).trim();
+      if (!q || /\s/.test(q)) return;
 
-    setBusy(true);
-    setError(null);
-    setResult(null);
-    setQueriedInfo({ mode: activeMode, query: q, at: Date.now() });
+      if (syncUrl) {
+        setSearchParams({ mode: activeMode, q }, { replace: true });
+      }
 
-    try {
-      const res =
-        activeMode === "explain"
-          ? await api.flowExplain(q)
-          : activeMode === "by-tx"
-            ? await api.flowByTx(q)
-            : await api.flow(q);
-      setResult((res ?? {}) as Record<string, unknown>);
-      setHistory((prev) => {
-        const filtered = prev.filter(
-          (h) => !(h.mode === activeMode && h.query === q),
-        );
-        return [{ mode: activeMode, query: q, ts: Date.now() }, ...filtered].slice(0, 8);
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Lifecycle lookup request failed");
-    } finally {
-      setBusy(false);
+      setBusy(true);
+      setError(null);
+      setResult(null);
+      setQueriedInfo({ mode: activeMode, query: q, at: Date.now() });
+
+      try {
+        const res =
+          activeMode === "explain"
+            ? await api.flowExplain(q)
+            : activeMode === "by-tx"
+              ? await api.flowByTx(q)
+              : await api.flow(q);
+        setResult((res ?? {}) as Record<string, unknown>);
+        setHistory((prev) => {
+          const filtered = prev.filter(
+            (h) => !(h.mode === activeMode && h.query === q),
+          );
+          return [{ mode: activeMode, query: q, ts: Date.now() }, ...filtered].slice(
+            0,
+            8,
+          );
+        });
+      } catch (e) {
+        const msg =
+          e instanceof Error ? e.message : "Lifecycle lookup request failed";
+        const isInvalid =
+          (e instanceof ApiError && e.status === 400) ||
+          /^(invalid_argument|validation error|invalid )/i.test(msg);
+        setErrorKind(isInvalid ? "invalid" : "unavailable");
+        setError(msg);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [input, mode, setSearchParams],
+  );
+
+  // Run lookup automatically if URL has ?q=... on initial load
+  useEffect(() => {
+    const qParam = searchParams.get("q")?.trim();
+    const mParam = parseMode(searchParams.get("mode"));
+    if (qParam && autoRanRef.current !== `${mParam}:${qParam}`) {
+      autoRanRef.current = `${mParam}:${qParam}`;
+      setMode(mParam);
+      setInput(qParam);
+      void executeLookup(mParam, qParam, false);
     }
-  };
+  }, [searchParams, executeLookup]);
 
-  // Extract top-level summary fields if present in the open-shaped payload
+  // Extract top-level structured fields
   const extractedSummary = useMemo(() => {
     if (!result) return null;
+    const found =
+      typeof result.found === "boolean"
+        ? result.found
+        : typeof result.matchCount === "number"
+          ? result.matchCount > 0
+          : result.flow !== null && result.flow !== undefined;
     const status =
       typeof result.status === "string"
         ? result.status
@@ -140,31 +196,49 @@ export default function Flow() {
           ? result.state
           : typeof result.lifecycleStatus === "string"
             ? result.lifecycleStatus
+            : found
+              ? "Indexed"
+              : "Not Found";
+    const primaryFlowId =
+      typeof result.primaryFlowId === "string"
+        ? result.primaryFlowId
+        : typeof result.flowId === "string"
+          ? result.flowId
+          : typeof result.id === "string"
+            ? result.id
             : null;
-    const flowId =
-      typeof result.flowId === "string"
-        ? result.flowId
-        : typeof result.id === "string"
-          ? result.id
-          : null;
     const apiEnv = typeof result.apiEnv === "string" ? result.apiEnv : null;
-    const note =
-      typeof result.note === "string"
-        ? result.note
-        : typeof result.explanation === "string"
-          ? result.explanation
-          : typeof result.text === "string"
-            ? result.text
-            : null;
-    return { status, flowId, apiEnv, note };
+    const summary =
+      typeof result.summary === "string"
+        ? result.summary
+        : typeof result.note === "string"
+          ? result.note
+          : null;
+    const explanation =
+      typeof result.explanation === "string"
+        ? result.explanation
+        : typeof result.text === "string"
+          ? result.text
+          : null;
+    const matchCount =
+      typeof result.matchCount === "number" ? result.matchCount : null;
+    return {
+      found,
+      status,
+      primaryFlowId,
+      apiEnv,
+      summary,
+      explanation,
+      matchCount,
+    };
   }, [result]);
 
   return (
     <div className="page-stack">
       <PageHeader
-        title="Transaction & Lifecycle Flow Explorer"
+        title="Track a Deposit or Withdrawal"
         badge={<Pill kind="accent">Read-Only Trace</Pill>}
-        subtitle="Trace cross-chain Zipper deposits, withdrawals, and settlement flows from source-chain confirmation to exchange ledger credit or destination release."
+        subtitle="Paste a public transaction hash or Polyester flow ID to see what stage a deposit or withdrawal is in."
       />
 
       <MetricStrip>
@@ -176,7 +250,7 @@ export default function Flow() {
         <MetricCell
           label="Identifier Handling"
           value="Exact Verbatim"
-          sub="Base58 & hex case preserved"
+          sub="Base58, UUID & hex case preserved"
         />
         <MetricCell
           label="Last Query Status"
@@ -186,16 +260,22 @@ export default function Flow() {
               : error
                 ? "warn"
                 : result
-                  ? "up"
+                  ? extractedSummary?.found
+                    ? "up"
+                    : "flat"
                   : undefined
           }
           value={
             busy
               ? "Tracing…"
               : error
-                ? "Not Found / Error"
+                ? errorKind === "invalid"
+                  ? "Invalid Format (400)"
+                  : "Upstream Error"
                 : result
-                  ? extractedSummary?.status ?? "Payload Returned"
+                  ? extractedSummary?.found
+                    ? extractedSummary.status
+                    : "Not Indexed"
                   : "Idle"
           }
           sub={
@@ -257,7 +337,11 @@ export default function Flow() {
               <button
                 type="button"
                 className="btn ghost"
-                onClick={() => setInput("")}
+                onClick={() => {
+                  setInput("");
+                  setError(null);
+                  setResult(null);
+                }}
                 title="Clear input"
               >
                 Clear
@@ -296,7 +380,7 @@ export default function Flow() {
                     void executeLookup(h.mode, h.query);
                   }}
                 >
-                  [{h.mode}] {h.query.slice(0, 10)}
+                  [{MODE_LABELS[h.mode].label}] {h.query.slice(0, 10)}
                   {h.query.length > 10 ? "…" : ""}
                 </button>
               ))}
@@ -318,37 +402,13 @@ export default function Flow() {
         </Card>
       )}
 
+      {/* Invalid format (400) or upstream failure (502) */}
       {error && (
-        <Card
-          title="Lookup Diagnostic"
-          actions={<Pill kind="warn">No Lifecycle Record Returned</Pill>}
-        >
-          <div className="notice error mb-3">
-            <div>
-              <strong>Endpoint response:</strong> {error}
-            </div>
-          </div>
-          <div className="faint" style={{ lineHeight: 1.65 }}>
-            <strong>Important:</strong> A missing or failed lookup here does{" "}
-            <strong>not</strong> mean your on-chain transaction reverted or failed. Common
-            reasons a trace is not yet returned:
-            <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
-              <li>
-                The transaction was just broadcast on the source chain and has not yet
-                reached the required confirmation count for Zipper indexing.
-              </li>
-              <li>
-                You pasted a base58 <code>flowId</code> while in{" "}
-                <code>by Transaction Hash</code> mode (or vice-versa) — try switching the
-                lookup mode above.
-              </li>
-              <li>
-                Always verify the on-chain transaction status directly on the source
-                network&apos;s block explorer (linked on the Zipper Routes page).
-              </li>
-            </ul>
-          </div>
-        </Card>
+        <ErrorBox
+          error={error}
+          kind={errorKind}
+          onRetry={errorKind === "unavailable" ? () => void executeLookup() : undefined}
+        />
       )}
 
       {!busy && !error && result === null && (
@@ -356,12 +416,69 @@ export default function Flow() {
           <EmptyState
             icon={<IconFlow size={18} />}
             title="Ready to trace a transaction or flow"
-            description="Paste a deposit/withdrawal transaction hash from any supported Zipper chain or a Polyester base58 flow ID above to inspect its settlement lifecycle."
+            description="Paste a deposit/withdrawal transaction hash from any supported Zipper chain or a Polyester flow ID above to inspect its settlement lifecycle."
           />
         </Card>
       )}
 
-      {result !== null && (
+      {/* HTTP 200 with found === false (UX-T9-01 / A4) */}
+      {result !== null && extractedSummary?.found === false && (
+        <Card
+          title="Lookup Result"
+          subtitle={
+            queriedInfo
+              ? `Queried verbatim: ${queriedInfo.query} (${MODE_LABELS[queriedInfo.mode].endpoint})`
+              : undefined
+          }
+          actions={
+            <div className="row-flex" style={{ gap: 8 }}>
+              {extractedSummary.apiEnv && (
+                <Pill kind="warn">{extractedSummary.apiEnv}</Pill>
+              )}
+              <button
+                type="button"
+                className="btn sm ghost"
+                onClick={() => setShowRawJson((v) => !v)}
+              >
+                {showRawJson ? "Hide Raw JSON" : "Inspect Raw JSON"}
+              </button>
+            </div>
+          }
+        >
+          <EmptyState
+            icon={<IconFlow size={18} />}
+            title="No public flow indexed for this identifier"
+            description="Polyester has no public flow for this id. That is not the same as a failed transfer."
+          />
+          {extractedSummary.summary && (
+            <div className="notice mt-2">
+              <div>
+                <strong>Summary:</strong> {extractedSummary.summary}
+              </div>
+            </div>
+          )}
+          {showRawJson && (
+            <pre
+              className="mono mt-3"
+              style={{
+                margin: 0,
+                padding: 14,
+                background: "var(--bg-shell)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius-sm)",
+                overflowX: "auto",
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              {JSON.stringify(result, null, 2)}
+            </pre>
+          )}
+        </Card>
+      )}
+
+      {/* HTTP 200 with found !== false */}
+      {result !== null && extractedSummary?.found !== false && (
         <Card
           title="Lifecycle Trace Payload"
           subtitle={
@@ -393,14 +510,30 @@ export default function Flow() {
             </div>
           }
         >
-          {extractedSummary?.note && (
+          {extractedSummary?.summary && (
             <div className="notice info mb-3">
               <div>
-                <strong>Summary:</strong> {extractedSummary.note}
+                <strong>Summary:</strong> {extractedSummary.summary}
               </div>
             </div>
           )}
-
+          {extractedSummary?.explanation &&
+            extractedSummary.explanation !== extractedSummary.summary && (
+              <div className="notice mb-3">
+                <div>
+                  <strong>Explanation:</strong> {extractedSummary.explanation}
+                </div>
+              </div>
+            )}
+          {extractedSummary?.primaryFlowId && (
+            <div className="kv mb-2">
+              <span className="k">Primary Flow ID</span>
+              <span className="v mono row-flex" style={{ justifyContent: "flex-end" }}>
+                <span>{extractedSummary.primaryFlowId}</span>
+                <CopyButton text={extractedSummary.primaryFlowId} label="Copy Flow ID" />
+              </span>
+            </div>
+          )}
           {queriedInfo && (
             <div className="kv mb-2">
               <span className="k">Queried Identifier (verbatim)</span>

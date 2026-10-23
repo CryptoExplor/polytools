@@ -1,6 +1,6 @@
 /**
  * App-wide store: market metadata, selected symbol, environment telemetry,
- * and dark/light theme state.
+ * local watchlist, and dark/light theme state.
  */
 
 import {
@@ -9,6 +9,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -26,6 +27,7 @@ interface AppState {
   assetByCode: Map<string, AssetInfo>;
   symbols: string[];
   apiEnv: string;
+  dataSource: "live" | "wire-samples";
   envInfo: EnvInfo | null;
   marketsError: string | null;
   marketsLoading: boolean;
@@ -34,6 +36,8 @@ interface AppState {
   refreshMarkets: () => void;
   symbol: string;
   setSymbol: (s: string) => void;
+  watchlist: string[];
+  toggleWatchlist: (s: string) => void;
   theme: ThemeMode;
   setTheme: (t: ThemeMode) => void;
   toggleTheme: () => void;
@@ -43,6 +47,7 @@ const Ctx = createContext<AppState | null>(null);
 
 const SYMBOL_KEY = "poly-tools:symbol";
 const THEME_KEY = "poly-tools:theme";
+const WATCH_KEY = "poly-tools:watch:v1";
 
 function loadInitialTheme(): ThemeMode {
   try {
@@ -52,6 +57,19 @@ function loadInitialTheme(): ThemeMode {
     /* ignore storage error */
   }
   return "dark";
+}
+
+function loadInitialWatchlist(): string[] {
+  try {
+    const raw = localStorage.getItem(WATCH_KEY);
+    if (!raw) return ["BTC-USDT", "ETH-USDT", "SOL-USDT"];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === "string")
+      : [];
+  } catch {
+    return ["BTC-USDT", "ETH-USDT", "SOL-USDT"];
+  }
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -67,6 +85,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return "BTC-USDT";
     }
   });
+  const [watchlist, setWatchlist] = useState<string[]>(loadInitialWatchlist);
   const [theme, setThemeState] = useState<ThemeMode>(loadInitialTheme);
 
   // Sync theme to document root
@@ -84,30 +103,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [theme]);
 
+  const metaReqRef = useRef(0);
+
   const fetchMeta = useCallback(() => {
-    let alive = true;
+    const reqId = ++metaReqRef.current;
     setMarketsLoading(true);
     api
       .markets()
       .then((m) => {
-        if (!alive) return;
+        if (reqId !== metaReqRef.current) return;
         setMarkets(m);
         setMarketsError(null);
         setMarketsUpdatedAt(Date.now());
       })
       .catch((e) => {
-        if (!alive) return;
+        if (reqId !== metaReqRef.current) return;
         setMarketsError(e instanceof Error ? e.message : "Failed to load market metadata");
       })
       .finally(() => {
-        if (alive) setMarketsLoading(false);
+        if (reqId === metaReqRef.current) setMarketsLoading(false);
       });
 
     api.env().then((e) => {
-      if (alive && e) setEnvInfo(e);
+      if (reqId === metaReqRef.current && e) setEnvInfo(e);
     });
     return () => {
-      alive = false;
+      metaReqRef.current++;
     };
   }, []);
 
@@ -144,6 +165,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const toggleWatchlist = useCallback((s: string) => {
+    setWatchlist((prev) => {
+      const next = prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s];
+      try {
+        localStorage.setItem(WATCH_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
   const setTheme = useCallback((t: ThemeMode) => {
     setThemeState(t);
   }, []);
@@ -154,9 +187,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const connectionStatus: ConnectionStatus = useMemo(() => {
     if (marketsLoading && !markets && !marketsError) return "connecting";
-    if (marketsError && !markets) return "degraded";
+    if (marketsError) return "degraded";
     return "connected";
   }, [marketsLoading, markets, marketsError]);
+
+  const dataSource: "live" | "wire-samples" = useMemo(() => {
+    const src = (markets as unknown as Record<string, unknown> | null)?.dataSource;
+    return src === "wire-samples" ? "wire-samples" : "live";
+  }, [markets]);
 
   const value: AppState = {
     markets,
@@ -166,6 +204,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     assetByCode,
     symbols,
     apiEnv: markets?.apiEnv ?? "testnet",
+    dataSource,
     envInfo,
     marketsError,
     marketsLoading,
@@ -174,6 +213,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshMarkets: fetchMeta,
     symbol,
     setSymbol,
+    watchlist,
+    toggleWatchlist,
     theme,
     setTheme,
     toggleTheme,

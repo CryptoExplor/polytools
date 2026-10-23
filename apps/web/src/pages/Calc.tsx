@@ -123,6 +123,7 @@ export default function Calc() {
   const [riskPct, setRiskPct] = useState<number>(1);
   const [entry, setEntry] = useState<number>(82000);
   const [stop, setStop] = useState<number>(80000);
+  const [showWalkthrough, setShowWalkthrough] = useState<boolean>(false);
 
   // --- 2. Liquidation Estimate State
   const [liqEntry, setLiqEntry] = useState<number>(82000);
@@ -156,6 +157,15 @@ export default function Calc() {
     setPEntry(live);
     setPExit(Number((live * 1.03).toPrecision(6)));
     setConvPrice(live);
+  };
+
+  const applySampleSizing = () => {
+    const px = isFinite(live) && live > 0 ? live : 82000;
+    setEquity(1000);
+    setRiskPct(1);
+    setEntry(px);
+    setStop(Number((px * 0.975).toPrecision(6)));
+    setShowWalkthrough(true);
   };
 
   // --- 1. Position Sizing Validation & Calculation
@@ -331,7 +341,7 @@ export default function Calc() {
             </Pill>
           ) : null
         }
-        subtitle="Pre-trade risk sizing, isolated-margin liquidation estimator, round-trip fee & break-even analyzer, and precision asset/unit converter."
+        subtitle="Scratchpads for trade size, profit/loss after fees, and unit conversion. These numbers are yours to type. Nothing is sent to Polyester."
         actions={
           <div className="row-flex">
             <SymbolSelect value={symbol} onChange={setSymbol} />
@@ -408,11 +418,21 @@ export default function Calc() {
           title="1. Risk-Based Position Sizing"
           subtitle="Calculates exact position size so a stop-out loses only your target risk %."
           actions={
-            sizingResult.valid ? (
-              <Pill kind={sizingResult.inferredSide === "LONG" ? "up" : "down"}>
-                Inferred {sizingResult.inferredSide}
-              </Pill>
-            ) : null
+            <div className="row-flex" style={{ gap: 6 }}>
+              <button
+                type="button"
+                className="btn sm"
+                onClick={applySampleSizing}
+                title="Load a beginner-friendly 1% risk example with a 3-line explanation"
+              >
+                Try a sample
+              </button>
+              {sizingResult.valid ? (
+                <Pill kind={sizingResult.inferredSide === "LONG" ? "up" : "down"}>
+                  Inferred {sizingResult.inferredSide}
+                </Pill>
+              ) : null}
+            </div>
           }
           footer={
             <span className="mono">
@@ -491,6 +511,37 @@ export default function Calc() {
                     </span>
                   </div>
                 )}
+                {showWalkthrough && (
+                  <div
+                    className="notice mt-2"
+                    style={{ padding: "8px 10px", fontSize: 12 }}
+                    role="note"
+                  >
+                    <div>
+                      <strong>Walkthrough (3 steps):</strong>
+                      <div className="muted mt-1">
+                        1. Risk budget: {riskPct}% of {fmtNum(equity)} {quote} ={" "}
+                        <strong>
+                          {fmtNum(sizingResult.riskAmt)} {quote}
+                        </strong>{" "}
+                        maximum loss if stopped out.
+                        <br />
+                        2. Price distance to stop: |{fmtNum(entry)} − {fmtNum(stop)}| ={" "}
+                        <strong>
+                          {fmtNum(Math.abs(entry - stop))} {quote}
+                        </strong>{" "}
+                        per 1 {base}.
+                        <br />
+                        3. Target size: {fmtNum(sizingResult.riskAmt)} ÷{" "}
+                        {fmtNum(Math.abs(entry - stop))} ={" "}
+                        <strong>
+                          {fmtNum(sizingResult.qty, baseDecimals)} {base}
+                        </strong>
+                        .
+                      </div>
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <div className="faint center" style={{ padding: "12px 0" }}>
@@ -500,10 +551,10 @@ export default function Calc() {
           </div>
         </Card>
 
-        {/* 2. Liquidation Estimator */}
+        {/* 2. Educational Isolated-Margin Sketch (UX-03 / A6) */}
         <Card
-          title="2. Isolated Liquidation Estimator"
-          subtitle="Estimates zero-equity price before maintenance margin, fees, and funding."
+          title="2. Educational Isolated-Margin Sketch (Not Polyester Liquidation)"
+          subtitle="Toy textbook 1/L math — Polyester's public product is unified-asset spot + lending, not isolated-margin perpetuals."
           actions={
             <div className="seg-group" role="group" aria-label="Liquidation position direction">
               <button
@@ -653,6 +704,7 @@ export default function Calc() {
               value={feeBps}
               onChange={setFeeBps}
               error={pnlResult.errors.feeBps}
+              hint="Default 10 bps is a placeholder. Polyester VIP fees are not on this MCP."
             />
           </div>
 

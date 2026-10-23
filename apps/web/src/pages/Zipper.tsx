@@ -94,15 +94,9 @@ export default function Zipper() {
     refresh: refreshCmp,
   } = usePollData(() => api.zipperCompare(asset, compareBy), 60_000, [asset, compareBy]);
 
-  const cfgAssets = useMemo(
-    () => ((cfg as { assets?: ConfigAssetEntry[] } | null)?.assets ?? []),
-    [cfg],
-  );
+  const cfgAssets = useMemo(() => cfg?.assets ?? [], [cfg]);
 
-  const cfgContracts = useMemo(
-    () => ((cfg as { contracts?: ConfigContractEntry[] } | null)?.contracts ?? []),
-    [cfg],
-  );
+  const cfgContracts = useMemo(() => cfg?.contracts ?? [], [cfg]);
 
   const assetChoices = useMemo(() => {
     const fromStore = assets.map((a) => a.asset);
@@ -195,7 +189,7 @@ export default function Zipper() {
             <Pill kind={cfg.apiEnv === "testnet" ? "warn" : "up"}>{cfg.apiEnv}</Pill>
           ) : null
         }
-        subtitle="Inspect supported Zipper networks, compare per-asset deposit and withdrawal routes by network fee or minimum size, and verify finality requirements."
+        subtitle="Which blockchains can send or receive each token on Polyester, with published minimum amounts, network fees, and confirmation times. Public route list — no deposit address is created here."
         actions={
           <DataFreshness
             updatedAt={cmpAt ?? cfgAt}
@@ -261,7 +255,7 @@ export default function Zipper() {
       <Card
         flush
         title={`Asset Route Comparison · ${asset}`}
-        subtitle="Preserves exchange route ranking algorithm. Estimated net output deducts published network fee and is not a guaranteed execution quote."
+        subtitle="Ranked by the column you chose. Inventory, time, and testnet resets are not included."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <div className="row-flex" style={{ gap: 6 }}>
@@ -368,8 +362,8 @@ export default function Zipper() {
                   <th>Confirmations / Finality</th>
                   <th>
                     <TermTip
-                      label={`Est. Net Output (${asset})`}
-                      tip="Simulated Amount − Network Fee (estimate only; excludes source-chain gas)"
+                      label={`Illustrative Net (${asset})`}
+                      tip="Illustrative: amount minus network fee string. Not a Zipper quote."
                     />
                   </th>
                   <th className="align-left">Ranking Rationale & Status</th>

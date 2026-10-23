@@ -75,7 +75,7 @@ export function CandleChart({
   const sma25 = useMemo(() => computeSma(data.map((c) => c.close), 25), [data]);
 
   const geom = useMemo(() => {
-    if (data.length < 2) return null;
+    if (!data.length) return null;
     const padL = 8;
     const padR = 78;
     const padT = 14;
@@ -89,7 +89,7 @@ export function CandleChart({
     const lows = data.map((c) => c.low);
     const maxP = Math.max(...highs);
     const minP = Math.min(...lows);
-    const span = maxP - minP || 1;
+    const span = maxP - minP || (maxP * 0.01 || 1);
     const maxV = Math.max(...data.map((c) => c.volume), 1e-9);
 
     const step = w / data.length;

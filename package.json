@@ -13,7 +13,8 @@
     "dev": "npm -w apps/web run dev",
     "build": "npm -w apps/web run build:all",
     "typecheck": "npm -w apps/web run typecheck",
-    "preview": "npm -w apps/web run preview"
+    "preview": "npm -w apps/web run preview",
+    "test": "node --test tests/polytools.test.mjs"
   },
   "engines": {
     "node": ">=18"

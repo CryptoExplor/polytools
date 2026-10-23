@@ -48,6 +48,7 @@ export default function Charts() {
   const { symbol, setSymbol } = useApp();
   const [tf, setTf] = useState<CandleTimeframe>("1h");
   const [limit, setLimit] = useState<number>(140);
+  const [rangeHours, setRangeHours] = useState<number | null>(null);
   const [showSma7, setShowSma7] = useState<boolean>(true);
   const [showSma25, setShowSma25] = useState<boolean>(true);
 
@@ -63,9 +64,14 @@ export default function Charts() {
     setPaused,
     refresh,
   } = usePollData(
-    () => api.candles(symbol, tf, limit),
+    () => {
+      const endTsSec = rangeHours ? Math.floor(Date.now() / 1000) : undefined;
+      const startTsSec =
+        rangeHours && endTsSec ? endTsSec - rangeHours * 3600 : undefined;
+      return api.candles(symbol, tf, limit, startTsSec, endTsSec);
+    },
     pollInterval,
-    [symbol, tf, limit],
+    [symbol, tf, limit, rangeHours],
   );
 
   const { data: ov } = usePollData(() => api.overview([symbol]), 4000, [symbol]);
@@ -117,7 +123,7 @@ export default function Charts() {
             </Pill>
           ) : null
         }
-        subtitle="Multi-timeframe OHLCV charting across all 11 Polyester candle intervals with 2D crosshair, moving average overlays, and keyboard arrow inspection."
+        subtitle="Price history in time buckets. Each bar shows open, high, low, close, and volume. Hover or press Left/Right arrow keys to inspect individual OHLCV bars."
         actions={
           <div className="row-flex">
             <SymbolSelect value={symbol} onChange={setSymbol} />
@@ -225,9 +231,9 @@ export default function Charts() {
               ))}
             </div>
 
-            {/* Bar count limit */}
+            {/* Bar count limit (MCP max = 200 per DEF-03) */}
             <div className="seg-group" role="group" aria-label="Number of candles">
-              {[60, 140, 250].map((n) => (
+              {[60, 140, 200].map((n) => (
                 <button
                   key={n}
                   type="button"
@@ -239,6 +245,24 @@ export default function Charts() {
               ))}
             </div>
 
+            {/* Optional time window filter (FEAT-07) */}
+            <div className="seg-group" role="group" aria-label="Time window filter">
+              {[
+                { label: "All", hrs: null },
+                { label: "24h", hrs: 24 },
+                { label: "7d", hrs: 168 },
+              ].map((r) => (
+                <button
+                  key={r.label}
+                  type="button"
+                  className={`seg-btn ${rangeHours === r.hrs ? "active" : ""}`}
+                  onClick={() => setRangeHours(r.hrs)}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+
             {/* Moving average overlay toggles */}
             <div className="seg-group" role="group" aria-label="Moving average overlays">
               <button
@@ -246,6 +270,7 @@ export default function Charts() {
                 className={`seg-btn ${showSma7 ? "active" : ""}`}
                 onClick={() => setShowSma7((v) => !v)}
                 style={{ color: showSma7 ? "#38bdf8" : undefined }}
+                title="Simple moving average of candle closes over 7 bars."
               >
                 SMA 7
               </button>
@@ -254,6 +279,7 @@ export default function Charts() {
                 className={`seg-btn ${showSma25 ? "active" : ""}`}
                 onClick={() => setShowSma25((v) => !v)}
                 style={{ color: showSma25 ? "#f59e0b" : undefined }}
+                title="Simple moving average of candle closes over 25 bars."
               >
                 SMA 25
               </button>
@@ -263,8 +289,8 @@ export default function Charts() {
         footer={
           <>
             <span>
-              Unclosed candles are streamed live by the matching engine — the rightmost bar is
-              actively forming ({windowStats?.last.isClosed === false ? "Open bar" : "Synced"}).
+              MCP marks past bars as open on some intervals; only the rightmost bar is the current
+              forming period.
             </span>
             <span className="mono">
               Auto-refresh: {(pollInterval / 1000).toFixed(1)}s for {tf}

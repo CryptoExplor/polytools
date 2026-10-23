@@ -45,19 +45,26 @@ export class PolyesterData {
     symbol: string,
     timeframe: CandleTimeframe = "1h",
     limit = 120,
+    startTsSec?: number,
+    endTsSec?: number,
   ): Promise<CandlesResult> {
-    return this.client.callTool<CandlesResult>(TOOL.candles, { symbol, timeframe, limit });
+    const args: Record<string, unknown> = { symbol, timeframe, limit };
+    if (typeof startTsSec === "number" && Number.isFinite(startTsSec)) {
+      args.startTsSec = Math.floor(startTsSec);
+    }
+    if (typeof endTsSec === "number" && Number.isFinite(endTsSec)) {
+      args.endTsSec = Math.floor(endTsSec);
+    }
+    return this.client.callTool<CandlesResult>(TOOL.candles, args);
   }
 
   recentTrades(
     symbol: string,
     limit = 25,
     side?: "buy" | "sell",
-    pageToken?: string,
   ): Promise<RecentTradesResult> {
     const args: Record<string, unknown> = { symbol, limit };
     if (side) args.side = side;
-    if (pageToken) args.pageToken = pageToken;
     return this.client.callTool<RecentTradesResult>(TOOL.recentTrades, args);
   }
 
@@ -65,8 +72,17 @@ export class PolyesterData {
     symbol: string,
     interval: "1s" | "1m" | "5m" | "1h" = "1m",
     depth = 50,
+    windowSec?: number,
+    limit?: number,
   ): Promise<HeatmapResult> {
-    return this.client.callTool<HeatmapResult>(TOOL.heatmap, { symbol, interval, depth });
+    const args: Record<string, unknown> = { symbol, interval, depth };
+    if (typeof windowSec === "number" && Number.isFinite(windowSec)) {
+      args.windowSec = Math.floor(windowSec);
+    }
+    if (typeof limit === "number" && Number.isFinite(limit)) {
+      args.limit = Math.floor(limit);
+    }
+    return this.client.callTool<HeatmapResult>(TOOL.heatmap, args);
   }
 
   /** Zipper: chains, confirmations, explorers for deposits/withdrawals. */
@@ -97,11 +113,13 @@ export class PolyesterData {
   lifecycleByTx(
     txHash: string,
     lookupKind: "source" | "any" = "any",
+    limit?: number,
   ): Promise<LifecycleResult> {
-    return this.client.callTool<LifecycleResult>(TOOL.lifecycleFlowByTx, {
-      txHash,
-      lookupKind,
-    });
+    const args: Record<string, unknown> = { txHash, lookupKind };
+    if (typeof limit === "number" && Number.isFinite(limit)) {
+      args.limit = Math.floor(limit);
+    }
+    return this.client.callTool<LifecycleResult>(TOOL.lifecycleFlowByTx, args);
   }
 
   explainTransaction(

@@ -31,6 +31,7 @@ import {
   PageHeader,
   Pill,
   SymbolSelect,
+  TermTip,
 } from "../components/ui";
 import {
   IconBell,
@@ -70,6 +71,14 @@ function playAlertTone() {
     gain.gain.exponentialRampToValueAtTime(0.16, now + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
     osc.connect(gain).connect(sharedAudioCtx.destination);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {
+        /* ignore */
+      }
+    };
     osc.start(now);
     osc.stop(now + 0.48);
   } catch {
@@ -93,7 +102,7 @@ export default function Tape() {
 
   const [threshold, setThreshold] = useState<number>(10_000);
   const [sideFilter, setSideFilter] = useState<"all" | "buy" | "sell" | "whales">("all");
-  const [sound, setSound] = useState<boolean>(true);
+  const [sound, setSound] = useState<boolean>(false);
   const [notify, setNotify] = useState<boolean>(false);
   const [notifPerm, setNotifPerm] = useState<string>(() =>
     typeof window !== "undefined" && "Notification" in window
@@ -109,13 +118,13 @@ export default function Tape() {
   const seededSymbolRef = useRef<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Keep alert preferences in a ref so toggling controls never re-runs trade ingestion or re-fires old alerts
-  const prefsRef = useRef({ threshold, sound, notify });
-  prefsRef.current = { threshold, sound, notify };
-
   const [base, quote] = splitSymbol(symbol);
   const pair = pairBySymbol.get(symbol);
   const qtyDecimals = assetByCode.get(base)?.quantityDisplayDecimals ?? 5;
+
+  // Keep alert preferences and display metadata in a ref so toggling controls never re-runs trade ingestion or re-fires old alerts
+  const prefsRef = useRef({ threshold, sound, notify, base, qtyDecimals });
+  prefsRef.current = { threshold, sound, notify, base, qtyDecimals };
 
   const showToastMsg = useCallback((msg: string) => {
     setToast(msg);
@@ -126,6 +135,10 @@ export default function Tape() {
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      if (sharedAudioCtx && sharedAudioCtx.state !== "closed") {
+        void sharedAudioCtx.close().catch(() => {});
+        sharedAudioCtx = null;
+      }
     };
   }, []);
 
@@ -139,9 +152,15 @@ export default function Tape() {
 
   // Ingest new trades when poll data arrives (strictly deduplicated by matchId)
   useEffect(() => {
-    if (!data?.trades) return;
+    if (!data?.trades || (data.symbol && data.symbol !== symbol)) return;
     const isInitialSeed = seededSymbolRef.current !== symbol;
-    const { threshold: curThreshold, sound: curSound, notify: curNotify } = prefsRef.current;
+    const {
+      threshold: curThreshold,
+      sound: curSound,
+      notify: curNotify,
+      base: curBase,
+      qtyDecimals: curQtyDecimals,
+    } = prefsRef.current;
 
     const fresh: TapeRow[] = [];
     for (const t of [...data.trades].reverse()) {
@@ -166,8 +185,8 @@ export default function Tape() {
         showToastMsg(
           `Whale print on ${symbol}: ${biggest.sideLabel.toUpperCase()} ${fmtNum(
             biggest.qtyNum,
-            qtyDecimals,
-          )} ${base} @ ${fmtNum(biggest.px)} (≈ ${fmtCompact(biggest.notional, "$")})`,
+            curQtyDecimals,
+          )} ${curBase} @ ${fmtNum(biggest.px)} (≈ ${fmtCompact(biggest.notional, "$")})`,
         );
         if (curSound) playAlertTone();
         if (
@@ -178,7 +197,7 @@ export default function Tape() {
         ) {
           try {
             new Notification(`Whale on ${symbol}`, {
-              body: `${biggest.sideLabel.toUpperCase()} ${fmtNum(biggest.qtyNum)} ${base} ≈ ${fmtCompact(
+              body: `${biggest.sideLabel.toUpperCase()} ${fmtNum(biggest.qtyNum)} ${curBase} ≈ ${fmtCompact(
                 biggest.notional,
                 "$",
               )} @ ${fmtNum(biggest.px)}`,
@@ -189,7 +208,7 @@ export default function Tape() {
         }
       }
     }
-  }, [data, symbol, base, qtyDecimals, showToastMsg]);
+  }, [data, symbol, showToastMsg]);
 
   const stats = useMemo(() => {
     let buyCount = 0;
@@ -258,9 +277,9 @@ export default function Tape() {
   return (
     <div className="page-stack">
       <PageHeader
-        title={`Trade Tape & Whale Monitor · ${symbol}`}
+        title={`Trade Tape & Large Prints · ${symbol}`}
         badge={<Pill kind="accent">{rows.length} prints buffered</Pill>}
-        subtitle="Real-time time & sales feed with matchId deduplication, buy/sell aggressor flow breakdown, session VWAP, and configurable whale print alerts."
+        subtitle="Every trade that just matched on the selected pair, newest on top. Alerts are local. They are not orders."
         actions={
           <div className="row-flex">
             <SymbolSelect value={symbol} onChange={setSymbol} />
@@ -321,15 +340,25 @@ export default function Tape() {
           }
         />
         <MetricCell
-          label="Session VWAP"
+          label={
+            <TermTip
+              label="Session VWAP"
+              tip="Volume-weighted average price of trades this browser session has seen, not the exchange daily VWAP."
+            />
+          }
           value={isFinite(stats.vwap) ? fmtNum(stats.vwap) : "—"}
           sub={`Across ${rows.length} buffered prints`}
         />
         <MetricCell
-          label="Largest Print Seen"
+          label={
+            <TermTip
+              label="Largest Print Seen"
+              tip="Single matched trade notional (price × qty) above your chosen threshold."
+            />
+          }
           trend="warn"
           value={stats.biggest ? fmtCompact(stats.biggest, "$") : "—"}
-          sub={`Whale threshold: ≥ ${fmtCompact(threshold, "$")}`}
+          sub={`Large print threshold: ≥ ${fmtCompact(threshold, "$")}`}
         />
       </MetricStrip>
 
@@ -337,8 +366,8 @@ export default function Tape() {
 
       {/* Alert Controls Bar */}
       <Card
-        title="Whale Alert & Tape Controls"
-        subtitle="Alerts trigger only once per unique matchId on newly arriving trades."
+        title="Large Print Alert & Tape Controls"
+        subtitle="Alerts are local. They are not orders. Triggered once per unique matchId on newly arriving trades."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <button type="button" className="btn sm ghost" onClick={triggerTestAlert}>
@@ -431,8 +460,9 @@ export default function Tape() {
               type="button"
               className={`seg-btn ${sideFilter === "whales" ? "active" : ""}`}
               onClick={() => setSideFilter("whales")}
+              title="Single trade notional (price × qty) above your chosen threshold"
             >
-              Whales ≥ {fmtCompact(threshold, "$")}
+              Large prints (≥ {fmtCompact(threshold, "$")})
             </button>
           </div>
         </div>

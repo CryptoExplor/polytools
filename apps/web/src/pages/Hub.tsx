@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { NETWORKS, fmtTimeUTC } from "@poly/core";
 import { useNow } from "../lib/hooks";
 import { useApp } from "../lib/store";
@@ -17,7 +18,7 @@ import {
   PageHeader,
   Pill,
 } from "../components/ui";
-import { IconCheck, IconClock, IconExternal, IconTrash } from "../components/icons";
+import { IconCheck, IconClock, IconExternal, IconKey, IconTrash } from "../components/icons";
 
 const APP = NETWORKS.testnet.appUrl;
 const DOCS = NETWORKS.testnet.docsUrl;
@@ -40,6 +41,24 @@ const LINKS = [
     tag: "Faucets",
     url: `${DOCS}/user-docs/reference/testnet-faucets`,
     desc: "Request external testnet coins (tBTC, tETH, tSOL, tBCH…) for cross-chain Zipper deposit testing.",
+  },
+  {
+    label: "TypeScript SDK (@polyester/sdk)",
+    tag: "TS SDK",
+    url: `${DOCS}/sdk/typescript/get-started`,
+    desc: "Official typed TypeScript client for Node.js, Bun, Edge, and Browser (market data, streams, wallet & Ed25519 auth).",
+  },
+  {
+    label: "Python SDK (polyester-sdk)",
+    tag: "Python SDK",
+    url: `${DOCS}/sdk/python/get-started`,
+    desc: "Official async (AsyncPolyester) and sync (Polyester) API-key client for trading bots and ConnectRPC streams.",
+  },
+  {
+    label: "Rust SDK (polyester-sdk)",
+    tag: "Rust SDK",
+    url: `${DOCS}/sdk/rust/get-started`,
+    desc: "Official Tokio async Rust client (use polyester::Client) for low-latency bots and typed Protobuf streams.",
   },
   {
     label: "User Documentation & Guides",
@@ -127,15 +146,25 @@ const CHECKLIST: CheckItem[] = [
 
 const STORE_KEY = "poly-tools:hub-checklist";
 
-/** Compute timestamp (ms) of the next 00:00:00 UTC midnight. */
-function nextReset(): number {
-  const d = new Date();
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 0, 0);
+/** Compute timestamp (ms) of the next 00:00:00 UTC midnight relative to `nowMs`. */
+function nextReset(nowMs = Date.now()): number {
+  const d = new Date(nowMs);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 0, 0, 0);
 }
 
 export default function Hub() {
   const now = useNow(1000);
-  const { apiEnv, pairs, assets } = useApp();
+  const {
+    apiEnv,
+    dataSource,
+    envInfo,
+    marketsError,
+    marketsUpdatedAt,
+    connectionStatus,
+    refreshMarkets,
+    pairs,
+    assets,
+  } = useApp();
 
   const [done, setDone] = useState<Set<string>>(() => {
     try {
@@ -173,9 +202,15 @@ export default function Hub() {
         badge={<Pill kind="warn">ENV: {apiEnv.toUpperCase()}</Pill>}
         subtitle="Track the daily 00:00 UTC paper-asset reset window, work through the local onboarding checklist, and access verified Polyester testnet faucets and documentation."
         actions={
-          <span className="pill mono" title="Current UTC clock">
-            <IconClock size={12} /> {fmtTimeUTC(now)} UTC
-          </span>
+          <div className="row-flex">
+            <Link to="/sdk" className="btn sm primary">
+              <IconKey size={13} />
+              <span>Open SDK Quickstart (TS · Python · Rust)</span>
+            </Link>
+            <span className="pill mono" title="Current UTC clock">
+              <IconClock size={12} /> {fmtTimeUTC(now)} UTC
+            </span>
+          </div>
         }
       />
 
@@ -220,7 +255,7 @@ export default function Hub() {
           actions={<Pill kind="accent">UTC Schedule</Pill>}
         >
           <Countdown
-            to={nextReset()}
+            to={nextReset(now)}
             label="Time remaining until the next 00:00 UTC daily reset window:"
           />
           <div className="row-flex mt-3" style={{ justifyContent: "space-between" }}>
@@ -293,7 +328,7 @@ export default function Hub() {
       {/* Interactive Checklist */}
       <Card
         title="Testnet Onboarding Checklist"
-        subtitle="Click any step to mark it complete in your browser."
+        subtitle="Stored only in this browser. PolyTools cannot see whether you actually claimed."
       >
         <div>
           {CHECKLIST.map((c) => {
@@ -330,6 +365,82 @@ export default function Hub() {
               </label>
             );
           })}
+        </div>
+      </Card>
+
+      {/* Connection & Environment Diagnostics (FEAT-11) */}
+      <Card
+        title="Backend & MCP Connection Diagnostics"
+        subtitle="Live telemetry from /api/env and /api/markets showing MCP configuration, isolate TTL cache state, and data source."
+        actions={
+          <button type="button" className="btn sm ghost" onClick={refreshMarkets}>
+            Refresh Diagnostics
+          </button>
+        }
+      >
+        <div className="grid cols-2">
+          <div>
+            <div className="kv">
+              <span className="k">Connection Status</span>
+              <span className="v">
+                <Pill
+                  kind={
+                    connectionStatus === "connected"
+                      ? "up"
+                      : connectionStatus === "connecting"
+                        ? "info"
+                        : "down"
+                  }
+                >
+                  {connectionStatus.toUpperCase()}
+                </Pill>
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">Serving Environment (apiEnv)</span>
+              <span className="v mono">{apiEnv}</span>
+            </div>
+            <div className="kv">
+              <span className="k">Data Source</span>
+              <span className="v mono">
+                {dataSource === "wire-samples"
+                  ? "wire-samples (sandbox offline fallback)"
+                  : "live MCP endpoint"}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">Last Metadata Sync</span>
+              <span className="v mono">
+                {marketsUpdatedAt
+                  ? `${fmtTimeUTC(marketsUpdatedAt)} UTC`
+                  : marketsError
+                    ? `Error: ${marketsError}`
+                    : "Pending"}
+              </span>
+            </div>
+          </div>
+          <div>
+            <div className="kv">
+              <span className="k">Testnet MCP Configured</span>
+              <span className="v mono">
+                {String(envInfo?.networks?.testnet?.mcpConfigured ?? true)}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">Mainnet MCP Configured</span>
+              <span className="v mono">
+                {String(envInfo?.networks?.mainnet?.mcpConfigured ?? false)}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">Backend Isolate Cache Keys</span>
+              <span className="v mono">{envInfo?.cache?.keys ?? 0} / 200 max</span>
+            </div>
+            <div className="kv">
+              <span className="k">In-Flight Coalesced Requests</span>
+              <span className="v mono">{envInfo?.cache?.inFlight ?? 0}</span>
+            </div>
+          </div>
         </div>
       </Card>
 

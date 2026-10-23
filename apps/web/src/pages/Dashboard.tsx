@@ -43,7 +43,7 @@ type SortKey = "symbol" | "last" | "index" | "change" | "vol" | "spread";
 type TrendFilter = "all" | "up" | "down";
 
 export default function Dashboard() {
-  const { setSymbol, pairBySymbol } = useApp();
+  const { setSymbol, pairBySymbol, watchlist, toggleWatchlist } = useApp();
   const nav = useNavigate();
   const now = useNow(1000);
   const {
@@ -62,6 +62,7 @@ export default function Dashboard() {
   const [query, setQuery] = useState("");
   const [quoteFilter, setQuoteFilter] = useState<string>("ALL");
   const [trendFilter, setTrendFilter] = useState<TrendFilter>("all");
+  const [watchOnly, setWatchOnly] = useState<boolean>(false);
 
   // Maintain ring buffers of observed last prices per symbol inside useEffect (pure render)
   const buffersRef = useRef<Map<string, number[]>>(new Map());
@@ -127,6 +128,10 @@ export default function Dashboard() {
       list = list.filter((m) => m.change24hBps < 0);
     }
 
+    if (watchOnly) {
+      list = list.filter((m) => watchlist.includes(m.symbol));
+    }
+
     const numVal = (m: MarketOverviewEntry): number => {
       switch (sortKey) {
         case "last":
@@ -152,7 +157,7 @@ export default function Dashboard() {
       }
       return (numVal(a) - numVal(b)) * sortDir;
     });
-  }, [data, query, quoteFilter, trendFilter, sortKey, sortDir]);
+  }, [data, query, quoteFilter, trendFilter, watchOnly, watchlist, sortKey, sortDir]);
 
   const summary = useMemo(() => {
     const ms = data?.markets ?? [];
@@ -324,6 +329,7 @@ export default function Dashboard() {
                 <IconSearch size={14} />
               </span>
               <input
+                id="market-search"
                 type="search"
                 className="input with-icon"
                 placeholder="Search symbol (e.g. BTC)…"
@@ -332,6 +338,16 @@ export default function Dashboard() {
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
+
+            <button
+              type="button"
+              className={`btn sm ${watchOnly ? "primary" : "ghost"}`}
+              onClick={() => setWatchOnly((w) => !w)}
+              aria-pressed={watchOnly}
+              title="Show only pairs starred in your local browser watchlist"
+            >
+              ★ Watchlist ({watchlist.length})
+            </button>
 
             <div className="seg-group" role="group" aria-label="Filter by quote asset">
               {quoteChoices.map((q) => (
@@ -386,12 +402,18 @@ export default function Dashboard() {
             <thead>
               <tr>
                 {renderSortTh("symbol", "Market", true)}
-                {renderSortTh("last", "Last Price")}
+                {renderSortTh(
+                  "last",
+                  <TermTip
+                    label="Last Price"
+                    tip="Last public trade on Polyester, decoded from the testnet feed (scaled integer ÷ 10³)."
+                  />,
+                )}
                 {renderSortTh(
                   "index",
                   <TermTip
                     label="Index Price"
-                    tip="Exchange reference index price (scaled integer ÷ 10³)"
+                    tip="Exchange reference index price (scaled integer ÷ 10³)."
                   />,
                 )}
                 {renderSortTh("change", "24h Change")}
@@ -486,6 +508,26 @@ export default function Dashboard() {
                   >
                     <td>
                       <span className="sym-cell">
+                        <button
+                          type="button"
+                          className={`star-btn ${watchlist.includes(m.symbol) ? "active" : ""}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleWatchlist(m.symbol);
+                          }}
+                          aria-label={
+                            watchlist.includes(m.symbol)
+                              ? `Remove ${m.symbol} from watchlist`
+                              : `Add ${m.symbol} to watchlist`
+                          }
+                          title={
+                            watchlist.includes(m.symbol)
+                              ? "Starred in local watchlist"
+                              : "Add to local watchlist"
+                          }
+                        >
+                          {watchlist.includes(m.symbol) ? "★" : "☆"}
+                        </button>
                         <SymBadge asset={base} />
                         <span>
                           {base}

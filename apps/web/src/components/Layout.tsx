@@ -1,10 +1,12 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { NETWORKS, fmtAgo } from "@poly/core";
 import { useApp } from "../lib/store";
 import { useNow } from "../lib/hooks";
 import { SymbolSelect } from "./ui";
+import { GlossaryDrawer } from "./Glossary";
 import {
+  IconActivity,
   IconBook,
   IconCalc,
   IconChart,
@@ -14,12 +16,15 @@ import {
   IconExternal,
   IconFlow,
   IconHub,
+  IconInfo,
+  IconKey,
   IconMenu,
   IconMoon,
   IconRefresh,
   IconSun,
   IconTape,
   IconVault,
+  IconX,
   IconZipper,
 } from "./icons";
 
@@ -30,50 +35,62 @@ interface NavItem {
   icon: ReactNode;
 }
 
+const INTRO_STORAGE_KEY = "poly-tools:intro:v1";
+
 const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
   {
-    group: "Market Intelligence",
+    group: "Watch",
     items: [
-      { to: "/", label: "Market Dashboard", shortTag: "MKT", icon: <IconDashboard size={16} /> },
-      { to: "/book", label: "Order Book & Depth", shortTag: "L2", icon: <IconBook size={16} /> },
-      { to: "/tape", label: "Trades & Whales", shortTag: "TAPE", icon: <IconTape size={16} /> },
-      { to: "/charts", label: "Candlestick Charts", shortTag: "OHLC", icon: <IconChart size={16} /> },
-      { to: "/compare", label: "Venue Compare", shortTag: "ARB", icon: <IconCompare size={16} /> },
+      { to: "/", label: "Markets", shortTag: "MKT", icon: <IconDashboard size={16} /> },
+      { to: "/book", label: "Order book", shortTag: "L2", icon: <IconBook size={16} /> },
+      { to: "/tape", label: "Recent trades", shortTag: "TAPE", icon: <IconTape size={16} /> },
+      { to: "/charts", label: "Price chart", shortTag: "OHLC", icon: <IconChart size={16} /> },
+      { to: "/heatmap", label: "Liquidity heatmap", shortTag: "HEAT", icon: <IconActivity size={16} /> },
+      { to: "/compare", label: "vs CoinGecko", shortTag: "ARB", icon: <IconCompare size={16} /> },
     ],
   },
   {
-    group: "Execution & Routing",
+    group: "Move (info only)",
     items: [
-      { to: "/zipper", label: "Zipper Routes", shortTag: "BRIDGE", icon: <IconZipper size={16} /> },
-      { to: "/calc", label: "Risk & PnL Calcs", shortTag: "CALC", icon: <IconCalc size={16} /> },
-      { to: "/flow", label: "Tx Lifecycle Explorer", shortTag: "FLOW", icon: <IconFlow size={16} /> },
+      { to: "/zipper", label: "Deposit networks", shortTag: "BRIDGE", icon: <IconZipper size={16} /> },
+      { to: "/flow", label: "Track a deposit", shortTag: "FLOW", icon: <IconFlow size={16} /> },
     ],
   },
   {
-    group: "Security & Network",
+    group: "Learn",
     items: [
-      { to: "/portfolio", label: "Ed25519 Key Vault", shortTag: "KEYS", icon: <IconVault size={16} /> },
-      { to: "/hub", label: "Testnet Hub", shortTag: "UTC", icon: <IconHub size={16} /> },
+      { to: "/calc", label: "Calculators", shortTag: "CALC", icon: <IconCalc size={16} /> },
+      { to: "/hub", label: "Testnet setup", shortTag: "UTC", icon: <IconHub size={16} /> },
+      { to: "/sdk", label: "SDK & Bot Guide", shortTag: "SDK", icon: <IconKey size={16} /> },
+    ],
+  },
+  {
+    group: "Keys",
+    items: [
+      { to: "/portfolio", label: "Key vault", shortTag: "KEYS", icon: <IconVault size={16} /> },
     ],
   },
 ];
 
 const ROUTE_META: Record<string, { title: string; routeTag: string; showSymbolSelector: boolean }> = {
-  "/": { title: "Market Overview Terminal", routeTag: "/#/", showSymbolSelector: true },
+  "/": { title: "Markets Overview", routeTag: "/#/", showSymbolSelector: true },
   "/book": { title: "L2 Order Book & Depth", routeTag: "/#/book", showSymbolSelector: true },
-  "/tape": { title: "Live Trade Tape & Whale Alerts", routeTag: "/#/tape", showSymbolSelector: true },
-  "/charts": { title: "Multi-Timeframe Charts", routeTag: "/#/charts", showSymbolSelector: true },
-  "/compare": { title: "Cross-Venue Index Comparison", routeTag: "/#/compare", showSymbolSelector: false },
-  "/zipper": { title: "Zipper Cross-Chain Routes", routeTag: "/#/zipper", showSymbolSelector: false },
-  "/calc": { title: "Position, Liquidation & PnL Calculators", routeTag: "/#/calc", showSymbolSelector: true },
-  "/flow": { title: "Transaction & Flow Explorer", routeTag: "/#/flow", showSymbolSelector: false },
-  "/portfolio": { title: "Client-Side Ed25519 Key Vault", routeTag: "/#/portfolio", showSymbolSelector: false },
-  "/hub": { title: "Testnet Onboarding & Claim Hub", routeTag: "/#/hub", showSymbolSelector: false },
+  "/tape": { title: "Recent Trades & Large Prints", routeTag: "/#/tape", showSymbolSelector: true },
+  "/charts": { title: "Candlestick Price Chart", routeTag: "/#/charts", showSymbolSelector: true },
+  "/heatmap": { title: "Order Book Liquidity Heatmap", routeTag: "/#/heatmap", showSymbolSelector: true },
+  "/compare": { title: "Polyester vs CoinGecko Reference", routeTag: "/#/compare", showSymbolSelector: false },
+  "/zipper": { title: "Deposit & Withdrawal Networks (Zipper)", routeTag: "/#/zipper", showSymbolSelector: false },
+  "/calc": { title: "Position, Break-Even & Risk Calculators", routeTag: "/#/calc", showSymbolSelector: true },
+  "/flow": { title: "Track a Deposit or Withdrawal", routeTag: "/#/flow", showSymbolSelector: false },
+  "/portfolio": { title: "Local Ed25519 API Key Vault", routeTag: "/#/portfolio", showSymbolSelector: false },
+  "/sdk": { title: "Beginner SDK & Bot Quickstart", routeTag: "/#/sdk", showSymbolSelector: true },
+  "/hub": { title: "Testnet Setup & Daily Claim Hub", routeTag: "/#/hub", showSymbolSelector: false },
 };
 
 export function Layout() {
   const {
     apiEnv,
+    dataSource,
     envInfo,
     symbol,
     setSymbol,
@@ -87,18 +104,47 @@ export function Layout() {
     assets,
   } = useApp();
   const [navOpen, setNavOpen] = useState(false);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
+  const [introDismissed, setIntroDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(INTRO_STORAGE_KEY) === "dismissed";
+    } catch {
+      return false;
+    }
+  });
+
   const loc = useLocation();
+  const navigate = useNavigate();
   const now = useNow(2000);
 
   const meta = ROUTE_META[loc.pathname] ?? {
-    title: "PolyTools Terminal",
+    title: "PolyTools",
     routeTag: `/#${loc.pathname}`,
-    showSymbolSelector: true,
+    showSymbolSelector: false,
   };
 
   const mainnetReady = Boolean(
     NETWORKS.mainnet.mcpUrl || envInfo?.networks.mainnet.mcpConfigured,
   );
+
+  const dismissIntro = useCallback(() => {
+    setIntroDismissed(true);
+    try {
+      localStorage.setItem(INTRO_STORAGE_KEY, "dismissed");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const handleBrowseMarkets = () => {
+    if (loc.pathname !== "/") {
+      navigate("/");
+    }
+    window.setTimeout(() => {
+      const el = document.getElementById("market-search") as HTMLInputElement | null;
+      if (el) el.focus();
+    }, 60);
+  };
 
   // Dynamic document title for browser tabs & history
   useEffect(() => {
@@ -112,13 +158,15 @@ export function Layout() {
   }, [loc.pathname]);
 
   useEffect(() => {
-    if (!navOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setNavOpen(false);
+      if (e.key === "Escape") {
+        if (navOpen) setNavOpen(false);
+        else if (!introDismissed) dismissIntro();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navOpen]);
+  }, [navOpen, introDismissed, dismissIntro]);
 
   return (
     <div className="shell">
@@ -138,7 +186,7 @@ export function Layout() {
             <span className="logo">PT</span>
             <span className="brand-meta">
               <span>PolyTools</span>
-              <span className="brand-sub">Exchange Terminal</span>
+              <span className="brand-sub">Testnet · Read-only</span>
             </span>
           </NavLink>
           <button
@@ -184,7 +232,7 @@ export function Layout() {
             </span>
           </div>
           <div>
-            Non-custodial, read-only toolkit for{" "}
+            Read-only testnet analytics for{" "}
             <a href={NETWORKS.testnet.appUrl} target="_blank" rel="noreferrer">
               Polyester <IconExternal size={11} />
             </a>
@@ -213,25 +261,29 @@ export function Layout() {
           <div className="spacer" />
 
           <div className="topbar-controls">
-            {/* Global active market switcher */}
-            <SymbolSelect
-              value={symbol}
-              onChange={setSymbol}
-              ariaLabel="Global active market symbol"
-            />
+            {/* Active market switcher — only shown on market-scoped pages (FE-NAV-02 / DEF-05) */}
+            {meta.showSymbolSelector && (
+              <SymbolSelect
+                value={symbol}
+                onChange={setSymbol}
+                ariaLabel="Global active market symbol"
+              />
+            )}
 
             {/* Real Backend Connection Indicator */}
             {connectionStatus === "connected" ? (
               <span
-                className="pill up hide-xs"
+                className={`pill ${dataSource === "wire-samples" ? "info" : "up"} hide-xs`}
                 title={
-                  marketsUpdatedAt
-                    ? `Backend connected · Metadata synced ${fmtAgo(marketsUpdatedAt, now)}`
-                    : "Backend connected"
+                  dataSource === "wire-samples"
+                    ? "Serving captured testnet wire samples (sandbox offline fallback)"
+                    : marketsUpdatedAt
+                      ? `Backend connected · Metadata synced ${fmtAgo(marketsUpdatedAt, now)}`
+                      : "Backend connected"
                 }
               >
                 <span className="dot live" />
-                API Live
+                {dataSource === "wire-samples" ? "Cached sample" : "API Live"}
               </span>
             ) : connectionStatus === "connecting" ? (
               <span className="pill hide-xs" title="Connecting to Polyester MCP backend facade">
@@ -271,6 +323,18 @@ export function Layout() {
               mainnet: {mainnetReady ? "ready" : "pending"}
             </span>
 
+            {/* Glossary / Definitions Drawer Trigger (UX-02 / FEAT-09) */}
+            <button
+              type="button"
+              className="btn sm ghost"
+              onClick={() => setGlossaryOpen(true)}
+              title="Open plain-English definitions glossary"
+              aria-label="Open plain-English definitions glossary"
+            >
+              <IconInfo size={13} />
+              <span className="hide-sm">Definitions</span>
+            </button>
+
             {/* Theme Selector (Dark / Light Terminal) */}
             <button
               type="button"
@@ -285,16 +349,55 @@ export function Layout() {
           </div>
         </header>
 
+        {/* First-Visit Dismissible Intent Bar (UX-01 / A11Y-01) */}
+        {!introDismissed && (
+          <section className="intent-bar" aria-label="About PolyTools">
+            <div className="intent-bar-copy">
+              <strong>PolyTools is a read-only map of Polyester testnet.</strong>{" "}
+              It cannot place orders, move funds, or see your balances. Open a market to
+              watch prices, or follow the Testnet Hub to trade in the official app.
+            </div>
+            <div className="intent-bar-actions">
+              <button
+                type="button"
+                className="btn sm primary"
+                onClick={handleBrowseMarkets}
+              >
+                Browse markets
+              </button>
+              <NavLink to="/hub" className="btn sm">
+                Open Testnet Hub
+              </NavLink>
+              <button
+                type="button"
+                className="btn sm ghost"
+                onClick={dismissIntro}
+                aria-label="Dismiss introduction banner"
+              >
+                <IconX size={13} />
+                <span>Dismiss</span>
+              </button>
+            </div>
+          </section>
+        )}
+
         <main id="main-workspace" className="content" tabIndex={-1}>
           <Outlet />
         </main>
 
         <footer className="foot">
           <span>
-            <strong>PolyTools v0.1</strong> · Read-only community analytics for Polyester Exchange ·
+            <strong>PolyTools v0.1</strong> · Read-only testnet analytics. Trade in the official app ·
             Prices decoded via <code className="mono">raw ÷ 10³</code> (`PRICE_SCALE = 3`)
           </span>
           <span className="row-flex" style={{ gap: 14 }}>
+            <button
+              type="button"
+              className="btn sm ghost"
+              onClick={() => setGlossaryOpen(true)}
+            >
+              Definitions
+            </button>
             <a href={NETWORKS.testnet.appUrl} target="_blank" rel="noreferrer">
               Exchange App ↗
             </a>
@@ -304,6 +407,8 @@ export function Layout() {
           </span>
         </footer>
       </div>
+
+      <GlossaryDrawer open={glossaryOpen} onClose={() => setGlossaryOpen(false)} />
     </div>
   );
 }

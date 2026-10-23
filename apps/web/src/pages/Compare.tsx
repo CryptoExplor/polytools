@@ -233,7 +233,7 @@ export default function Compare() {
             <Pill kind={ov.apiEnv === "testnet" ? "warn" : "up"}>{ov.apiEnv}</Pill>
           ) : null
         }
-        subtitle="Compares Polyester exchange prices against CoinGecko USD spot reference feeds to measure absolute dollar spread and basis-point premium/discount."
+        subtitle="Compares Polyester testnet prices with public CoinGecko USD reference prices. CoinGecko USD vs Polyester USDT/USDC testnet prices — differences are not executable trades."
         actions={
           <div className="row-flex">
             <DataFreshness
@@ -251,6 +251,14 @@ export default function Compare() {
           </div>
         }
       />
+
+      {/* Non-executable informational banner (UX-T5-01) */}
+      <div className="notice warn" role="note">
+        <div>
+          <strong>Reference comparison only:</strong> CoinGecko USD vs Polyester USDT/USDC
+          testnet prices. Differences are not executable trades or arbitrage opportunities.
+        </div>
+      </div>
 
       {/* Explicit Dual-Source Telemetry Strip */}
       <MetricStrip>

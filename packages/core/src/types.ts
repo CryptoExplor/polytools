@@ -62,6 +62,9 @@ export interface MarketOverviewEntry {
 export interface MarketOverviewResult {
   apiEnv: ApiEnv;
   markets: MarketOverviewEntry[];
+  nextPageToken?: string | null;
+  error?: string;
+  knownSymbols?: string[];
 }
 
 export interface BookLevel {
@@ -101,6 +104,7 @@ export interface CandlesResult {
   timeframe: string;
   candleCount: number;
   candles: Candle[];
+  note?: string;
 }
 
 export interface RecentTrade {
@@ -138,6 +142,7 @@ export interface HeatmapResult {
   quantityMode: string;
   lastPersistedTsSec: number;
   buckets: HeatmapBucket[];
+  note?: string;
 }
 
 export interface ZipperChain {
@@ -150,11 +155,37 @@ export interface ZipperChain {
   confirmationTimeSeconds: number;
 }
 
+export interface DepositWithdrawAssetVariant {
+  chain: string;
+  chainCode: string;
+  chainId: number;
+  isNativeAsset: boolean;
+  networkFee: string;
+  depositMinAmount: string;
+  withdrawMinAmount: string;
+}
+
+export interface DepositWithdrawAssetConfig {
+  asset: string;
+  name: string;
+  quantityDisplayDecimals: number;
+  variants?: DepositWithdrawAssetVariant[];
+}
+
+export interface DepositWithdrawContract {
+  name: string;
+  address: string;
+  type?: string;
+}
+
 export interface DepositWithdrawConfig {
   apiEnv: ApiEnv;
   tsMs: number;
   polyesterChainId: number;
   chains: ZipperChain[];
+  assets?: DepositWithdrawAssetConfig[];
+  contracts?: DepositWithdrawContract[];
+  note?: string;
   [k: string]: unknown;
 }
 
@@ -186,6 +217,13 @@ export interface CompareRoutesResult extends AssetRoutesResult {
 /** Lifecycle/explain payloads evolve quickly — keep them open-shaped. */
 export interface LifecycleResult {
   apiEnv: ApiEnv;
+  found?: boolean;
+  summary?: string;
+  explanation?: string;
+  primaryFlowId?: string | null;
+  matchCount?: number;
+  matches?: Array<Record<string, unknown>>;
+  flow?: Record<string, unknown> | null;
   note?: string;
   [k: string]: unknown;
 }

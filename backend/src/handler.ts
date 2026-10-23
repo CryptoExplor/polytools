@@ -27,7 +27,15 @@
  *   /api/flow/explain?txHash=...
  */
 
-import { NETWORKS, resolveMcpUrl } from "../../packages/core/src/index";
+import {
+  BOOK_DEPTHS,
+  CANDLE_TIMEFRAMES,
+  McpError,
+  NETWORKS,
+  resolveMcpUrl,
+  type BookDepth,
+  type CandleTimeframe,
+} from "../../packages/core/src/index";
 import { cached, cacheStats } from "./cache";
 import { dataFor } from "./mcpServer";
 
@@ -43,6 +51,13 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Max-Age": "86400",
 };
 
+const VALID_DEPTHS = new Set<number>(BOOK_DEPTHS);
+const VALID_TIMEFRAMES = new Set<string>(CANDLE_TIMEFRAMES);
+const VALID_HEATMAP_INTERVALS = new Set<string>(["1s", "1m", "5m", "1h"]);
+const VALID_SIDES = new Set<string>(["buy", "sell"]);
+const VALID_COMPARE_BY = new Set<string>(["networkFee", "depositMinAmount"]);
+const VALID_LOOKUP_KIND = new Set<string>(["source", "any"]);
+
 function json(body: unknown, init: ResponseInit = {}, extra?: Record<string, string>) {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json; charset=utf-8");
@@ -51,18 +66,32 @@ function json(body: unknown, init: ResponseInit = {}, extra?: Record<string, str
   return new Response(JSON.stringify(body, null, 0), { ...init, headers });
 }
 
-function error(status: number, message: string) {
-  return json({ error: message }, { status });
+function error(status: number, code: string, detail?: string) {
+  return json(detail ? { error: code, detail } : { error: code }, { status });
 }
 
 const num = (v: string | null, dflt: number, min: number, max: number): number => {
-  const n = v === null ? dflt : Number(v);
+  const n = v === null || v.trim() === "" ? dflt : Number(v);
   if (!isFinite(n)) return dflt;
   return Math.min(max, Math.max(min, Math.trunc(n)));
 };
 
-const str = (v: string | null): string | undefined =>
-  v !== null && v !== "" ? v : undefined;
+const optNum = (
+  v: string | null,
+  min: number,
+  max: number,
+): number | undefined => {
+  if (v === null || v.trim() === "") return undefined;
+  const n = Number(v);
+  if (!isFinite(n)) return undefined;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+};
+
+const str = (v: string | null): string | undefined => {
+  if (v === null) return undefined;
+  const trimmed = v.trim();
+  return trimmed !== "" ? trimmed : undefined;
+};
 
 export async function api(request: Request, opts: ApiOptions = {}): Promise<Response> {
   const url = new URL(request.url);
@@ -111,16 +140,33 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
         return json(await cached("markets", 60_000, () => data.spotMarkets()));
 
       case "/api/overview": {
-        const symbols = str(url.searchParams.get("symbols"))?.split(",");
-        const key = `overview:${symbols?.join(",") ?? "*"}`;
-        return json(await cached(key, 2_000, () => data.marketOverview(symbols)));
+        const symbols = str(url.searchParams.get("symbols"))
+          ?.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const limit = num(url.searchParams.get("limit"), 100, 1, 200);
+        const key = `overview:${symbols?.join(",") ?? "*"}:${limit}`;
+        return json(
+          await cached(key, 2_000, () => data.marketOverview(symbols, limit)),
+        );
       }
 
       case "/api/orderbook": {
-        const symbol = url.searchParams.get("symbol");
+        const symbol = str(url.searchParams.get("symbol"));
         if (!symbol) return error(400, "symbol is required");
-        const depth = num(url.searchParams.get("depth"), 20, 1, 100) as
-          | 1 | 5 | 10 | 20 | 50 | 100;
+        const rawDepth = str(url.searchParams.get("depth"));
+        let depth: BookDepth = 20;
+        if (rawDepth !== undefined) {
+          const parsed = Number(rawDepth);
+          if (!Number.isInteger(parsed) || !VALID_DEPTHS.has(parsed)) {
+            return error(
+              400,
+              "invalid_argument",
+              "depth must be one of 1, 5, 10, 20, 50, 100",
+            );
+          }
+          depth = parsed as BookDepth;
+        }
         return json(
           await cached(`book:${symbol}:${depth}`, 1_500, () =>
             data.orderbook(symbol, depth),
@@ -129,22 +175,53 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
       }
 
       case "/api/candles": {
-        const symbol = url.searchParams.get("symbol");
+        const symbol = str(url.searchParams.get("symbol"));
         if (!symbol) return error(400, "symbol is required");
-        const tf = str(url.searchParams.get("tf")) ?? "1h";
-        const limit = num(url.searchParams.get("limit"), 120, 1, 500);
+        const tf =
+          str(url.searchParams.get("tf")) ??
+          str(url.searchParams.get("timeframe")) ??
+          "1h";
+        if (!VALID_TIMEFRAMES.has(tf)) {
+          return error(
+            400,
+            "invalid_argument",
+            `tf must be one of ${CANDLE_TIMEFRAMES.join(", ")}`,
+          );
+        }
+        const limit = num(url.searchParams.get("limit"), 120, 1, 200);
+        const startTsSec = optNum(
+          url.searchParams.get("startTsSec"),
+          0,
+          4_102_444_800,
+        );
+        const endTsSec = optNum(
+          url.searchParams.get("endTsSec"),
+          0,
+          4_102_444_800,
+        );
+        const key = `candles:${symbol}:${tf}:${limit}:${startTsSec ?? "*"}:${endTsSec ?? "*"}`;
         return json(
-          await cached(`candles:${symbol}:${tf}:${limit}`, 3_000, () =>
-            data.candles(symbol, tf as never, limit),
+          await cached(key, 3_000, () =>
+            data.candles(
+              symbol,
+              tf as CandleTimeframe,
+              limit,
+              startTsSec,
+              endTsSec,
+            ),
           ),
         );
       }
 
       case "/api/trades": {
-        const symbol = url.searchParams.get("symbol");
+        const symbol = str(url.searchParams.get("symbol"));
         if (!symbol) return error(400, "symbol is required");
         const limit = num(url.searchParams.get("limit"), 25, 1, 100);
-        const side = str(url.searchParams.get("side")) as "buy" | "sell" | undefined;
+        const sideRaw = str(url.searchParams.get("side"));
+        if (sideRaw !== undefined && !VALID_SIDES.has(sideRaw)) {
+          return error(400, "invalid_argument", "side must be buy or sell");
+        }
+        const side = sideRaw as "buy" | "sell" | undefined;
         return json(
           await cached(`trades:${symbol}:${limit}:${side ?? "*"}`, 1_200, () =>
             data.recentTrades(symbol, limit, side),
@@ -153,14 +230,36 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
       }
 
       case "/api/heatmap": {
-        const symbol = url.searchParams.get("symbol");
+        const symbol = str(url.searchParams.get("symbol"));
         if (!symbol) return error(400, "symbol is required");
-        const interval = (str(url.searchParams.get("interval")) ?? "1m") as
-          | "1s" | "1m" | "5m" | "1h";
-        const depth = num(url.searchParams.get("depth"), 50, 1, 100);
+        const intervalRaw = str(url.searchParams.get("interval")) ?? "1m";
+        if (!VALID_HEATMAP_INTERVALS.has(intervalRaw)) {
+          return error(
+            400,
+            "invalid_argument",
+            "interval must be one of 1s, 1m, 5m, 1h",
+          );
+        }
+        const interval = intervalRaw as "1s" | "1m" | "5m" | "1h";
+        const rawDepth = str(url.searchParams.get("depth"));
+        let depth: BookDepth = 50;
+        if (rawDepth !== undefined) {
+          const parsed = Number(rawDepth);
+          if (!Number.isInteger(parsed) || !VALID_DEPTHS.has(parsed)) {
+            return error(
+              400,
+              "invalid_argument",
+              "depth must be one of 1, 5, 10, 20, 50, 100",
+            );
+          }
+          depth = parsed as BookDepth;
+        }
+        const windowSec = optNum(url.searchParams.get("windowSec"), 60, 86_400);
+        const limit = optNum(url.searchParams.get("limit"), 1, 500);
+        const key = `heat:${symbol}:${interval}:${depth}:${windowSec ?? "*"}:${limit ?? "*"}`;
         return json(
-          await cached(`heat:${symbol}:${interval}:${depth}`, 5_000, () =>
-            data.heatmap(symbol, interval, depth),
+          await cached(key, 5_000, () =>
+            data.heatmap(symbol, interval, depth, windowSec, limit),
           ),
         );
       }
@@ -172,7 +271,7 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
         );
 
       case "/api/zipper/routes": {
-        const asset = url.searchParams.get("asset");
+        const asset = str(url.searchParams.get("asset"));
         if (!asset) return error(400, "asset is required");
         const chainFilter = str(url.searchParams.get("chainFilter"));
         return json(
@@ -185,39 +284,72 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
       }
 
       case "/api/zipper/compare": {
-        const asset = url.searchParams.get("asset");
+        const asset = str(url.searchParams.get("asset"));
         if (!asset) return error(400, "asset is required");
-        const compareBy = (str(url.searchParams.get("compareBy")) ?? "networkFee") as
-          | "networkFee" | "depositMinAmount";
+        const compareByRaw = str(url.searchParams.get("compareBy")) ?? "networkFee";
+        if (!VALID_COMPARE_BY.has(compareByRaw)) {
+          return error(
+            400,
+            "invalid_argument",
+            "compareBy must be networkFee or depositMinAmount",
+          );
+        }
+        const compareBy = compareByRaw as "networkFee" | "depositMinAmount";
+        const chainFilter = str(url.searchParams.get("chainFilter"));
         return json(
-          await cached(`zipper:cmp:${asset}:${compareBy}`, 300_000, () =>
-            data.compareRoutes(asset, compareBy),
+          await cached(
+            `zipper:cmp:${asset}:${compareBy}:${chainFilter ?? "*"}`,
+            300_000,
+            () => data.compareRoutes(asset, compareBy, chainFilter),
           ),
         );
       }
 
       // ---- lifecycle -------------------------------------------------------------
       case "/api/flow": {
-        const flowId = url.searchParams.get("flowId");
+        const flowId = str(url.searchParams.get("flowId"));
         if (!flowId) return error(400, "flowId is required");
         return json(await data.lifecycleFlow(flowId));
       }
 
       case "/api/flow/by-tx": {
-        const txHash = url.searchParams.get("txHash");
+        const txHash = str(url.searchParams.get("txHash"));
         if (!txHash) return error(400, "txHash is required");
-        return json(await data.lifecycleByTx(txHash));
+        const lookupKindRaw = str(url.searchParams.get("lookupKind")) ?? "any";
+        if (!VALID_LOOKUP_KIND.has(lookupKindRaw)) {
+          return error(400, "invalid_argument", "lookupKind must be source or any");
+        }
+        const limit = optNum(url.searchParams.get("limit"), 1, 50);
+        return json(
+          await data.lifecycleByTx(
+            txHash,
+            lookupKindRaw as "source" | "any",
+            limit,
+          ),
+        );
       }
 
       case "/api/flow/explain": {
-        const txHash = url.searchParams.get("txHash");
+        const txHash = str(url.searchParams.get("txHash"));
         if (!txHash) return error(400, "txHash is required");
-        return json(await data.explainTransaction(txHash));
+        const lookupKindRaw = str(url.searchParams.get("lookupKind")) ?? "any";
+        if (!VALID_LOOKUP_KIND.has(lookupKindRaw)) {
+          return error(400, "invalid_argument", "lookupKind must be source or any");
+        }
+        return json(
+          await data.explainTransaction(
+            txHash,
+            lookupKindRaw as "source" | "any",
+          ),
+        );
       }
     }
   } catch (e) {
+    if (e instanceof McpError && /^(validation error|invalid)/i.test(e.message)) {
+      return error(400, "invalid_argument", e.message.slice(0, 240));
+    }
     const message = e instanceof Error ? e.message : "upstream error";
-    return error(502, message);
+    return error(502, "upstream", message.slice(0, 200));
   }
 
   return error(404, `Unknown route: ${path}`);

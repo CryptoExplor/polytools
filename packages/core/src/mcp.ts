@@ -27,6 +27,7 @@ export class McpError extends Error {
   constructor(
     message: string,
     public readonly rpcCode?: number,
+    public readonly httpStatus?: number,
   ) {
     super(message);
     this.name = "McpError";
@@ -98,15 +99,32 @@ export class McpClient {
     try {
       return JSON.parse(text);
     } catch {
-      throw new McpError(`Unparseable MCP response (${res.status})`);
+      const snippet = text.trim().slice(0, 120);
+      throw new McpError(
+        snippet
+          ? `Unparseable MCP response (${res.status}): ${snippet}`
+          : `Unparseable MCP response (${res.status})`,
+        undefined,
+        res.status,
+      );
     }
   }
 
-  private assertOk(msg: any): void {
+  private assertOk(msg: any, httpStatus?: number): void {
     if (msg?.error) {
       const err = msg.error as JsonRpcError;
-      throw new McpError(err.message ?? "MCP error", err.code);
+      throw new McpError(err.message ?? "MCP error", err.code, httpStatus);
     }
+  }
+
+  private isSessionError(err: unknown, httpStatus?: number): boolean {
+    if (httpStatus === 404) return true;
+    if (!(err instanceof McpError)) return false;
+    if (err.httpStatus === 404) return true;
+    if (err.rpcCode === -32000 && /session/i.test(err.message)) return true;
+    return /session not found|unknown session|expired session|invalid session/i.test(
+      err.message,
+    );
   }
 
   /** Initialize (or reuse) the session. Single-flight + auto-retry once. */
@@ -128,7 +146,7 @@ export class McpClient {
         true,
       );
       const msg = await this.parse(res);
-      this.assertOk(msg);
+      this.assertOk(msg, res.status);
       await this.post({
         jsonrpc: "2.0",
         method: "notifications/initialized",
@@ -142,7 +160,8 @@ export class McpClient {
   /**
    * Call an MCP tool. Returns `result.structuredContent` when present,
    * otherwise attempts to JSON-parse the first text content block.
-   * Transparently re-initializes once on session errors.
+   * Transparently re-initializes once ONLY on session-expiry errors, and
+   * surfaces tool-level `result.isError === true` as an `McpError`.
    */
   async callTool<T = unknown>(
     name: string,
@@ -150,25 +169,44 @@ export class McpClient {
     _retried = false,
   ): Promise<T> {
     await this.ensureSession();
+    const res = await this.post({
+      jsonrpc: "2.0",
+      id: Date.now(),
+      method: "tools/call",
+      params: { name, arguments: args },
+    });
     let msg: any;
     try {
-      const res = await this.post({
-        jsonrpc: "2.0",
-        id: Date.now(),
-        method: "tools/call",
-        params: { name, arguments: args },
-      });
+      if (res.status === 404) {
+        const text = (await res.text()).trim();
+        throw new McpError(text || "Session not found", -32000, 404);
+      }
       msg = await this.parse(res);
-      this.assertOk(msg);
+      this.assertOk(msg, res.status);
     } catch (e) {
-      // Session expired / unknown → rebuild once and retry.
-      if (!_retried && e instanceof McpError) {
+      // Rebuild session and retry once ONLY when the session expired / was not found.
+      if (!_retried && this.isSessionError(e, res.status)) {
         this.sessionId = null;
         return this.callTool<T>(name, args, true);
       }
       throw e;
     }
+
     const result = msg?.result ?? {};
+    if (result.isError === true) {
+      const content: Array<{ type?: string; text?: string }> = Array.isArray(
+        result.content,
+      )
+        ? result.content
+        : [];
+      const text = content
+        .filter((c) => c?.type === "text" && typeof c.text === "string")
+        .map((c) => c.text!.trim())
+        .filter(Boolean)
+        .join("\n");
+      throw new McpError(text || "MCP tool error", undefined, res.status);
+    }
+
     if (result.structuredContent !== undefined && result.structuredContent !== null) {
       return result.structuredContent as T;
     }

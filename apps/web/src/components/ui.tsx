@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { fmtAgo, splitSymbol } from "@poly/core";
 import { useApp } from "../lib/store";
 import { useNow } from "../lib/hooks";
@@ -225,28 +225,61 @@ export function DataFreshness({
 
 /* ---------- Error, Empty, Loading States ---------- */
 
+export type ErrorBoxKind = "unavailable" | "invalid" | "notfound" | "tool";
+
 export function ErrorBox({
   error,
+  kind = "unavailable",
   onRetry,
   hasStaleData,
 }: {
   error: string | null;
+  kind?: ErrorBoxKind;
   onRetry?: () => void;
   hasStaleData?: boolean;
 }) {
   if (!error) return null;
+
+  const isInvalid =
+    kind === "invalid" ||
+    /^(invalid_argument|validation error|invalid )/i.test(error);
+
+  const heading = isInvalid
+    ? "Invalid input — check format:"
+    : kind === "notfound"
+      ? "No public record indexed:"
+      : kind === "tool"
+        ? "Tool error:"
+        : "Cannot reach Polyester MCP right now:";
+
+  const helper = isInvalid
+    ? "Check that the identifier matches the expected format (e.g. 0x-prefixed 64-character hex hash or UUID flow ID) and try again."
+    : kind === "notfound"
+      ? "Polyester has no public flow for this identifier. That is not the same as a failed transfer."
+      : hasStaleData
+        ? "Showing last known data snapshot while automatic background retry continues."
+        : "Automatic polling remains active and will recover as soon as the endpoint responds.";
+
   return (
-    <div className="notice error" role="alert">
+    <div
+      className={`notice ${isInvalid || kind === "notfound" ? "warn" : "error"}`}
+      role="status"
+      aria-live="polite"
+    >
       <div className="row-flex" style={{ gap: 10 }}>
-        <IconAlert size={16} style={{ color: "var(--down)", flexShrink: 0 }} />
+        <IconAlert
+          size={16}
+          style={{
+            color: isInvalid || kind === "notfound" ? "var(--warn)" : "var(--down)",
+            flexShrink: 0,
+          }}
+        />
         <div>
           <div>
-            <strong>Upstream request failed:</strong> {error}{" "}
+            <strong>{heading}</strong> {error}{" "}
           </div>
           <div className="faint" style={{ marginTop: 2 }}>
-            {hasStaleData
-              ? "Showing last known data snapshot while automatic background retry continues."
-              : "Automatic polling remains active and will recover as soon as the endpoint responds."}
+            {helper}
           </div>
         </div>
       </div>
@@ -282,7 +315,12 @@ export function EmptyState({
 
 export function Loading({ lines = 5 }: { lines?: number }) {
   return (
-    <div className="grid" style={{ gap: 10, padding: "8px 0" }} aria-busy="true" aria-label="Loading data">
+    <div
+      className="grid"
+      style={{ gap: 10, padding: "8px 0" }}
+      aria-busy="true"
+      aria-label="Loading data"
+    >
       {Array.from({ length: lines }).map((_, i) => (
         <div className="skeleton" key={i} style={{ width: `${94 - (i % 5) * 8}%` }} />
       ))}
@@ -290,13 +328,22 @@ export function Loading({ lines = 5 }: { lines?: number }) {
   );
 }
 
-/* ---------- Technical Term Tooltip ---------- */
+/* ---------- Accessible Technical Term Tooltip (A11Y-02) ---------- */
 
 export function TermTip({ label, tip }: { label: ReactNode; tip: string }) {
+  const id = useId();
   return (
-    <span className="term-tip" title={tip} tabIndex={0} aria-label={`${typeof label === "string" ? label : ""} (${tip})`}>
-      {label}
-    </span>
+    <button
+      type="button"
+      className="term-tip"
+      title={tip}
+      aria-describedby={id}
+    >
+      <span>{label}</span>
+      <span id={id} role="tooltip" className="term-tip-pop">
+        {tip}
+      </span>
+    </button>
   );
 }
 
@@ -610,14 +657,26 @@ export function JsonView({ value, depth = 0 }: { value: unknown; depth?: number 
 
 export function Countdown({ to, label }: { to: number; label: string }) {
   const now = useNow(1000);
-  const ms = Math.max(0, to - now);
+  const dayMs = 86_400_000;
+  const effectiveTo =
+    to > now
+      ? to
+      : Date.UTC(
+          new Date(now).getUTCFullYear(),
+          new Date(now).getUTCMonth(),
+          new Date(now).getUTCDate() + 1,
+          0,
+          0,
+          0,
+          0,
+        );
+  const ms = Math.max(0, effectiveTo - now);
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
   const s = Math.floor((ms % 60_000) / 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
 
   // Progress through current 24h UTC window
-  const dayMs = 86_400_000;
   const elapsedPct = Math.min(100, Math.max(0, ((dayMs - ms) / dayMs) * 100));
 
   return (

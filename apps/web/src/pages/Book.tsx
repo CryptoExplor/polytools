@@ -61,16 +61,20 @@ export default function Book() {
 
   const book = useMemo(() => {
     if (!data) return null;
-    const bids = (data.bids ?? []).map((l) => ({
-      rawPrice: l.price,
-      price: price(l.price),
-      qty: dec(l.qty),
-    }));
-    const asks = (data.asks ?? []).map((l) => ({
-      rawPrice: l.price,
-      price: price(l.price),
-      qty: dec(l.qty),
-    }));
+    const bids = (data.bids ?? [])
+      .map((l) => ({
+        rawPrice: l.price,
+        price: price(l.price),
+        qty: dec(l.qty),
+      }))
+      .sort((a, b) => b.price - a.price);
+    const asks = (data.asks ?? [])
+      .map((l) => ({
+        rawPrice: l.price,
+        price: price(l.price),
+        qty: dec(l.qty),
+      }))
+      .sort((a, b) => a.price - b.price);
 
     const bidWalls = wallIndexes(
       bids.map((b) => b.qty),
@@ -136,7 +140,7 @@ export default function Book() {
             </Pill>
           ) : null
         }
-        subtitle="Live L2 order book ladders, cumulative liquidity profile, bid/ask book imbalance, and automated liquidity wall detection."
+        subtitle="Resting buy orders (bids, green) and sell orders (asks, red) waiting to be matched. Includes cumulative liquidity profile, bid/ask book imbalance, and statistical size outlier detection."
         actions={
           <div className="row-flex">
             <SymbolSelect value={symbol} onChange={setSymbol} />
@@ -219,7 +223,12 @@ export default function Book() {
           }
         />
         <MetricCell
-          label={`Book Imbalance (${depth} lvls)`}
+          label={
+            <TermTip
+              label={`Book Imbalance (${depth} lvls)`}
+              tip="Share of displayed bid qty vs ask qty. Not a prediction."
+            />
+          }
           value={
             book ? (
               <span>
@@ -286,7 +295,7 @@ export default function Book() {
       {book && (
         <Card
           title="Detected Liquidity Walls"
-          subtitle={`Levels with quantity ≥ ${wallMult}× the median level size on their side`}
+          subtitle={`WALL is a size outlier (≥ ${wallMult}× median side size), not a detected trader.`}
           actions={
             <div className="seg-group" role="group" aria-label="Wall sensitivity multiplier">
               {[2, 3, 5].map((m) => (
