@@ -39,3 +39,7 @@ Record only sanitized status/code, operation, browser origin, timestamp, and sch
 8. Revoke the disposable key in the official UI after testing.
 
 Until these checks are completed from the intended browser origin, the application must continue to describe live compatibility as **unverified** and must not claim live balances, fees, equity, or P&L.
+
+## Separate headless evidence
+
+See [the sanitized local-agent testnet report](./live-testnet-verification-report.md) for a reported headless API-key run. That evidence is attributed to the local agent and does not replace the browser-origin, CORS, vault, pagination-completeness, or P&L gates above.

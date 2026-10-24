@@ -208,7 +208,10 @@ export class AccountDataCoordinator {
 
   constructor(options: AccountDataCoordinatorOptions) {
     this.vault = options.vault;
-    this.client = options.client ?? new AccountRestClient({ vault: options.vault });
+    this.client = options.client ?? new AccountRestClient({
+      vault: options.vault,
+      ...(options.now ? { now: options.now } : {}),
+    });
     this.store = options.store ?? new MemoryDatasetStore();
     this.maxPages = options.maxPages ?? 25;
     if (!Number.isSafeInteger(this.maxPages) || this.maxPages < 1 || this.maxPages > 10_000) {

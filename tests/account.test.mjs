@@ -381,6 +381,19 @@ describe("Encrypted account vault and read-only signer (synthetic keys only)", (
     assert.equal(instance.getSessionInfo(), null);
   });
 
+  it("applies a validated server clock offset to signing timestamps", async () => {
+    const localNow = 1_900_000_000_000;
+    const { instance } = await makeImportedVault({ now: () => localNow });
+    instance.setClockSkew(7_500);
+    assert.equal(instance.getClockSkew(), 7_500);
+    const signed = await instance.signReadRequest({ operation: "balances" });
+    assert.equal(signed.timestamp, String(localNow + 7_500));
+    assert.equal(signed.canonicalString.split("\n")[0], signed.timestamp);
+    for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+      assert.throws(() => instance.setClockSkew(invalid), (error) => error?.code === "VAULT_INVALID_INPUT");
+    }
+  });
+
   it("does not substitute the empty-body hash when WebCrypto is unavailable", async () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
     Object.defineProperty(globalThis, "crypto", {

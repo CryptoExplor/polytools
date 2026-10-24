@@ -267,6 +267,42 @@ describe("DTO validation and private memory partitions", () => {
     assert.equal(page.nextPageToken, "opaque-next");
   });
 
+  it("accepts pair-string fills and omitted settlement legs but rejects ambiguous markets", () => {
+    const rawFill = {
+      executedAt: "2026-01-01T00:00:00Z",
+      fee: "0.8",
+      feeAsset: "QUOTE",
+      feeIsRebate: false,
+      isMaker: true,
+      lineage: { generation: 1, id: "order1" },
+      matchId: "1",
+      orderId: "order1",
+      price: "100000",
+      qty: "0.01",
+      referralShare: "0",
+      side: "BUY",
+      symbol: "BTC-USDT",
+    };
+    const market = { baseAsset: "BTC", quoteAsset: "USDT", marketSymbol: "BTC-USDT" };
+    const page = account.validateFillsResponse(
+      { nextPageToken: "", trades: [rawFill] },
+      { accountScope: "synthetic-scope", markets: { "1": market } },
+    );
+    assert.equal(page.fills.length, 1);
+    assert.equal(page.fills[0].symbol, "1");
+    assert.equal(page.fills[0].marketSymbol, "BTC-USDT");
+    assert.equal(page.fills[0].baseAsset, "BTC");
+    assert.equal(page.settlementLegs.length, 0);
+    assert.equal(page.quarantined.length, 0);
+
+    const ambiguous = account.validateFillsResponse(
+      { nextPageToken: "", trades: [rawFill] },
+      { accountScope: "synthetic-scope", markets: { "1": market, "2": { ...market } } },
+    );
+    assert.equal(ambiguous.fills.length, 0);
+    assert.equal(ambiguous.quarantined.length, 1);
+  });
+
   it("partitions private snapshots by session, scope, operation, and stable filters", () => {
     const store = new account.MemoryDatasetStore();
     const partition = {

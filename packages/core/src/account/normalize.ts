@@ -203,6 +203,19 @@ export interface NormalizedFillPage {
   settlementLegs: unknown[];
 }
 
+function resolveFillMarket(
+  symbol: string,
+  markets: Readonly<Record<string, FillMarket>>,
+): { symbolId: string; market: FillMarket } {
+  // Friendly REST has used both a numeric symbol ID and a pair string for
+  // this field. Accept either, but never guess when the catalog is ambiguous.
+  const matches = Object.entries(markets)
+    .filter(([marketId, market]) => marketId === symbol || market.marketSymbol === symbol);
+  if (matches.length !== 1) throw new AccountSchemaError("Unknown or ambiguous fill market; row quarantined.");
+  const [symbolId, market] = matches[0];
+  return { symbolId, market };
+}
+
 export function validateFillsResponse(
   value: unknown,
   context: { accountScope: string; markets: Readonly<Record<string, FillMarket>> },
@@ -214,9 +227,8 @@ export function validateFillsResponse(
   for (const raw of array(response.trades)) {
     try {
       const row = object(raw);
-      const symbolId = string(row.symbol);
-      const market = context.markets[symbolId];
-      if (!market) throw new AccountSchemaError("Unknown fill market; row quarantined.");
+      const symbol = string(row.symbol);
+      const { symbolId, market } = resolveFillMarket(symbol, context.markets);
       const side = string(row.side);
       if (side !== "BUY" && side !== "SELL") fail();
       const feeAsset = string(row.feeAsset);
@@ -226,6 +238,7 @@ export function validateFillsResponse(
       if (generation < 1) fail();
       const fill: FillInput = {
         accountScope: context.accountScope,
+        // Canonical catalog identity keeps aliases deduplicable across pages.
         symbol: symbolId,
         marketSymbol: market.marketSymbol,
         baseAsset: string(market.baseAsset),
@@ -251,7 +264,8 @@ export function validateFillsResponse(
       quarantined.push(raw);
     }
   }
-  const settlementLegs = array(response.transfers);
+  // Proto/REST serializers may omit an empty repeated settlement-leg field.
+  const settlementLegs = response.transfers === undefined ? [] : array(response.transfers);
   return { nextPageToken, fills, quarantined, settlementLegs };
 }
 

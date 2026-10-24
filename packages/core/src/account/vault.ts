@@ -533,6 +533,7 @@ export class AccountVault {
   private readonly legacyStorage?: LegacyStorage;
   private readonly idleTimeoutMs: number;
   private readonly now: () => number;
+  private clockSkewMs = 0;
   private readonly channel: VaultControlChannel | null;
   private readonly ownsChannel: boolean;
   private readonly listeners = new Set<VaultListener>();
@@ -701,6 +702,29 @@ export class AccountVault {
     if (this.session) this.armIdleTimer();
   }
 
+  /**
+   * Set the server-minus-local clock offset used only for signing timestamps.
+   * The offset is not persisted and does not change vault metadata or lock timers.
+   */
+  setClockSkew(skewMs: number): void {
+    if (!Number.isSafeInteger(skewMs)) {
+      throw new AccountVaultError("VAULT_INVALID_INPUT", "The signing clock offset is invalid.");
+    }
+    this.clockSkewMs = skewMs;
+  }
+
+  getClockSkew(): number {
+    return this.clockSkewMs;
+  }
+
+  private signingNow(): number {
+    const adjusted = this.now() + this.clockSkewMs;
+    if (!Number.isSafeInteger(adjusted) || adjusted < 0) {
+      throw new AccountVaultError("VAULT_INVALID_INPUT", "The adjusted signing clock is invalid.");
+    }
+    return adjusted;
+  }
+
   getSessionInfo(): VaultSessionInfo | null {
     if (!this.session) return null;
     return {
@@ -754,7 +778,7 @@ export class AccountVault {
         createdAt: this.now(),
       };
       const metadata = metadataFromPayload(payload, entryId);
-      const signer = await importVerifiedSigner(pkcs8, metadata, this.now);
+      const signer = await importVerifiedSigner(pkcs8, metadata, () => this.signingNow());
       const record = await encryptPayload(payload, entryId, passphrase);
       payload.privateKeyPkcs8 = "";
       await this.storage.putEntry(record);
@@ -814,7 +838,7 @@ export class AccountVault {
         createdAt: this.now(),
       };
       const metadata = metadataFromPayload(payload, entryId);
-      const signer = await importVerifiedSigner(pkcs8, metadata, this.now);
+      const signer = await importVerifiedSigner(pkcs8, metadata, () => this.signingNow());
       const record = await encryptPayload(payload, entryId, passphrase);
       payload.privateKeyPkcs8 = "";
       await this.storage.putEntry(record);
@@ -858,7 +882,7 @@ export class AccountVault {
       throw new AccountVaultError("VAULT_NOT_FOUND", "The encrypted entry no longer exists.");
     }
     try {
-      const { metadata, signer } = await decryptEntry(entry, passphrase, this.now);
+      const { metadata, signer } = await decryptEntry(entry, passphrase, () => this.signingNow());
       const [currentEntry, currentGeneration] = await Promise.all([
         this.storage.getEntry(entryId),
         this.storage.getGeneration(),
@@ -898,7 +922,7 @@ export class AccountVault {
     this.clearSession("LOCK");
     const entry = await this.storage.getEntry(entryId);
     if (!entry) throw new AccountVaultError("VAULT_NOT_FOUND", "The encrypted entry no longer exists.");
-    const decrypted = await decryptEntry(entry, passphrase, this.now);
+    const decrypted = await decryptEntry(entry, passphrase, () => this.signingNow());
     let plaintextRecord: EncryptedVaultEntry | null = null;
     try {
       // Re-encrypting requires the transient decrypted payload. Perform a second
@@ -1087,7 +1111,7 @@ export class AccountVault {
           };
           const metadata = metadataFromPayload(payload, entryId);
           // Verify the original pair, then verify a freshly read/decrypted write below.
-          const probe = await importVerifiedSigner(pkcs8, metadata, this.now);
+          const probe = await importVerifiedSigner(pkcs8, metadata, () => this.signingNow());
           void probe;
           const record = await encryptPayload(payload, entryId, passphrase);
           payload.privateKeyPkcs8 = "";
@@ -1095,7 +1119,7 @@ export class AccountVault {
           created.push(entryId);
           const stored = await this.storage.getEntry(entryId);
           if (!stored) throw new Error("Encrypted migration write is missing.");
-          await decryptEntry(stored, passphrase, this.now);
+          await decryptEntry(stored, passphrase, () => this.signingNow());
         } finally {
           pkcs8?.fill(0);
           if (payload) payload.privateKeyPkcs8 = "";

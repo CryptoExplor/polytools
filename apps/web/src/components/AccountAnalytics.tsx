@@ -157,7 +157,7 @@ export function AccountAnalytics({
   );
 
   const load = useCallback(async () => {
-    if (!coordinator || !session) return;
+    if (!coordinator || !session || !accountVault) return;
     if (!LIVE_READS_ENABLED) {
       setLocalError("Live account reads are disabled in this build. Enable them only in a reviewed deployment after CORS and least-privilege verification; no request was sent.");
       return;
@@ -180,6 +180,14 @@ export function AccountAnalytics({
     try {
       const catalog = await account.fetchOfficialSpotCatalog({ signal: controller.signal });
       if (requestRef.current !== controller || controller.signal.aborted) return;
+      // The unsigned official catalog also supplies a server reference clock.
+      // Apply only the server-minus-local offset to future signing timestamps.
+      const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+      const skewMs = BigInt(catalog.tsSec) * 1_000n - BigInt(catalog.retrievedAtMs);
+      if (skewMs > maxSafe || skewMs < -maxSafe) {
+        throw new Error("The official catalog clock offset is outside the supported range.");
+      }
+      accountVault.setClockSkew(Number(skewMs));
       setCatalogReady(true);
       const next = await coordinator.loadAll({ range, markets: catalog.markets, signal: controller.signal });
       if (requestRef.current === controller && !controller.signal.aborted) setSnapshot(next);
@@ -195,7 +203,7 @@ export function AccountAnalytics({
         requestRef.current = null;
       }
     }
-  }, [coordinator, session, secureContext, range]);
+  }, [accountVault, coordinator, session, secureContext, range]);
 
   const datasets = snapshot ? [snapshot.balances, snapshot.equity, snapshot.orders, snapshot.fills, snapshot.transfers, snapshot.feeRates] : [];
   const successful = datasets.filter((dataset) => dataset.data !== null).length;
