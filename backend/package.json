@@ -6,9 +6,11 @@
   "description": "Reusable serverless backend for Polyester tools: one pure Web-API handler with adapters for Cloudflare Pages/Workers, Vercel, and Node.",
   "scripts": {
     "dev": "npx tsx adapters/node.ts",
-    "deploy:worker": "wrangler deploy adapters/worker.ts"
+    "deploy:worker": "wrangler deploy adapters/worker.ts",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
     "wrangler": "^4.135.0"
   }

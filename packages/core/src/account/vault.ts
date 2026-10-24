@@ -414,8 +414,25 @@ async function decryptEntry(
   passphrase: string,
   now: () => number,
 ): Promise<{ metadata: VaultKeyMetadata; signer: Ed25519RequestSigner }> {
+  const decrypted = await decryptEntryWithPayload(entry, passphrase, now);
+  try {
+    return { metadata: decrypted.metadata, signer: decrypted.signer };
+  } finally {
+    // Ordinary unlock/signing callers never retain the serialized private key.
+    decrypted.payload.privateKeyPkcs8 = "";
+  }
+}
+
+/** Decrypt once for an update; the caller must clear payload.privateKeyPkcs8. */
+async function decryptEntryWithPayload(
+  entry: EncryptedVaultEntry,
+  passphrase: string,
+  now: () => number,
+): Promise<{ metadata: VaultKeyMetadata; signer: Ed25519RequestSigner; payload: VaultPayload }> {
   let plaintext: Uint8Array | null = null;
   let pkcs8: Uint8Array | null = null;
+  let payload: VaultPayload | null = null;
+  let retainPayload = false;
   try {
     validateEncryptedEntry(entry);
     const crypto = requireWebCrypto();
@@ -429,21 +446,22 @@ async function decryptEntry(
       ciphertext,
     );
     plaintext = new Uint8Array(decrypted);
-    const payload = JSON.parse(new TextDecoder().decode(plaintext)) as VaultPayload;
+    const parsedPayload = JSON.parse(new TextDecoder().decode(plaintext)) as VaultPayload;
+    payload = parsedPayload;
     plaintext.fill(0);
     plaintext = null;
     if (
-      !payload ||
-      payload.keyId !== payload.userLabel ||
-      typeof payload.privateKeyPkcs8 !== "string"
+      !parsedPayload ||
+      parsedPayload.keyId !== parsedPayload.userLabel ||
+      typeof parsedPayload.privateKeyPkcs8 !== "string"
     ) {
       throw new Error("Invalid encrypted payload.");
     }
-    const metadata = metadataFromPayload(payload, entry.entryId);
-    pkcs8 = base64ToBytes(payload.privateKeyPkcs8);
-    payload.privateKeyPkcs8 = "";
+    const metadata = metadataFromPayload(parsedPayload, entry.entryId);
+    pkcs8 = base64ToBytes(parsedPayload.privateKeyPkcs8);
     const signer = await importVerifiedSigner(pkcs8, metadata, now);
-    return { metadata, signer };
+    retainPayload = true;
+    return { metadata, signer, payload: parsedPayload };
   } catch (error) {
     if (error instanceof CanonicalRequestError) throw error;
     throw new AccountVaultError(
@@ -453,6 +471,7 @@ async function decryptEntry(
   } finally {
     plaintext?.fill(0);
     pkcs8?.fill(0);
+    if (!retainPayload && payload) payload.privateKeyPkcs8 = "";
   }
 }
 
@@ -922,16 +941,14 @@ export class AccountVault {
     this.clearSession("LOCK");
     const entry = await this.storage.getEntry(entryId);
     if (!entry) throw new AccountVaultError("VAULT_NOT_FOUND", "The encrypted entry no longer exists.");
-    const decrypted = await decryptEntry(entry, passphrase, () => this.signingNow());
+    const decrypted = await decryptEntryWithPayload(entry, passphrase, () => this.signingNow());
     let plaintextRecord: EncryptedVaultEntry | null = null;
     try {
-      // Re-encrypting requires the transient decrypted payload. Perform a second
-      // authenticated decrypt through a dedicated helper rather than retaining
-      // any secret in the session object.
-      const payload = await this.decryptPayloadForUpdate(entry, passphrase);
+      // Reuse the single authenticated decrypt for both signer verification and
+      // re-encryption. The serialized key stays local and is cleared below.
+      const payload = decrypted.payload;
       payload.registeredKeyId = normalized;
       const updated = await encryptPayload(payload, entryId, passphrase);
-      payload.privateKeyPkcs8 = "";
       await this.storage.putEntry(updated);
       plaintextRecord = await this.storage.getEntry(entryId);
       if (!plaintextRecord || plaintextRecord.ciphertext !== updated.ciphertext) {
@@ -943,46 +960,8 @@ export class AccountVault {
       this.installSession(metadata, decrypted.signer);
       return metadata;
     } finally {
+      decrypted.payload.privateKeyPkcs8 = "";
       plaintextRecord = null;
-    }
-  }
-
-  private async decryptPayloadForUpdate(
-    entry: EncryptedVaultEntry,
-    passphrase: string,
-  ): Promise<VaultPayload> {
-    let plaintext: Uint8Array | null = null;
-    try {
-      validateEncryptedEntry(entry);
-      const crypto = requireWebCrypto();
-      const key = await deriveDataKey(
-        passphrase,
-        base64ToBytes(entry.kdf.salt),
-        entry.kdf.iterations,
-        "decrypt",
-      );
-      const decrypted = await crypto.subtle.decrypt(
-        {
-          name: "AES-GCM",
-          iv: base64ToBytes(entry.cipher.iv),
-          additionalData: additionalData(entry),
-          tagLength: 128,
-        },
-        key,
-        base64ToBytes(entry.ciphertext),
-      );
-      plaintext = new Uint8Array(decrypted);
-      const payload = JSON.parse(new TextDecoder().decode(plaintext)) as VaultPayload;
-      metadataFromPayload(payload, entry.entryId);
-      if (typeof payload.privateKeyPkcs8 !== "string") throw new Error("Invalid payload.");
-      return payload;
-    } catch {
-      throw new AccountVaultError(
-        "VAULT_AUTH_FAILED",
-        "The entry could not be unlocked for this update.",
-      );
-    } finally {
-      plaintext?.fill(0);
     }
   }
 

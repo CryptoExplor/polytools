@@ -19,6 +19,7 @@ import {
   validateFeeRatesResponse,
   validateFillsResponse,
   validateOrderHistoryResponse,
+  validateOrdersOpenResponse,
   validateTransfersResponse,
   type EquityHistoryResponse,
   type FillMarket,
@@ -79,6 +80,11 @@ export interface EquityData {
 }
 
 export interface OrdersData {
+  orders: NormalizedOrder[];
+  quarantined: unknown[];
+}
+
+export interface OpenOrdersData {
   orders: NormalizedOrder[];
   quarantined: unknown[];
 }
@@ -533,6 +539,30 @@ export class AccountDataCoordinator {
       });
     } catch (error) {
       return this.failure(session, "transfers", params, period, context.previous, error);
+    }
+  }
+
+  /**
+   * Load open orders independently from terminal history. This deliberately
+   * does not add another request to loadAll(): callers can keep permission and
+   * coverage failures for the two order datasets separate.
+   */
+  async loadOpenOrders(options: AccountDataLoadOptions = {}): Promise<AccountDataset<OpenOrdersData>> {
+    const session = this.sessionOrThrow();
+    const scope = options.subaccountId === undefined ? {} : { subaccountId: options.subaccountId };
+    const params: AccountRequestParams = { ...scope, limit: 100 };
+    const context = this.pagedBase<OpenOrdersData>(session, "ordersOpen", params, undefined);
+    try {
+      const collection = await this.collectPages(session, "ordersOpen", params, options.signal, (value) => {
+        const page = validateOrdersOpenResponse(value, options.markets ?? {});
+        return { nextPageToken: page.nextPageToken, rows: page.orders, quarantined: page.quarantined };
+      });
+      return this.finishPaged(session, "ordersOpen", params, undefined, context, collection, {
+        orders: collection.rows,
+        quarantined: collection.quarantined,
+      }, { accepted: collection.rows.length, unknown: collection.quarantined.length });
+    } catch (error) {
+      return this.failure(session, "ordersOpen", params, undefined, context.previous, error);
     }
   }
 

@@ -435,6 +435,22 @@ export function validateOrderHistoryResponse(
   return { nextPageToken, orders, quarantined };
 }
 
+/**
+ * Validate open orders with the same strict order DTO and quarantine rules as
+ * history. An omitted cursor is an exhausted first page, not a fabricated
+ * cursor; present cursors remain opaque and unchanged.
+ */
+export function validateOrdersOpenResponse(
+  value: unknown,
+  markets: Readonly<Record<string, FillMarket>> = {},
+): NormalizedOrderPage {
+  const response = object(value);
+  return validateOrderHistoryResponse({
+    ...response,
+    nextPageToken: response.nextPageToken === undefined ? "" : response.nextPageToken,
+  }, markets);
+}
+
 export interface NormalizedFeeRate {
   symbol: string;
   makerFeeRatePercent: string;
@@ -446,6 +462,8 @@ export function validateFeeRatesResponse(value: unknown): { feeRates: Normalized
   const response = object(value);
   const feeRates = array(response.feeRates).map((raw) => {
     const row = object(raw);
+    // Maker rates may represent rebates. Taker rates use the non-negative
+    // decimal validator; both remain exact source strings, with no float gate.
     const maker = decimal(row.makerFeeRatePercent, true);
     const taker = decimal(row.takerFeeRatePercent);
     if (compare(parseDecimal(maker), fromBigInt(-100n)) < 0 || compare(parseDecimal(maker), fromBigInt(100n)) > 0) fail();

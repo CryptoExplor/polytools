@@ -98,6 +98,17 @@ export function usePollData<T>(
     void handleRef.current?.tick();
   }, []);
 
+  const setPausedWithResume = useCallback((next: boolean) => {
+    pausedRef.current = next;
+    setPaused(next);
+    if (!next) {
+      // React state updates are asynchronous. Update the ref first, then force
+      // one immediate tick so Resume does not wait for the next interval.
+      forceManualRef.current = true;
+      void handleRef.current?.tick();
+    }
+  }, []);
+
   return {
     data,
     error,
@@ -106,7 +117,7 @@ export function usePollData<T>(
     updatedAt,
     lastErrorAt,
     paused,
-    setPaused,
+    setPaused: setPausedWithResume,
     refresh,
   };
 }

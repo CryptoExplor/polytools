@@ -353,7 +353,7 @@ export function serializeReadOperation(
     case "feeRates":
       ["subaccountId", "symbol"].forEach((key) => allKeys.add(key));
       assertKeys(operation, params, allKeys);
-      push(pairs, "subaccountId", text(params.subaccountId, operation, "subaccountId", 256));
+      push(pairs, "subaccountId", id(params.subaccountId, operation, "subaccountId"));
       for (const symbol of symbols(params.symbol, operation)) push(pairs, "symbol", symbol);
       break;
     default:

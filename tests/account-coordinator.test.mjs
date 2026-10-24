@@ -83,7 +83,7 @@ const fill = {
   symbol: "1",
 };
 
-function order(id = "order1") {
+function order(id = "order1", overrides = {}) {
   return {
     orderId: id,
     symbol: "1",
@@ -98,6 +98,7 @@ function order(id = "order1") {
     createdAt: "2026-01-01T00:00:00Z",
     lineage: { generation: 1, id },
     version: 1,
+    ...overrides,
   };
 }
 
@@ -128,6 +129,11 @@ function successRouter(calls, overrides = {}) {
         points: 2,
         btcPrices: ["100", "101"],
         series: [{ asset: { id: 1, symbol: "BTC" }, equity: ["10", "11"] }],
+      });
+    }
+    if (path === "/v1/orders/open") {
+      return jsonResponse({
+        orders: [order("open1", { status: "WORKING", cumQty: "0", leavesQty: "0.01" })],
       });
     }
     if (path === "/v1/orders/history") {
@@ -211,6 +217,42 @@ describe("Account data coordinator (synthetic authenticated transport)", () => {
     assert.equal(calls.every(({ init }) => init.method === "GET" && init.body === undefined), true);
     const fillCall = calls.find(({ url }) => new URL(url).pathname === "/v1/spot/trades");
     assert.match(fillCall.url, /startTime=2026-01-01T00%3A00%3A00.000Z/);
+  });
+
+  it("loads typed open orders independently, including an omitted exhausted cursor", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, successRouter(calls));
+    const dataset = await coordinator.loadOpenOrders({ markets });
+    assert.equal(dataset.data.orders.length, 1);
+    assert.equal(dataset.data.orders[0].orderId, "open1");
+    assert.equal(dataset.data.orders[0].status, "WORKING");
+    assert.equal(dataset.coverage.status, "complete");
+    assert.equal(dataset.coverage.cursorExhausted, true);
+    assert.equal(dataset.coverage.rowsReceived, 1);
+    assert.equal(dataset.coverage.rowsAccepted, 1);
+    assert.equal(account.rowsReconcile(dataset.coverage), true);
+    const openCall = calls.find(({ url }) => new URL(url).pathname === "/v1/orders/open");
+    assert.equal(openCall.init.method, "GET");
+    assert.equal(new URL(openCall.url).searchParams.has("startTime"), false);
+  });
+
+  it("keeps malformed open-order rows visible as partial coverage", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, successRouter(calls, {
+      "/v1/orders/open": () => jsonResponse({
+        orders: [order("open1", { status: "WORKING" }), { symbol: "unknown" }],
+      }),
+    }));
+    const dataset = await coordinator.loadOpenOrders({ markets });
+    assert.equal(dataset.data.orders.length, 1);
+    assert.equal(dataset.data.quarantined.length, 1);
+    assert.equal(dataset.coverage.status, "partial");
+    assert.equal(dataset.coverage.rowsReceived, 2);
+    assert.equal(dataset.coverage.rowsAccepted, 1);
+    assert.equal(dataset.coverage.unknownRows, 1);
+    assert.equal(account.rowsReconcile(dataset.coverage), true);
   });
 
   it("keeps permission failures independent and never turns them into empty successful datasets", async () => {

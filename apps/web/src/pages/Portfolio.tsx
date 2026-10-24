@@ -135,7 +135,7 @@ function AccountTransactions({ session }: { session: vault.VaultSessionInfo | nu
     <>
       <Card
         title="Transaction scope"
-        subtitle="My accounts is the default. Public lifecycle lookup remains credential-free; neither option claims an unverified live broadcast."
+        subtitle="My accounts is the default. Public lifecycle lookup does not require credentials; neither option claims an unverified live broadcast."
       >
         <div className="seg-group" role="group" aria-label="Transaction explorer scope">
           <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} onClick={() => setScope("mine")}>

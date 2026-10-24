@@ -5,5 +5,5 @@ export * from "./tools";
 export * from "./normalize";
 export * from "./format";
 export * from "./poll";
-export * as vault from "./keys";
+export * as vault from "./account/index";
 export * as account from "./account/index";

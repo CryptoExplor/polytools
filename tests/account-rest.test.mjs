@@ -88,6 +88,17 @@ describe("Friendly REST read-only serializers", () => {
     assert.equal(account.buildReadRequest("feeRates").path, "/v1/spot/fee-rates");
   });
 
+  it("applies the shared subaccount ID rules to current fee rates", () => {
+    assert.equal(
+      account.buildReadRequest("feeRates", { subaccountId: "123456789" }).canonicalQuery,
+      "subaccountId=123456789",
+    );
+    assert.throws(
+      () => account.buildReadRequest("feeRates", { subaccountId: "bad id!" }),
+      (error) => error?.code === "INVALID_REQUEST",
+    );
+  });
+
   it("encodes opaque cursors exactly once and preserves Unicode/reserved bytes", () => {
     const cursor = "a+b/% 字";
     const built = account.buildReadRequest("fills", { symbol: "BTC-USDT", pageToken: cursor });

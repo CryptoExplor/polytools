@@ -58,6 +58,12 @@ const VALID_SIDES = new Set<string>(["buy", "sell"]);
 const VALID_COMPARE_BY = new Set<string>(["networkFee", "depositMinAmount"]);
 const VALID_LOOKUP_KIND = new Set<string>(["source", "any"]);
 
+/** Resolve the primary endpoint, honoring a mainnet-only deployment override. */
+export function resolveBackendMcpUrl(env?: Record<string, string | undefined>): string {
+  return resolveMcpUrl("testnet", env?.MCP_URL ?? env?.MCP_URL_MAINNET) ||
+    resolveMcpUrl("mainnet", env?.MCP_URL_MAINNET);
+}
+
 class ValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -134,9 +140,7 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
   if (request.method !== "GET") return error(405, "Method not allowed");
 
   // ---- environment resolution -------------------------------------------------
-  const mcpUrl =
-    resolveMcpUrl("testnet", opts.env?.MCP_URL) ||
-    resolveMcpUrl("mainnet", opts.env?.MCP_URL_MAINNET);
+  const mcpUrl = resolveBackendMcpUrl(opts.env);
 
   // ---- meta routes -------------------------------------------------------------
   if (path === "/api" || path === "/api/health") {

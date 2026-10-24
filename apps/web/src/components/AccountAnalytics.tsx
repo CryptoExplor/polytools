@@ -346,7 +346,7 @@ export function AccountAnalytics({
 
   return (
     <Card
-      title="R2 Account Analytics"
+      title="Account analytics"
       subtitle="Read-only balances, sampled equity, order history, fills, labeled transfer activity, current rates, and explicit loaded-row exports. Official SpotConfig pair mapping is loaded separately; public MCP tools remain independent."
       actions={<Pill kind={snapshot && !hasIncomplete && successful > 0 ? "up" : "warn"}>{connectionLabel}</Pill>}
     >
@@ -385,7 +385,7 @@ export function AccountAnalytics({
         {snapshot && <span className="faint"><IconClock size={12} /> {latest ? `Latest response ${fmtAgo(latest)}` : "No successful response timestamp"}</span>}
       </div>
       {localError && <div className="notice error" role="alert" style={{ marginBottom: 14 }}><IconAlert size={15} /><span>{localError}</span></div>}
-      <p className="faint">Amounts retain friendly REST decimal strings; no ConnectRPC scale divisor is applied. Rounded display never updates the underlying exact arithmetic.</p>
+      <p className="faint">Amounts retain the API's exact decimal strings; no additional scale divisor is applied. Rounded display never updates the underlying exact arithmetic.</p>
       {!LIVE_READS_ENABLED && <p className="faint">The button is intentionally disabled here. Unit and fake-fetch tests validate behavior, not Polyester live authentication or response compatibility.</p>}
 
       {snapshot && (
@@ -525,7 +525,7 @@ export function AccountAnalytics({
             ) : <><NoDataset dataset={snapshot.feeRates} /><DatasetMessages dataset={snapshot.feeRates} /></>}
           </Card>
 
-          <Card title="P&L remains unavailable in R2" subtitle="Observed fills, deposits, equity changes, and net quote flow are not profit.">
+          <Card title="Profit & loss remains unavailable" subtitle="Observed fills, deposits, equity changes, and net quote flow are not profit.">
             <div className="notice info" role="note"><IconAlert size={15} /><span>Realized and unrealized P&L require opening lots, complete fills, resolved non-fill cash flows, and a fresh labeled valuation mark. Those gates are not yet established by this read-only integration, so no P&L number is displayed.</span></div>
           </Card>
         </>
