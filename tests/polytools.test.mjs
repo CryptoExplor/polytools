@@ -263,6 +263,20 @@ describe("3. Backend handler allowlists, Node adapter path fix, and bounded TTL 
       core.NETWORKS.testnet.mcpUrl,
     );
   });
+
+  it("honors a mainnet-only MCP override in the backend resolver", () => {
+    assert.equal(
+      handlerMod.resolveBackendMcpUrl({ MCP_URL_MAINNET: "https://mainnet.example.com/mcp" }),
+      "https://mainnet.example.com/mcp",
+    );
+    assert.equal(
+      handlerMod.resolveBackendMcpUrl({
+        MCP_URL: "https://primary.example.com/mcp",
+        MCP_URL_MAINNET: "https://mainnet.example.com/mcp",
+      }),
+      "https://primary.example.com/mcp",
+    );
+  });
 });
 
 describe("4. Shared canonical-request primitives (SEC-01, SEC-07)", () => {

@@ -1,8 +1,8 @@
 /**
  * Secure local Ed25519 vault and read-only request-signing foundation.
  *
- * The signer itself never executes requests. Account analytics is isolated in
- * a deployment-gated panel; live release remains subject to target-browser,
+ * The signer itself never executes requests. Account analytics uses explicit
+ * read-only requests; live compatibility remains subject to target-browser,
  * CORS, and owner-controlled read-policy verification.
  */
 
@@ -135,7 +135,7 @@ function AccountTransactions({ session }: { session: vault.VaultSessionInfo | nu
     <>
       <Card
         title="Transaction scope"
-        subtitle="My accounts is the default. Public lifecycle lookup remains credential-free; neither option claims an unverified live broadcast."
+        subtitle="My accounts is the default. Public lifecycle lookup does not require credentials; neither option claims an unverified live broadcast."
       >
         <div className="seg-group" role="group" aria-label="Transaction explorer scope">
           <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} onClick={() => setScope("mine")}>
@@ -457,11 +457,11 @@ export default function Portfolio() {
         <>
       <div className="notice warn" role="note">
         <div>
-          <strong>Real-key use remains deployment-gated.</strong>{" "}
-          Do not enter a real key in a development server or shared preview. Live account
-          reads require an explicit deployment opt-in after target-browser, dependency/CSP,
-          exact-origin CORS, and owner-controlled read-policy gates pass. The local signer
-          below never sends its inspection signatures.
+          <strong>Real-key use requires an owner-controlled deployment.</strong>{" "}
+          Do not enter a real key in a development server or shared preview. Account reads
+          are explicit GET requests; target-browser, dependency/CSP, exact-origin CORS, and
+          owner-controlled read-policy checks still determine whether they succeed. The local
+          signer below never sends its inspection signatures.
         </div>
       </div>
 
@@ -885,11 +885,15 @@ export default function Portfolio() {
                     setSignedOutput(null);
                   }}
                 >
-                  {Object.entries(vault.READ_ONLY_OPERATIONS).map(([key, definition]) => (
-                    <option key={key} value={key}>
-                      {definition.label} · {definition.path}
-                    </option>
-                  ))}
+                  {Object.entries(vault.READ_ONLY_OPERATIONS)
+                    // Order details needs a validated path identifier and is
+                    // initiated by the account drawer, not this raw inspector.
+                    .filter(([, definition]) => !definition.path.includes("{"))
+                    .map(([key, definition]) => (
+                      <option key={key} value={key}>
+                        {definition.label} · {definition.path}
+                      </option>
+                    ))}
                 </select>
               </div>
               <div className="field">

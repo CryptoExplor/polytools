@@ -57,8 +57,7 @@ function resultDetail(operation, data) {
     return `object accepted (${Object.keys(data).length} top-level keys; fields not asserted)`;
   }
   if (operation === "ordersOpen") {
-    const rows = Array.isArray(data.orders) ? data.orders.length : "unknown";
-    return `object accepted (${rows} order rows; row schema not asserted)`;
+    return `schema valid (${data.orders.length} orders; ${data.quarantined.length} quarantined)`;
   }
   if (operation === "equityHistory") {
     const samples = data.series.reduce((total, series) => total + series.equity.length, 0);
@@ -152,7 +151,7 @@ async function main() {
     { name: "authMe", desc: "GET /v1/auth/me", params: {}, validate: account.validateObjectResponse },
     { name: "balances", desc: "GET /v1/balances", params: {}, validate: account.validateBalancesResponse },
     { name: "feeRates", desc: "GET /v1/spot/fee-rates", params: {}, validate: account.validateFeeRatesResponse },
-    { name: "ordersOpen", desc: "GET /v1/orders/open", params: {}, validate: account.validateObjectResponse },
+    { name: "ordersOpen", desc: "GET /v1/orders/open", params: {}, validate: account.validateOrdersOpenResponse },
     { name: "ordersHistory", desc: "GET /v1/orders/history", params: {}, validate: account.validateOrderHistoryResponse },
     {
       name: "fills",

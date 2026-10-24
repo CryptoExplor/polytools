@@ -243,11 +243,26 @@ describe("Encrypted account vault and read-only signer (synthetic keys only)", (
       () => instance.setRegisteredKeyId(metadata.entryId, PASSPHRASE, "local-label"),
       (error) => error?.code === "VAULT_INVALID_INPUT",
     );
-    const updated = await instance.setRegisteredKeyId(
-      metadata.entryId,
-      PASSPHRASE,
-      REGISTERED_ID,
-    );
+    const subtle = crypto.subtle;
+    const originalDeriveKey = subtle.deriveKey;
+    let keyDerivations = 0;
+    subtle.deriveKey = async function (...args) {
+      keyDerivations += 1;
+      return originalDeriveKey.apply(this, args);
+    };
+    let updated;
+    try {
+      updated = await instance.setRegisteredKeyId(
+        metadata.entryId,
+        PASSPHRASE,
+        REGISTERED_ID,
+      );
+    } finally {
+      subtle.deriveKey = originalDeriveKey;
+    }
+    // One decrypt for signer verification plus one encrypt for the update;
+    // the old implementation performed a second decrypt as well.
+    assert.equal(keyDerivations, 2);
     assert.equal(updated.registeredKeyId, REGISTERED_ID);
     const signed = await instance.signReadRequest({ operation: "balances" });
     assert.equal(signed.keyId, REGISTERED_ID);

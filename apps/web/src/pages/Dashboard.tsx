@@ -271,7 +271,9 @@ export default function Dashboard() {
     a.href = url;
     a.download = `polyester-markets-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Let the browser begin the download before releasing the object URL.
+    // Immediate revocation can cancel downloads, especially in Safari.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   return (

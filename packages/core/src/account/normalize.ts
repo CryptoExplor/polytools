@@ -90,6 +90,12 @@ export interface BalanceHistorySeries {
   balance: string[];
 }
 
+export interface BalanceHistoryTiming {
+  /** True only when the contract supplies enough aligned timing to derive points. */
+  available: boolean;
+  bucketSeconds?: number;
+}
+
 export interface BalanceHistoryResponse {
   range: string;
   bucket?: string;
@@ -97,6 +103,7 @@ export interface BalanceHistoryResponse {
   endTsSec?: number;
   points?: number;
   series: BalanceHistorySeries[];
+  timing: BalanceHistoryTiming;
 }
 
 function historyBounds(response: Record<string, unknown>): Pick<BalanceHistoryResponse, "bucket" | "startTsSec" | "endTsSec" | "points"> {
@@ -115,13 +122,32 @@ function checkPointCount(points: number | undefined, length: number): void {
   if (points !== undefined && points !== length) fail();
 }
 
+function balanceChartDecimal(value: unknown): string {
+  const raw = decimal(value);
+  // The pinned balance-history schema uses unsigned digit strings with an
+  // optional fractional part, not the broader friendly-decimal variants.
+  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(raw)) fail();
+  return raw;
+}
+
+function balanceBucketSeconds(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const match = /^([1-9]\d*)([smhd])$/.exec(value);
+  if (!match) fail();
+  const amount = Number(match[1]);
+  const multiplier = { s: 1, m: 60, h: 3_600, d: 86_400 }[match[2] as "s" | "m" | "h" | "d"];
+  const seconds = amount * multiplier;
+  if (!Number.isSafeInteger(seconds) || seconds < 1) fail();
+  return seconds;
+}
+
 export function validateBalanceHistoryResponse(value: unknown): BalanceHistoryResponse {
   const response = object(value);
   const range = string(response.range);
   if (!["1d", "7d", "30d", "90d", "180d", "365d"].includes(range)) fail();
   const series = array(response.series).map((row) => {
     const item = object(row);
-    const balance = array(item.balance).map((entry) => decimal(entry));
+    const balance = array(item.balance).map((entry) => balanceChartDecimal(entry));
     return {
       account: string(item.account),
       asset: string(item.asset),
@@ -129,12 +155,29 @@ export function validateBalanceHistoryResponse(value: unknown): BalanceHistoryRe
     };
   });
   const bounds = historyBounds(response);
+  if ((bounds.startTsSec !== undefined && bounds.startTsSec < 0) || (bounds.endTsSec !== undefined && bounds.endTsSec < 0)) fail();
+  if (bounds.startTsSec !== undefined && bounds.endTsSec !== undefined && bounds.endTsSec < bounds.startTsSec) fail();
   const alignedLength = series[0]?.balance.length;
   for (const row of series) {
     checkPointCount(bounds.points, row.balance.length);
     if (alignedLength !== undefined && row.balance.length !== alignedLength) fail();
   }
-  return { range, series, ...bounds };
+  const bucketSeconds = balanceBucketSeconds(bounds.bucket);
+  const pointCount = bounds.points ?? alignedLength;
+  const timingAvailable = bucketSeconds !== undefined && bounds.startTsSec !== undefined && pointCount !== undefined;
+  if (timingAvailable && bounds.endTsSec !== undefined && pointCount > 0) {
+    const expectedEnd = bounds.startTsSec! + (pointCount - 1) * bucketSeconds!;
+    if (!Number.isSafeInteger(expectedEnd) || expectedEnd !== bounds.endTsSec) fail();
+  }
+  return {
+    range,
+    series,
+    ...bounds,
+    timing: {
+      available: timingAvailable,
+      ...(bucketSeconds === undefined ? {} : { bucketSeconds }),
+    },
+  };
 }
 
 export interface EquityHistorySeries {
@@ -373,6 +416,14 @@ export interface NormalizedOrder {
   generation: number;
   version: number;
   feeAsset?: "BASE" | "QUOTE";
+  clientOrderId?: string;
+  tif?: "GTC" | "IOC" | "FOK" | "GTD";
+  expireAt?: string;
+  postOnly?: boolean;
+  stpMode?: "EXPIRE_MAKER" | "EXPIRE_TAKER" | "EXPIRE_BOTH";
+  inheritedCumQty?: string;
+  terminalReason?: string;
+  terminalReasonCode?: number;
 }
 
 export interface NormalizedOrderPage {
@@ -384,6 +435,8 @@ export interface NormalizedOrderPage {
 const ORDER_SIDES = new Set(["BUY", "SELL"]);
 const ORDER_STATUSES = new Set(["PENDING", "PENDING_CANCEL", "WORKING", "FILLED", "CANCELED", "REJECTED"]);
 const ORDER_TYPES = new Set(["LIMIT", "MARKET"]);
+const ORDER_TIFS = new Set(["GTC", "IOC", "FOK", "GTD"]);
+const ORDER_STP_MODES = new Set(["EXPIRE_MAKER", "EXPIRE_TAKER", "EXPIRE_BOTH"]);
 
 export function validateOrderHistoryResponse(
   value: unknown,
@@ -421,11 +474,31 @@ export function validateOrderHistoryResponse(
         generation,
         version: integer(row.version),
       };
+      if (order.version < 1) fail();
       if (row.terminalAt !== undefined) order.terminalAt = string(row.terminalAt);
       if (row.feeAsset !== undefined) {
         const feeAsset = string(row.feeAsset);
         if (feeAsset !== "BASE" && feeAsset !== "QUOTE") fail();
         order.feeAsset = feeAsset;
+      }
+      if (row.clientOrderId !== undefined) order.clientOrderId = string(row.clientOrderId, true);
+      if (row.tif !== undefined) {
+        const tif = string(row.tif);
+        if (!ORDER_TIFS.has(tif)) fail();
+        order.tif = tif as NonNullable<NormalizedOrder["tif"]>;
+      }
+      if (row.expireAt !== undefined) order.expireAt = string(row.expireAt);
+      if (row.postOnly !== undefined) order.postOnly = boolean(row.postOnly);
+      if (row.stpMode !== undefined) {
+        const stpMode = string(row.stpMode);
+        if (!ORDER_STP_MODES.has(stpMode)) fail();
+        order.stpMode = stpMode as NonNullable<NormalizedOrder["stpMode"]>;
+      }
+      if (row.inheritedCumQty !== undefined) order.inheritedCumQty = decimal(row.inheritedCumQty);
+      if (row.terminalReason !== undefined) order.terminalReason = string(row.terminalReason, true);
+      if (row.terminalReasonCode !== undefined) {
+        order.terminalReasonCode = integer(row.terminalReasonCode);
+        if (order.terminalReasonCode < 0) fail();
       }
       orders.push(order);
     } catch {
@@ -433,6 +506,77 @@ export function validateOrderHistoryResponse(
     }
   }
   return { nextPageToken, orders, quarantined };
+}
+
+/**
+ * Validate open orders with the same strict order DTO and quarantine rules as
+ * history. An omitted cursor is an exhausted first page, not a fabricated
+ * cursor; present cursors remain opaque and unchanged.
+ */
+export function validateOrdersOpenResponse(
+  value: unknown,
+  markets: Readonly<Record<string, FillMarket>> = {},
+): NormalizedOrderPage {
+  const response = object(value);
+  return validateOrderHistoryResponse({
+    ...response,
+    nextPageToken: response.nextPageToken === undefined ? "" : response.nextPageToken,
+  }, markets);
+}
+
+export interface NormalizedOrderDetailsPage {
+  nextPageToken: string;
+  order: NormalizedOrder | null;
+  executions: FillInput[];
+  quarantined: unknown[];
+  settlementLegs: unknown[];
+}
+
+/**
+ * Validate the single-order DTO and its independently paginated executions.
+ * Executions are associated only through the requested order's validated
+ * symbol, lineage, and generation; physical order IDs may differ on replaces.
+ */
+export function validateOrderDetailsResponse(
+  value: unknown,
+  context: { accountScope: string; markets: Readonly<Record<string, FillMarket>>; orderId: string },
+): NormalizedOrderDetailsPage {
+  const response = object(value);
+  if (response.nextPageToken === undefined) fail();
+  const requestedOrderId = base58(context.orderId);
+  const fills = validateFillsResponse(response, context);
+  let order: NormalizedOrder | null = null;
+  if (response.order !== undefined) {
+    const orderPage = validateOrderHistoryResponse({
+      nextPageToken: "",
+      orders: [response.order],
+    }, context.markets);
+    if (orderPage.orders.length !== 1 || orderPage.quarantined.length !== 0) fail();
+    order = orderPage.orders[0]!;
+    if (order.orderId !== requestedOrderId) fail();
+    let symbolId = order.symbol;
+    if (Object.keys(context.markets).length > 0) {
+      symbolId = resolveFillMarket(order.symbol, context.markets).symbolId;
+    }
+    for (const fill of fills.fills) {
+      if (
+        fill.symbol !== symbolId ||
+        fill.lineageId !== order.lineageId ||
+        fill.generation === undefined ||
+        fill.generation > order.generation
+      ) fail();
+    }
+  } else if (fills.fills.length > 0) {
+    // Never associate executions with a missing/not-found order.
+    fail();
+  }
+  return {
+    nextPageToken: fills.nextPageToken,
+    order,
+    executions: fills.fills,
+    quarantined: fills.quarantined,
+    settlementLegs: fills.settlementLegs,
+  };
 }
 
 export interface NormalizedFeeRate {
@@ -446,6 +590,8 @@ export function validateFeeRatesResponse(value: unknown): { feeRates: Normalized
   const response = object(value);
   const feeRates = array(response.feeRates).map((raw) => {
     const row = object(raw);
+    // Maker rates may represent rebates. Taker rates use the non-negative
+    // decimal validator; both remain exact source strings, with no float gate.
     const maker = decimal(row.makerFeeRatePercent, true);
     const taker = decimal(row.takerFeeRatePercent);
     if (compare(parseDecimal(maker), fromBigInt(-100n)) < 0 || compare(parseDecimal(maker), fromBigInt(100n)) > 0) fail();
