@@ -151,6 +151,16 @@ This is a proposed automation procedure, not a claim that it has already run:
 
 A local headless run can therefore automate almost all request/schema/permission verification. It cannot honestly be reported as a successful **browser** compatibility test unless the browser checks also pass.
 
+### Repository runner
+
+The optional `scripts/live-test.mjs` runner uses a local gitignored `.env` containing `PUBLIC_KEY`, `PRIVATE_KEY`, and `KEY_ID`. Run it only in the owner-controlled local environment:
+
+```bash
+POLYTOOLS_LIVE_TEST=1 node scripts/live-test.mjs
+```
+
+It refuses CI, is not part of `npm test`, suppresses identifiers and arbitrary error details, and performs only the fixed read-only GET checks. Do not run it in Arena, a shared preview, or a deployed web process. Its output is a sanitized operational report, not a substitute for browser CORS or complete-pagination evidence.
+
 ## 7. Impact on the current PolyTools checkpoint
 
 - R1 source changes remain frozen while the owner-controlled live test is completed.

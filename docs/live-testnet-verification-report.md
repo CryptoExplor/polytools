@@ -99,3 +99,9 @@ For a stronger follow-up report, the owner-controlled agent should retain only s
 - separate browser-origin CORS/preflight results if the web UI is enabled.
 
 The disposable test key should be revoked according to the owner's procedure when testing is complete.
+
+## 7. Runner review after the handoff
+
+The subsequently pushed `scripts/live-test.mjs` was reviewed without executing it. The runner was then hardened to require an explicit local `POLYTOOLS_LIVE_TEST=1` opt-in, refuse CI, avoid retaining unrelated environment variables, disable Vite env-file loading, suppress key identifiers and arbitrary error messages, use the vault's clock-skew API, apply request timeouts, and distinguish generic object acceptance from full schema validation.
+
+Those runner edits are a static safety review, **not a second live verification run**. The results above remain attributed to the original local-agent handoff.
