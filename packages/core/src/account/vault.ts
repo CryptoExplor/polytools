@@ -988,6 +988,8 @@ export class AccountVault {
 
   async signReadRequest(input: {
     operation: ReadOnlyOperation;
+    /** Exact serialized path; dynamic order details is restricted below. */
+    path?: string;
     query?: string;
   }): Promise<SignedRequestResult & { headers: Record<string, string> }> {
     const operation = READ_ONLY_OPERATIONS[input.operation];
@@ -995,6 +997,22 @@ export class AccountVault {
       throw new AccountVaultError(
         "OPERATION_NOT_ALLOWED",
         "Only registered read-only GET operations can be signed by account analytics.",
+      );
+    }
+    let path = operation.path as string;
+    if (input.operation === "orderDetails") {
+      const orderId = input.path?.startsWith("/v1/spot/orders/") ? input.path.slice("/v1/spot/orders/".length) : "";
+      if (!input.path || orderId.length > 256 || !/^\/v1\/spot\/orders\/[1-9A-HJ-NP-Za-km-z]+$/.test(input.path)) {
+        throw new AccountVaultError(
+          "OPERATION_NOT_ALLOWED",
+          "Order details requires one validated order ID in its registered path.",
+        );
+      }
+      path = input.path;
+    } else if (input.path !== undefined && input.path !== operation.path) {
+      throw new AccountVaultError(
+        "OPERATION_NOT_ALLOWED",
+        "The requested path is not the registered path for this read-only operation.",
       );
     }
     const session = await this.requireSession();
@@ -1007,7 +1025,7 @@ export class AccountVault {
     try {
       const signed = await session.signer.signCanonical({
         method: operation.method,
-        path: operation.path,
+        path,
         query: input.query,
         operation: input.operation,
       });

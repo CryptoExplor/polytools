@@ -885,11 +885,15 @@ export default function Portfolio() {
                     setSignedOutput(null);
                   }}
                 >
-                  {Object.entries(vault.READ_ONLY_OPERATIONS).map(([key, definition]) => (
-                    <option key={key} value={key}>
-                      {definition.label} · {definition.path}
-                    </option>
-                  ))}
+                  {Object.entries(vault.READ_ONLY_OPERATIONS)
+                    // Order details needs a validated path identifier and is
+                    // initiated by the account drawer, not this raw inspector.
+                    .filter(([, definition]) => !definition.path.includes("{"))
+                    .map(([key, definition]) => (
+                      <option key={key} value={key}>
+                        {definition.label} · {definition.path}
+                      </option>
+                    ))}
                 </select>
               </div>
               <div className="field">

@@ -88,6 +88,22 @@ describe("Friendly REST read-only serializers", () => {
     assert.equal(account.buildReadRequest("feeRates").path, "/v1/spot/fee-rates");
   });
 
+  it("serializes order details with a validated dynamic path and execution cursor controls", () => {
+    const built = account.buildReadRequest("orderDetails", {
+      orderId: "order1",
+      subaccountId: "123456789",
+      includeExecutionHistory: true,
+      limit: 100,
+      pageToken: "a+b/%",
+    });
+    assert.equal(built.path, "/v1/spot/orders/order1");
+    assert.equal(built.canonicalQuery, "includeExecutionHistory=true&limit=100&pageToken=a%2Bb%2F%25&subaccountId=123456789");
+    assert.equal(built.url, `https://api.testnet.polyester.com/v1/spot/orders/order1?${built.canonicalQuery}`);
+    assert.equal(built.url.includes("orderId="), false);
+    assert.throws(() => account.buildReadRequest("orderDetails", { includeExecutionHistory: true }), (error) => error?.code === "INVALID_REQUEST");
+    assert.throws(() => account.buildReadRequest("orderDetails", { orderId: "order1", symbol: "BTC-USDT" }), (error) => error?.code === "INVALID_REQUEST");
+  });
+
   it("applies the shared subaccount ID rules to current fee rates", () => {
     assert.equal(
       account.buildReadRequest("feeRates", { subaccountId: "123456789" }).canonicalQuery,
@@ -121,6 +137,24 @@ describe("Friendly REST read-only serializers", () => {
 });
 
 describe("Signed fake-fetch account client", () => {
+  it("signs only the registered dynamic order path and rejects arbitrary paths", async () => {
+    const vault = await connected();
+    const signed = await vault.signReadRequest({
+      operation: "orderDetails",
+      path: "/v1/spot/orders/order1",
+      query: "includeExecutionHistory=true",
+    });
+    assert.equal(signed.canonicalString.split("\n")[2], "/v1/spot/orders/order1");
+    await assert.rejects(
+      () => vault.signReadRequest({ operation: "orderDetails", path: "/v1/spot/orders/order1/extra" }),
+      (error) => error?.code === "OPERATION_NOT_ALLOWED",
+    );
+    await assert.rejects(
+      () => vault.signReadRequest({ operation: "balances", path: "/v1/spot/orders/order1" }),
+      (error) => error?.code === "OPERATION_NOT_ALLOWED",
+    );
+  });
+
   it("signs the exact sent GET with safe fetch defaults and validates JSON before returning", async () => {
     const vault = await connected();
     const calls = [];

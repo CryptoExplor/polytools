@@ -12,15 +12,18 @@ import type { AccountVault, VaultSessionInfo } from "./vault";
 import { MemoryDatasetStore, type PrivatePartition } from "./memoryStore";
 import { collectCursorPages, CursorIngestionError } from "./pagination";
 import { emptyCoverage, type Coverage, type CoverageStatus } from "./coverage";
-import { sampledEquityMetrics, summarizeFills, type ObservedFillSummary, type SampledEquityMetrics } from "./analytics";
+import { deduplicateFills, sampledEquityMetrics, summarizeFills, type FillInput, type ObservedFillSummary, type SampledEquityMetrics } from "./analytics";
 import {
+  validateBalanceHistoryResponse,
   validateBalancesResponse,
   validateEquityHistoryResponse,
   validateFeeRatesResponse,
   validateFillsResponse,
+  validateOrderDetailsResponse,
   validateOrderHistoryResponse,
   validateOrdersOpenResponse,
   validateTransfersResponse,
+  type BalanceHistoryResponse,
   type EquityHistoryResponse,
   type FillMarket,
   type NormalizedBalance,
@@ -58,8 +61,14 @@ export interface AccountPeriod {
 export interface AccountDataLoadOptions {
   range?: AccountHistoryRange;
   subaccountId?: string;
+  ledger?: string;
+  accountCode?: string;
   markets?: Readonly<Record<string, FillMarket>>;
   signal?: AbortSignal;
+}
+
+export interface OrderDetailsLoadOptions extends AccountDataLoadOptions {
+  orderId: string;
 }
 
 export interface AccountDataset<T> {
@@ -72,6 +81,8 @@ export interface AccountDataset<T> {
 export interface BalancesData {
   balances: NormalizedBalance[];
 }
+
+export type BalanceHistoryData = BalanceHistoryResponse;
 
 export interface EquityData {
   response: EquityHistoryResponse;
@@ -86,6 +97,13 @@ export interface OrdersData {
 
 export interface OpenOrdersData {
   orders: NormalizedOrder[];
+  quarantined: unknown[];
+}
+
+export interface OrderDetailsData {
+  order: NormalizedOrder | null;
+  /** Deduplicated lineage executions; never settlement legs or inferred fills. */
+  executions: FillInput[];
   quarantined: unknown[];
 }
 
@@ -130,6 +148,11 @@ interface PageCollection<T> {
   repeatedCursor: boolean;
   retrievedAtMs: number | null;
   error?: unknown;
+}
+
+interface RequestGeneration {
+  key: string;
+  generation: number;
 }
 
 const RANGE_DAYS: Record<AccountHistoryRange, number> = {
@@ -211,6 +234,10 @@ export class AccountDataCoordinator {
   private readonly maxPages: number;
   private readonly now: () => number;
   private readonly unbindLifecycle: () => void;
+  private readonly unbindRequests: () => void;
+  private readonly requestGenerations = new Map<string, number>();
+  private requestSequence = 0;
+  private disposed = false;
 
   constructor(options: AccountDataCoordinatorOptions) {
     this.vault = options.vault;
@@ -225,14 +252,32 @@ export class AccountDataCoordinator {
     }
     this.now = options.now ?? Date.now;
     this.unbindLifecycle = this.store.bindLifecycle((listener) => this.vault.subscribe(listener));
+    this.unbindRequests = this.vault.subscribe((event) => {
+      if (["LOCK", "WIPE", "VAULT_CHANGED", "IMPORT", "UNLOCK"].includes(event.type.toUpperCase())) {
+        this.invalidate();
+      }
+    });
   }
 
   dispose(): void {
+    this.disposed = true;
+    this.requestGenerations.clear();
+    this.unbindRequests();
     this.unbindLifecycle();
     this.store.dispose();
   }
 
+  /** Invalidate every in-flight dataset and all same-session private snapshots. */
+  invalidate(): void {
+    this.requestSequence += 1;
+    this.requestGenerations.clear();
+    this.store.clear();
+  }
+
   private sessionOrThrow(): VaultSessionInfo {
+    if (this.disposed) {
+      throw new AccountRestError("ACCOUNT_STALE", "account", "The account coordinator was disposed; private data was discarded.");
+    }
     const session = this.vault.getSessionInfo();
     if (!session) {
       throw new AccountRestError("ACCOUNT_STALE", "account", "Unlock the vault before account reads.");
@@ -249,6 +294,22 @@ export class AccountDataCoordinator {
       session.signal.aborted
     ) {
       throw new AccountRestError("ACCOUNT_STALE", "account", "The account session changed; private data was discarded.");
+    }
+  }
+
+  private beginRequest(key: string): RequestGeneration {
+    if (this.disposed) {
+      throw new AccountRestError("ACCOUNT_STALE", "account", "The account coordinator was disposed; private data was discarded.");
+    }
+    const generation = ++this.requestSequence;
+    this.requestGenerations.set(key, generation);
+    return { key, generation };
+  }
+
+  private assertRequestCurrent(session: VaultSessionInfo, request: RequestGeneration): void {
+    this.assertCurrent(session);
+    if (this.disposed || this.requestGenerations.get(request.key) !== request.generation) {
+      throw new AccountRestError("ACCOUNT_STALE", "account", "A newer account request superseded this response; it was discarded.");
     }
   }
 
@@ -283,8 +344,10 @@ export class AccountDataCoordinator {
     operation: ReadOnlyOperation,
     params: AccountRequestParams,
     value: AccountDataset<T>,
+    request?: RequestGeneration,
   ): void {
-    this.assertCurrent(session);
+    if (request) this.assertRequestCurrent(session, request);
+    else this.assertCurrent(session);
     const current = this.vault.getSessionInfo();
     if (!current) return;
     this.store.setIfCurrent(partition, value, this.partition(current, operation, params));
@@ -297,7 +360,9 @@ export class AccountDataCoordinator {
     period: AccountPeriod | undefined,
     previous: AccountDataset<T> | undefined,
     error: unknown,
+    request?: RequestGeneration,
   ): AccountDataset<T> {
+    if (request) this.assertRequestCurrent(session, request);
     const safe = cursorError(error, operation);
     const base = emptyDataset<T>(operation, period, this.scopeLabel(params), params);
     const canUseStale = previous?.data !== null && previous?.data !== undefined && TEMPORARY_ERRORS.has(safe.code);
@@ -320,6 +385,7 @@ export class AccountDataCoordinator {
     period: AccountPeriod | undefined,
     validate: (value: unknown) => T,
     rowCount: (data: T) => number,
+    request: RequestGeneration,
     signal?: AbortSignal,
   ): Promise<AccountDataset<T>> {
     const partition = this.partition(session, operation, params);
@@ -327,7 +393,7 @@ export class AccountDataCoordinator {
     const base = emptyDataset<T>(operation, period, this.scopeLabel(params), params);
     try {
       const response = await this.client.request(operation, params, validate, { signal });
-      this.assertCurrent(session);
+      this.assertRequestCurrent(session, request);
       const rows = rowCount(response.data);
       const result: AccountDataset<T> = {
         data: response.data,
@@ -342,10 +408,10 @@ export class AccountDataCoordinator {
           retrievedAtMs: response.retrievedAtMs,
         },
       };
-      this.storeCurrent(session, partition, operation, params, result);
+      this.storeCurrent(session, partition, operation, params, result, request);
       return result;
     } catch (error) {
-      return this.failure(session, operation, params, period, previous, error);
+      return this.failure(session, operation, params, period, previous, error, request);
     }
   }
 
@@ -353,6 +419,7 @@ export class AccountDataCoordinator {
     session: VaultSessionInfo,
     operation: ReadOnlyOperation,
     params: AccountRequestParams,
+    request: RequestGeneration,
     signal: AbortSignal | undefined,
     adapt: (value: unknown) => PageAdapter<T>,
   ): Promise<PageCollection<T>> {
@@ -369,7 +436,7 @@ export class AccountDataCoordinator {
           (value) => adapt(value),
           { signal },
         );
-        this.assertCurrent(session);
+        this.assertRequestCurrent(session, request);
         const page = response.data;
         receivedRows += page.rows.length + (page.quarantined?.length ?? 0);
         if (page.quarantined) quarantined.push(...page.quarantined);
@@ -409,13 +476,14 @@ export class AccountDataCoordinator {
     operation: ReadOnlyOperation,
     params: AccountRequestParams,
     period: AccountPeriod | undefined,
+    request: RequestGeneration,
     context: { partition: PrivatePartition; previous?: AccountDataset<T>; base: AccountDataset<T> },
     collection: PageCollection<unknown>,
     data: T,
     counts: { accepted: number; duplicates?: number; conflicts?: number; unknown: number },
   ): AccountDataset<T> {
     if (collection.error && collection.pagesFetched === 0) {
-      return this.failure(session, operation, params, period, context.previous, collection.error);
+      return this.failure(session, operation, params, period, context.previous, collection.error, request);
     }
     const hasPartialData = Boolean(
       collection.error ||
@@ -444,9 +512,9 @@ export class AccountDataCoordinator {
       },
     };
     try {
-      this.storeCurrent(session, context.partition, operation, params, result);
+      this.storeCurrent(session, context.partition, operation, params, result, request);
     } catch (error) {
-      return this.failure(session, operation, params, period, context.previous, error);
+      return this.failure(session, operation, params, period, context.previous, error, request);
     }
     return result;
   }
@@ -456,20 +524,21 @@ export class AccountDataCoordinator {
     params: AccountRequestParams,
     period: AccountPeriod,
     markets: Readonly<Record<string, FillMarket>>,
+    request: RequestGeneration,
     signal?: AbortSignal,
   ): Promise<AccountDataset<OrdersData>> {
     const context = this.pagedBase<OrdersData>(session, "ordersHistory", params, period);
     try {
-      const collection = await this.collectPages(session, "ordersHistory", params, signal, (value) => {
+      const collection = await this.collectPages(session, "ordersHistory", params, request, signal, (value) => {
         const page = validateOrderHistoryResponse(value, markets);
         return { nextPageToken: page.nextPageToken, rows: page.orders, quarantined: page.quarantined };
       });
-      return this.finishPaged(session, "ordersHistory", params, period, context, collection, {
+      return this.finishPaged(session, "ordersHistory", params, period, request, context, collection, {
         orders: collection.rows,
         quarantined: collection.quarantined,
       }, { accepted: collection.rows.length, unknown: collection.quarantined.length });
     } catch (error) {
-      return this.failure(session, "ordersHistory", params, period, context.previous, error);
+      return this.failure(session, "ordersHistory", params, period, context.previous, error, request);
     }
   }
 
@@ -478,11 +547,12 @@ export class AccountDataCoordinator {
     params: AccountRequestParams,
     period: AccountPeriod,
     markets: Readonly<Record<string, FillMarket>>,
+    request: RequestGeneration,
     signal?: AbortSignal,
   ): Promise<AccountDataset<FillsData>> {
     const context = this.pagedBase<FillsData>(session, "fills", params, period);
     try {
-      const collection = await this.collectPages(session, "fills", params, signal, (value) => {
+      const collection = await this.collectPages(session, "fills", params, request, signal, (value) => {
         const page = validateFillsResponse(value, {
           accountScope: JSON.stringify([session.entryId, params.subaccountId ?? "root"]),
           markets,
@@ -500,7 +570,7 @@ export class AccountDataCoordinator {
         summary.metricLabel = "observed-metrics-blocked";
         summary.issues.push("Unknown response rows block affected fill aggregates.");
       }
-      const result = this.finishPaged(session, "fills", params, period, context, collection, {
+      const result = this.finishPaged(session, "fills", params, period, request, context, collection, {
         summary,
         quarantined: collection.quarantined,
       }, {
@@ -511,7 +581,7 @@ export class AccountDataCoordinator {
       });
       return result;
     } catch (error) {
-      return this.failure(session, "fills", params, period, context.previous, error);
+      return this.failure(session, "fills", params, period, context.previous, error, request);
     }
   }
 
@@ -519,16 +589,17 @@ export class AccountDataCoordinator {
     session: VaultSessionInfo,
     params: AccountRequestParams,
     period: AccountPeriod | undefined,
+    request: RequestGeneration,
     signal?: AbortSignal,
   ): Promise<AccountDataset<TransfersData>> {
     const context = this.pagedBase<TransfersData>(session, "transfers", params, period);
     try {
-      const collection = await this.collectPages(session, "transfers", params, signal, (value) => {
+      const collection = await this.collectPages(session, "transfers", params, request, signal, (value) => {
         const page = validateTransfersResponse(value);
         return { nextPageToken: page.nextPageToken, rows: page.transfers, quarantined: page.quarantined };
       });
       const unknownReasons = collection.rows.filter((transfer) => !transfer.reasonKnown).length;
-      return this.finishPaged(session, "transfers", params, period, context, collection, {
+      return this.finishPaged(session, "transfers", params, period, request, context, collection, {
         // Unknown reasons remain visible; they are excluded only from accepted
         // coverage counts, never silently dropped from the activity rows.
         transfers: collection.rows,
@@ -538,7 +609,7 @@ export class AccountDataCoordinator {
         unknown: collection.quarantined.length + unknownReasons,
       });
     } catch (error) {
-      return this.failure(session, "transfers", params, period, context.previous, error);
+      return this.failure(session, "transfers", params, period, context.previous, error, request);
     }
   }
 
@@ -549,32 +620,106 @@ export class AccountDataCoordinator {
    */
   async loadOpenOrders(options: AccountDataLoadOptions = {}): Promise<AccountDataset<OpenOrdersData>> {
     const session = this.sessionOrThrow();
+    const request = this.beginRequest("openOrders");
     const scope = options.subaccountId === undefined ? {} : { subaccountId: options.subaccountId };
     const params: AccountRequestParams = { ...scope, limit: 100 };
     const context = this.pagedBase<OpenOrdersData>(session, "ordersOpen", params, undefined);
     try {
-      const collection = await this.collectPages(session, "ordersOpen", params, options.signal, (value) => {
+      const collection = await this.collectPages(session, "ordersOpen", params, request, options.signal, (value) => {
         const page = validateOrdersOpenResponse(value, options.markets ?? {});
         return { nextPageToken: page.nextPageToken, rows: page.orders, quarantined: page.quarantined };
       });
-      return this.finishPaged(session, "ordersOpen", params, undefined, context, collection, {
+      return this.finishPaged(session, "ordersOpen", params, undefined, request, context, collection, {
         orders: collection.rows,
         quarantined: collection.quarantined,
       }, { accepted: collection.rows.length, unknown: collection.quarantined.length });
     } catch (error) {
-      return this.failure(session, "ordersOpen", params, undefined, context.previous, error);
+      return this.failure(session, "ordersOpen", params, undefined, context.previous, error, request);
+    }
+  }
+
+  /** Load fixed-range sampled balances without adding a request to loadAll(). */
+  async loadBalanceHistory(options: AccountDataLoadOptions = {}): Promise<AccountDataset<BalanceHistoryData>> {
+    const session = this.sessionOrThrow();
+    const request = this.beginRequest("balanceHistory");
+    const scope = options.subaccountId === undefined ? {} : { subaccountId: options.subaccountId };
+    const params: AccountRequestParams = {
+      ...scope,
+      range: options.range ?? "7d",
+      ...(options.ledger === undefined ? {} : { ledger: options.ledger }),
+      ...(options.accountCode === undefined ? {} : { accountCode: options.accountCode }),
+    };
+    return this.readSingle(
+      session,
+      "balanceHistory",
+      params,
+      undefined,
+      validateBalanceHistoryResponse,
+      (data) => data.series.reduce((count, series) => count + series.balance.length, 0),
+      request,
+      options.signal,
+    );
+  }
+
+  /** Load one order and all safely bounded pages of its lineage executions. */
+  async loadOrderDetails(options: OrderDetailsLoadOptions): Promise<AccountDataset<OrderDetailsData>> {
+    const session = this.sessionOrThrow();
+    const request = this.beginRequest("orderDetails");
+    const scope = options.subaccountId === undefined ? {} : { subaccountId: options.subaccountId };
+    const params: AccountRequestParams = {
+      ...scope,
+      orderId: options.orderId,
+      includeExecutionHistory: true,
+      limit: 100,
+    };
+    const context = this.pagedBase<OrderDetailsData>(session, "orderDetails", params, undefined);
+    let selectedOrder: NormalizedOrder | null = null;
+    let orderSeen = false;
+    try {
+      const collection = await this.collectPages(session, "orderDetails", params, request, options.signal, (value) => {
+        const page = validateOrderDetailsResponse(value, {
+          accountScope: JSON.stringify([session.entryId, params.subaccountId ?? "root"]),
+          markets: options.markets ?? {},
+          orderId: options.orderId,
+        });
+        if (!orderSeen) {
+          selectedOrder = page.order;
+          orderSeen = true;
+        } else if (JSON.stringify(selectedOrder) !== JSON.stringify(page.order)) {
+          throw new AccountRestError(
+            "SCHEMA_INCOMPATIBLE",
+            "orderDetails",
+            "The order changed while execution pages were read; the inconsistent snapshot was blocked.",
+          );
+        }
+        return { nextPageToken: page.nextPageToken, rows: page.executions, quarantined: page.quarantined };
+      });
+      const deduplicated = deduplicateFills(collection.rows);
+      return this.finishPaged(session, "orderDetails", params, undefined, request, context, collection, {
+        order: selectedOrder,
+        executions: deduplicated.rows,
+        quarantined: collection.quarantined,
+      }, {
+        accepted: deduplicated.rows.length,
+        duplicates: deduplicated.duplicateRows,
+        conflicts: deduplicated.conflictingRows,
+        unknown: collection.quarantined.length,
+      });
+    } catch (error) {
+      return this.failure(session, "orderDetails", params, undefined, context.previous, error, request);
     }
   }
 
   async loadAll(options: AccountDataLoadOptions = {}): Promise<AccountDataSnapshot> {
     const session = this.sessionOrThrow();
+    const request = this.beginRequest("all");
     const period = accountPeriodWindow(options.range ?? "30d", this.now());
     const markets = options.markets ?? {};
     const scope = options.subaccountId === undefined ? {} : { subaccountId: options.subaccountId };
     const paged = { ...scope, limit: 100 };
     const timeWindow = { startTime: period.startTime, endTime: period.endTime };
     const [balances, equity, orders, fills, transfers, feeRates] = await Promise.all([
-      this.readSingle(session, "balances", scope, undefined, validateBalancesResponse, (data) => data.balances.length, options.signal),
+      this.readSingle(session, "balances", scope, undefined, validateBalancesResponse, (data) => data.balances.length, request, options.signal),
       this.readSingle(session, "equityHistory", { ...scope, range: period.range, groupBy: "ASSET" }, period, (value) => {
         const response = validateEquityHistoryResponse(value);
         return {
@@ -583,12 +728,13 @@ export class AccountDataCoordinator {
             series.equity.map((equity, index) => ({ timestamp: String(index), equity })),
           )),
         };
-      }, (data) => data.response.series.reduce((count, series) => count + series.equity.length, 0), options.signal),
-      this.readOrders(session, { ...paged, ...timeWindow }, period, markets, options.signal),
-      this.readFills(session, { ...paged, ...timeWindow }, period, markets, options.signal),
-      this.readTransfers(session, paged, undefined, options.signal),
-      this.readSingle(session, "feeRates", scope, undefined, validateFeeRatesResponse, (data) => data.feeRates.length, options.signal),
+      }, (data) => data.response.series.reduce((count, series) => count + series.equity.length, 0), request, options.signal),
+      this.readOrders(session, { ...paged, ...timeWindow }, period, markets, request, options.signal),
+      this.readFills(session, { ...paged, ...timeWindow }, period, markets, request, options.signal),
+      this.readTransfers(session, paged, undefined, request, options.signal),
+      this.readSingle(session, "feeRates", scope, undefined, validateFeeRatesResponse, (data) => data.feeRates.length, request, options.signal),
     ]);
+    this.assertRequestCurrent(session, request);
     return {
       period,
       scopeLabel: this.scopeLabel(scope),

@@ -123,6 +123,16 @@ function successRouter(calls, overrides = {}) {
     const path = parsed.pathname;
     if (overrides[path]) return overrides[path](parsed, init);
     if (path === "/v1/balances") return jsonResponse({ balances: [balance] });
+    if (path === "/v1/balances/history") {
+      return jsonResponse({
+        range: "7d",
+        bucket: "1h",
+        startTsSec: 1767225600,
+        endTsSec: 1767229200,
+        points: 2,
+        series: [{ account: "trading", asset: "BTC", balance: ["2.5", "2.5000001"] }],
+      });
+    }
     if (path === "/v1/equity/history/series") {
       return jsonResponse({
         range: "7d",
@@ -140,6 +150,9 @@ function successRouter(calls, overrides = {}) {
       return parsed.searchParams.get("pageToken")
         ? jsonResponse({ nextPageToken: "", orders: [order("order2")] })
         : jsonResponse({ nextPageToken: "order-cursor", orders: [order("order1")] });
+    }
+    if (path === "/v1/spot/orders/order1") {
+      return jsonResponse({ nextPageToken: "", order: order("order1"), trades: [fill], transfers: [] });
     }
     if (path === "/v1/spot/trades") {
       return jsonResponse({ nextPageToken: "", trades: [fill], transfers: [] });
@@ -167,6 +180,21 @@ function makeCoordinator(vault, fetchImpl, options = {}) {
 }
 
 const markets = { "1": { baseAsset: "BTC", quoteAsset: "USDT", marketSymbol: "BTC-USDT" } };
+
+function historyBody(value = "2.5000001") {
+  return {
+    range: "7d", bucket: "1h", startTsSec: 1767225600, endTsSec: 1767229200, points: 2,
+    series: [{ account: "trading", asset: "BTC", balance: ["2.5", value] }],
+  };
+}
+
+async function waitFor(predicate) {
+  const deadline = Date.now() + 5_000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("Timed out waiting for synthetic request scheduling.");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
 
 describe("Official public catalog boundary", () => {
   it("loads pair identity without credentials and rejects conflicting catalog IDs", async () => {
@@ -237,6 +265,54 @@ describe("Account data coordinator (synthetic authenticated transport)", () => {
     assert.equal(new URL(openCall.url).searchParams.has("startTime"), false);
   });
 
+  it("loads fixed-range balance history with exact values, identity, timing, and coverage", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, successRouter(calls));
+    const dataset = await coordinator.loadBalanceHistory({ range: "7d" });
+    assert.equal(dataset.coverage.status, "complete");
+    assert.equal(dataset.coverage.cursorExhausted, true);
+    assert.equal(dataset.coverage.rowsReceived, 2);
+    assert.equal(dataset.data.series[0].asset, "BTC");
+    assert.equal(dataset.data.series[0].account, "trading");
+    assert.equal(dataset.data.series[0].balance[1], "2.5000001");
+    assert.equal(dataset.data.startTsSec, 1767225600);
+    assert.equal(dataset.data.endTsSec, 1767229200);
+    assert.equal(dataset.data.timing.available, true);
+    assert.equal(dataset.data.timing.bucketSeconds, 3600);
+    const call = calls.find(({ url }) => new URL(url).pathname === "/v1/balances/history");
+    assert.equal(new URL(call.url).searchParams.get("range"), "7d");
+    assert.equal(call.init.method, "GET");
+  });
+
+  it("loads order details with exact dynamic paths and validated lineage executions", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, successRouter(calls));
+    const dataset = await coordinator.loadOrderDetails({ orderId: "order1", markets });
+    assert.equal(dataset.coverage.status, "complete");
+    assert.equal(dataset.data.order.orderId, "order1");
+    assert.equal(dataset.data.executions.length, 1);
+    assert.equal(dataset.data.executions[0].feeMagnitude, "0.8");
+    assert.equal(dataset.data.executions[0].lineageId, "order1");
+    const call = calls.find(({ url }) => new URL(url).pathname === "/v1/spot/orders/order1");
+    assert.equal(new URL(call.url).searchParams.get("includeExecutionHistory"), "true");
+    assert.equal(new URL(call.url).searchParams.has("orderId"), false);
+    assert.equal(call.init.method, "GET");
+  });
+
+  it("keeps open orders independent when loaded concurrently with the main snapshot", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, successRouter(calls));
+    const [snapshot, open] = await Promise.all([
+      coordinator.loadAll({ markets }),
+      coordinator.loadOpenOrders({ markets }),
+    ]);
+    assert.equal(snapshot.balances.data.balances.length, 1);
+    assert.equal(open.data.orders[0].orderId, "open1");
+  });
+
   it("keeps malformed open-order rows visible as partial coverage", async () => {
     const vault = await connected();
     const calls = [];
@@ -253,6 +329,93 @@ describe("Account data coordinator (synthetic authenticated transport)", () => {
     assert.equal(dataset.coverage.rowsAccepted, 1);
     assert.equal(dataset.coverage.unknownRows, 1);
     assert.equal(account.rowsReconcile(dataset.coverage), true);
+  });
+
+  it("distinguishes empty fixed-range, open-order, and order-detail responses", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, successRouter(calls, {
+      "/v1/balances/history": () => jsonResponse({ range: "7d", points: 0, series: [] }),
+      "/v1/orders/open": () => jsonResponse({ nextPageToken: "", orders: [] }),
+      "/v1/spot/orders/order1": () => jsonResponse({ nextPageToken: "", trades: [], transfers: [] }),
+    }));
+    const history = await coordinator.loadBalanceHistory({ range: "7d" });
+    const open = await coordinator.loadOpenOrders({ markets });
+    const details = await coordinator.loadOrderDetails({ orderId: "order1", markets });
+    assert.deepEqual(history.data.series, []);
+    assert.equal(history.data.timing.available, false);
+    assert.deepEqual(open.data.orders, []);
+    assert.equal(details.data.order, null);
+    assert.deepEqual(details.data.executions, []);
+    for (const dataset of [history, open, details]) {
+      assert.equal(dataset.coverage.status, "complete");
+      assert.equal(dataset.data !== null, true);
+    }
+  });
+
+  it("blocks malformed balance timing and unassociated order executions", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, successRouter(calls, {
+      "/v1/balances/history": () => jsonResponse({
+        range: "7d", bucket: "1h", startTsSec: 1767225600, endTsSec: 1767225601, points: 2,
+        series: [{ account: "trading", asset: "BTC", balance: ["2.5", "2.6"] }],
+      }),
+      "/v1/spot/orders/order1": () => jsonResponse({
+        nextPageToken: "", order: order("order1"),
+        trades: [{ ...fill, lineage: { generation: 1, id: "other1" } }], transfers: [],
+      }),
+    }));
+    const history = await coordinator.loadBalanceHistory({ range: "7d" });
+    const details = await coordinator.loadOrderDetails({ orderId: "order1", markets });
+    assert.equal(history.data, null);
+    assert.equal(history.coverage.status, "blocked");
+    assert.equal(history.error.code, "SCHEMA_INCOMPATIBLE");
+    assert.equal(details.data, null);
+    assert.equal(details.coverage.status, "blocked");
+    assert.equal(details.error.code, "SCHEMA_INCOMPATIBLE");
+  });
+
+  it("retains validated order-detail prefixes with partial coverage after a later-page failure", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, successRouter(calls, {
+      "/v1/spot/orders/order1": (parsed) => parsed.searchParams.get("pageToken")
+        ? jsonResponse({ code: "UNAVAILABLE", detail: "synthetic private detail" }, 503)
+        : jsonResponse({ nextPageToken: "opaque+cursor", order: order("order1"), trades: [fill], transfers: [] }),
+    }));
+    const dataset = await coordinator.loadOrderDetails({ orderId: "order1", markets });
+    assert.equal(dataset.data.order.orderId, "order1");
+    assert.equal(dataset.data.executions.length, 1);
+    assert.equal(dataset.coverage.status, "partial");
+    assert.equal(dataset.coverage.cursorExhausted, false);
+    assert.equal(dataset.coverage.pagesFetched, 1);
+    assert.equal(dataset.error.code, "SERVER");
+    assert.equal(JSON.stringify(dataset).includes("synthetic private detail"), false);
+    const second = calls.filter(({ url }) => new URL(url).pathname === "/v1/spot/orders/order1")[1];
+    assert.equal(new URL(second.url).searchParams.get("pageToken"), "opaque+cursor");
+  });
+
+  it("keeps balance-history, open-order, and order-detail denials independent", async () => {
+    const vault = await connected();
+    const calls = [];
+    const denied = () => jsonResponse({ code: "PERMISSION_DENIED", detail: "synthetic private detail" }, 403);
+    const { coordinator } = makeCoordinator(vault, successRouter(calls, {
+      "/v1/balances/history": denied,
+      "/v1/orders/open": denied,
+      "/v1/spot/orders/order1": denied,
+    }));
+    const datasets = await Promise.all([
+      coordinator.loadBalanceHistory(),
+      coordinator.loadOpenOrders({ markets }),
+      coordinator.loadOrderDetails({ orderId: "order1", markets }),
+    ]);
+    for (const dataset of datasets) {
+      assert.equal(dataset.data, null);
+      assert.equal(dataset.coverage.status, "denied");
+      assert.equal(dataset.error.code, "PERMISSION_DENIED");
+      assert.equal(JSON.stringify(dataset).includes("synthetic private detail"), false);
+    }
   });
 
   it("keeps permission failures independent and never turns them into empty successful datasets", async () => {
@@ -342,6 +505,66 @@ describe("Account data coordinator (synthetic authenticated transport)", () => {
     assert.equal(snapshot.balances.data.balances[0].symbol, "BTC");
     assert.equal(snapshot.balances.error.code, "SERVER");
     assert.equal(snapshot.balances.coverage.rowsAccepted, 1);
+  });
+
+  it("keeps same-session balance-history data stale after a temporary failure", async () => {
+    const vault = await connected();
+    const calls = [];
+    let fail = false;
+    const { coordinator } = makeCoordinator(vault, successRouter(calls, {
+      "/v1/balances/history": () => fail
+        ? jsonResponse({ code: "UNAVAILABLE" }, 503)
+        : jsonResponse(historyBody()),
+    }));
+    await coordinator.loadBalanceHistory({ range: "7d" });
+    fail = true;
+    const stale = await coordinator.loadBalanceHistory({ range: "7d" });
+    assert.equal(stale.coverage.status, "stale");
+    assert.equal(stale.data.series[0].balance[1], "2.5000001");
+    assert.equal(stale.error.code, "SERVER");
+  });
+
+  it("lets only the newest same-session balance-history generation update data and cache", async () => {
+    const vault = await connected();
+    const pending = [];
+    let fail = false;
+    const { coordinator } = makeCoordinator(vault, async (url, init) => {
+      if (new URL(url).pathname !== "/v1/balances/history") return successRouter([])(url, init);
+      if (fail) return jsonResponse({ code: "UNAVAILABLE" }, 503);
+      return new Promise((resolve) => pending.push({ url, resolve }));
+    });
+    const firstPromise = coordinator.loadBalanceHistory({ range: "7d" });
+    const firstOutcome = firstPromise.then(() => null, (error) => error);
+    await waitFor(() => pending.length >= 1);
+    const secondPromise = coordinator.loadBalanceHistory({ range: "7d" });
+    await waitFor(() => pending.length >= 2);
+    pending[1].resolve(jsonResponse(historyBody("9.8765432")));
+    const second = await secondPromise;
+    assert.equal(second.data.series[0].balance[1], "9.8765432");
+    pending[0].resolve(jsonResponse(historyBody("1.0000000")));
+    const firstError = await firstOutcome;
+    assert.equal(firstError?.code, "ACCOUNT_STALE");
+    fail = true;
+    const cached = await coordinator.loadBalanceHistory({ range: "7d" });
+    assert.equal(cached.coverage.status, "stale");
+    assert.equal(cached.data.series[0].balance[1], "9.8765432");
+  });
+
+  it("discards a delayed balance-history response after lock and clears its snapshot", async () => {
+    const vault = await connected();
+    const pending = [];
+    const { coordinator, store } = makeCoordinator(vault, async (url) => {
+      if (new URL(url).pathname === "/v1/balances/history") {
+        return new Promise((resolve) => pending.push(resolve));
+      }
+      return jsonResponse({ balances: [balance] });
+    });
+    const result = coordinator.loadBalanceHistory({ range: "7d" });
+    await waitFor(() => pending.length === 1);
+    await vault.lock();
+    pending[0](jsonResponse(historyBody()));
+    await assert.rejects(result, (error) => error?.code === "ACCOUNT_STALE");
+    assert.equal(store.size, 0);
   });
 
   it("clears all private snapshots on the vault's real uppercase lock event", async () => {
