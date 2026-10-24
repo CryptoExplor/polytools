@@ -5,6 +5,11 @@ name = "polytools"
 main = "backend/adapters/worker.ts"
 compatibility_date = "2025-10-01"
 
+# Always create the SPA assets before Wrangler validates or uploads them.
+# This also covers Workers Builds configurations with no external build command.
+[build]
+command = "npm run build"
+
 [assets]
 directory = "./apps/web/dist"
 binding = "ASSETS"
