@@ -4,7 +4,6 @@ import { Card, ConfirmDialog, EmptyState, MetricCell, MetricStrip, Pill } from "
 import { IconActivity, IconAlert, IconClock, IconRefresh } from "./icons";
 import { downloadAccountExport } from "../lib/download";
 
-const LIVE_READS_ENABLED = import.meta.env.VITE_ENABLE_ACCOUNT_READS === "true";
 const RANGES: account.AccountHistoryRange[] = ["1d", "7d", "30d", "90d", "180d", "365d"];
 
 type AnyDataset = {
@@ -219,15 +218,11 @@ export function AccountAnalytics({
 
   const secureContext = typeof window !== "undefined" && window.isSecureContext;
   const canAttempt = Boolean(
-    LIVE_READS_ENABLED && secureContext && coordinator && session?.registeredKeyId && !loading,
+    secureContext && coordinator && session?.registeredKeyId && !loading,
   );
 
   const load = useCallback(async () => {
     if (!coordinator || !session || !accountVault) return;
-    if (!LIVE_READS_ENABLED) {
-      setLocalError("Live account reads are disabled in this build. Enable them only in a reviewed deployment after CORS and least-privilege verification; no request was sent.");
-      return;
-    }
     if (!secureContext) {
       setLocalError("A secure HTTPS browser context is required before an authenticated read can be attempted.");
       return;
@@ -334,15 +329,13 @@ export function AccountAnalytics({
       ? "Locked"
       : !session.registeredKeyId
         ? "Registered key ID required"
-        : !LIVE_READS_ENABLED
-          ? "Live verification required"
-          : snapshot
-            ? successful === 0
-              ? "No read granted or available"
-              : hasIncomplete
-                ? "Partial read coverage"
-                : "Validated read responses received"
-            : "Ready for owner-controlled verification";
+        : snapshot
+          ? successful === 0
+            ? "No read granted or available"
+            : hasIncomplete
+              ? "Partial read coverage"
+              : "Validated read responses received"
+          : "Ready for owner-controlled verification";
 
   return (
     <Card
@@ -352,17 +345,15 @@ export function AccountAnalytics({
     >
       <div className="notice warn" role="note" style={{ marginBottom: 14 }}>
         <div>
-          <strong>Live compatibility is still a release gate.</strong>{" "}
-          {LIVE_READS_ENABLED
-            ? "This deployment has opted into authenticated GET reads. Each operation still succeeds or fails independently; a response is not evidence of another permission."
-            : "Authenticated GET reads are disabled in this build. No account request has been sent by this panel. A reviewed deployment must explicitly enable them after browser CORS, origin, and owner-controlled read-policy checks."}
+          <strong>Live compatibility remains unverified.</strong>{" "}
+          Authenticated GET reads are enabled, but each operation still succeeds or fails independently. Browser CORS, origin, and owner-controlled read-policy checks determine whether a real response is available; a response is not evidence of another permission.
         </div>
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 14 }}>
         <div className="kv"><span className="k">Registered key ID</span><span className="v">{session?.registeredKeyId ? "Saved" : "Required"}</span></div>
         <div className="kv"><span className="k">Secure browser context</span><span className="v">{secureContext ? "Yes" : "No"}</span></div>
-        <div className="kv"><span className="k">Deployment read opt-in</span><span className="v">{LIVE_READS_ENABLED ? "Enabled" : "Disabled"}</span></div>
+        <div className="kv"><span className="k">Authenticated GET reads</span><span className="v">Enabled</span></div>
         <div className="kv"><span className="k">Official pair catalog</span><span className="v">{catalogReady ? "SpotConfig validated" : "Required before fills"}</span></div>
         <div className="kv"><span className="k">CORS / permissions</span><span className="v">{snapshot ? "Per-operation result below" : "Not live-verified"}</span></div>
       </div>
@@ -386,7 +377,6 @@ export function AccountAnalytics({
       </div>
       {localError && <div className="notice error" role="alert" style={{ marginBottom: 14 }}><IconAlert size={15} /><span>{localError}</span></div>}
       <p className="faint">Amounts retain the API's exact decimal strings; no additional scale divisor is applied. Rounded display never updates the underlying exact arithmetic.</p>
-      {!LIVE_READS_ENABLED && <p className="faint">The button is intentionally disabled here. Unit and fake-fetch tests validate behavior, not Polyester live authentication or response compatibility.</p>}
 
       {snapshot && (
         <>
@@ -535,7 +525,7 @@ export function AccountAnalytics({
         <EmptyState
           icon={<IconActivity size={22} />}
           title="No account analytics response loaded"
-          description={LIVE_READS_ENABLED ? "Unlock a registered read-only key, then explicitly verify and load the independent GET datasets." : "Live verification is disabled in this build. No synthetic fixture is presented as account data."}
+          description="Unlock a registered read-only key, then explicitly verify and load the independent GET datasets. No synthetic fixture is presented as account data."
         />
       )}
       {loading && <div className="notice info" role="status"><IconRefresh size={15} /><span>Reading independent GET datasets. Loading indicators are not account values; each result will retain its own coverage and permission state.</span></div>}

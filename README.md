@@ -131,8 +131,9 @@ secrets are for the optional notification bot, not for account custody or signin
    and/or `MCP_URL_MAINNET` on the backend. `MCP_URL` remains the primary override when both are set.
 2. Redeploy. The UI environment badge is data-driven (`apiEnv` in payloads), so it reports the
    serving environment returned by the API rather than assuming a network from the route.
-3. Private account reads remain separately gated. Do not treat a public endpoint, a successful
-   signature, or a synthetic test as proof of private permissions or complete account coverage.
+3. Private account reads remain read-only and require an unlocked registered key, a secure context,
+   and an explicit load action. Do not treat a public endpoint, a successful signature, or a
+   synthetic test as proof of private permissions or complete account coverage.
 
 ## Data and custody notes
 
@@ -146,6 +147,7 @@ secrets are for the optional notification bot, not for account custody or signin
 - The account vault uses passphrase-derived encryption and nonextractable in-memory signing keys.
   Lock, wipe, idle timeout, and cross-tab invalidation discard unlocked sessions and private cached
   snapshots. Never put real private keys in source, tests, CI, URLs, logs, or shared previews.
-- Public tools do not require credentials. Live account reads require the explicit deployment gate
-  and owner-controlled verification; no order placement, cancellation, transfer, or withdrawal is
-  provided by this repository.
+- Public tools do not require credentials. Live account reads are enabled in every build but still
+  require an unlocked registered key, a secure context, and an explicit load action. Owner-controlled
+  CORS, permission, and schema checks remain necessary; no order placement, cancellation, transfer,
+  or withdrawal is provided by this repository.

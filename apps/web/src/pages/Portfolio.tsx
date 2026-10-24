@@ -1,8 +1,8 @@
 /**
  * Secure local Ed25519 vault and read-only request-signing foundation.
  *
- * The signer itself never executes requests. Account analytics is isolated in
- * a deployment-gated panel; live release remains subject to target-browser,
+ * The signer itself never executes requests. Account analytics uses explicit
+ * read-only requests; live compatibility remains subject to target-browser,
  * CORS, and owner-controlled read-policy verification.
  */
 
@@ -457,11 +457,11 @@ export default function Portfolio() {
         <>
       <div className="notice warn" role="note">
         <div>
-          <strong>Real-key use remains deployment-gated.</strong>{" "}
-          Do not enter a real key in a development server or shared preview. Live account
-          reads require an explicit deployment opt-in after target-browser, dependency/CSP,
-          exact-origin CORS, and owner-controlled read-policy gates pass. The local signer
-          below never sends its inspection signatures.
+          <strong>Real-key use requires an owner-controlled deployment.</strong>{" "}
+          Do not enter a real key in a development server or shared preview. Account reads
+          are explicit GET requests; target-browser, dependency/CSP, exact-origin CORS, and
+          owner-controlled read-policy checks still determine whether they succeed. The local
+          signer below never sends its inspection signatures.
         </div>
       </div>
 

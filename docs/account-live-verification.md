@@ -14,7 +14,7 @@ This checklist is a **manual release gate**, not a record of completed live veri
 
 1. Build the production app and serve it from the exact intended HTTPS origin. Do not use the Arena preview or a shared development server for a real key.
 2. Confirm the deployment CSP permits only the required `connect-src` destination: `https://api.testnet.polyester.com`. Confirm no third-party analytics or private-response logging is present on the account route.
-3. Start with `VITE_ENABLE_ACCOUNT_READS=false`. After the origin and policy review, make a separate reviewed deployment with `VITE_ENABLE_ACCOUNT_READS=true`.
+3. Authenticated reads are enabled in every build, but no request is sent until the user explicitly selects **Verify & load read-only data**. Use a separate reviewed, owner-controlled HTTPS deployment for real keys; never use the Arena preview or a shared development server.
 4. Create/import the key only in that owner-controlled browser. Save the server-issued `ak_...` ID in the encrypted entry. A local label is never an authentication identity.
 
 ## Browser protocol checks
