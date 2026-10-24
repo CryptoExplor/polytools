@@ -1,4 +1,5 @@
 import { compare, fromBigInt, parseDecimal } from "./decimal";
+import { resolveTransferReason } from "./activity";
 import type { BalanceInput, FillInput } from "./analytics";
 
 export class AccountSchemaError extends Error {
@@ -288,6 +289,9 @@ export interface NormalizedTransfer {
   source: NormalizedTransferSide;
   timestamp: string;
   transferCode: string;
+  /** Unknown/unspecified reasons stay visible but do not pass coverage gates. */
+  reasonKnown: boolean;
+  reasonLabel: string;
 }
 
 export interface NormalizedTransferPage {
@@ -327,6 +331,8 @@ export function validateTransfersResponse(value: unknown): NormalizedTransferPag
   for (const raw of array(response.transfers)) {
     try {
       const row = object(raw);
+      const transferCode = string(row.transferCode);
+      const reason = resolveTransferReason(transferCode);
       transfers.push({
         account: string(row.account),
         asset: string(row.asset),
@@ -338,7 +344,9 @@ export function validateTransfersResponse(value: unknown): NormalizedTransferPag
         linkId: digits(row.linkId),
         source: transferSide(row.source),
         timestamp: digits(row.timestamp),
-        transferCode: string(row.transferCode),
+        transferCode,
+        reasonKnown: reason.known,
+        reasonLabel: reason.label,
       });
     } catch {
       quarantined.push(raw);

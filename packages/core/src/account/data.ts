@@ -521,10 +521,16 @@ export class AccountDataCoordinator {
         const page = validateTransfersResponse(value);
         return { nextPageToken: page.nextPageToken, rows: page.transfers, quarantined: page.quarantined };
       });
+      const unknownReasons = collection.rows.filter((transfer) => !transfer.reasonKnown).length;
       return this.finishPaged(session, "transfers", params, period, context, collection, {
+        // Unknown reasons remain visible; they are excluded only from accepted
+        // coverage counts, never silently dropped from the activity rows.
         transfers: collection.rows,
         quarantined: collection.quarantined,
-      }, { accepted: collection.rows.length, unknown: collection.quarantined.length });
+      }, {
+        accepted: collection.rows.length - unknownReasons,
+        unknown: collection.quarantined.length + unknownReasons,
+      });
     } catch (error) {
       return this.failure(session, "transfers", params, period, context.previous, error);
     }

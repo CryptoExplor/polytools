@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { account, fmtAgo } from "@poly/core";
-import { Card, EmptyState, MetricCell, MetricStrip, Pill } from "./ui";
+import { Card, ConfirmDialog, EmptyState, MetricCell, MetricStrip, Pill } from "./ui";
 import { IconActivity, IconAlert, IconClock, IconRefresh } from "./icons";
+import { downloadAccountExport } from "../lib/download";
 
 const LIVE_READS_ENABLED = import.meta.env.VITE_ENABLE_ACCOUNT_READS === "true";
 const RANGES: account.AccountHistoryRange[] = ["1d", "7d", "30d", "90d", "180d", "365d"];
@@ -49,6 +50,60 @@ function DatasetStatus({ dataset }: { dataset?: AnyDataset }) {
         </span>
       )}
     </span>
+  );
+}
+
+function ExportControls({
+  dataset,
+  name,
+  rowCount,
+  onExport,
+}: {
+  dataset: AnyDataset;
+  name: account.AccountExportDataset;
+  rowCount: number;
+  onExport: (name: account.AccountExportDataset, format: account.AccountExportFormat) => void;
+}) {
+  // Transfers can be filtered client-side, so their export is always described
+  // as loaded rows rather than implying a server-complete covered partition.
+  const covered = name !== "transfers" && (dataset.coverage.status === "complete" || dataset.coverage.status === "filter-complete");
+  const label = covered ? "Export covered rows" : "Export loaded rows";
+  return (
+    <span className="row-flex" style={{ gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+      <span className="faint">{label}</span>
+      {(["csv", "json"] as const).map((format) => (
+        <button
+          key={format}
+          type="button"
+          className="btn sm ghost"
+          disabled={rowCount === 0}
+          title={rowCount === 0 ? "No loaded rows are available to export" : `${label} as ${format.toUpperCase()}`}
+          aria-label={`${label} as ${format.toUpperCase()}`}
+          onClick={() => onExport(name, format)}
+        >
+          {format.toUpperCase()}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function DatasetActions({
+  dataset,
+  name,
+  rowCount,
+  onExport,
+}: {
+  dataset: AnyDataset;
+  name: account.AccountExportDataset;
+  rowCount: number;
+  onExport: (name: account.AccountExportDataset, format: account.AccountExportFormat) => void;
+}) {
+  return (
+    <>
+      <DatasetStatus dataset={dataset} />
+      <ExportControls dataset={dataset} name={name} rowCount={rowCount} onExport={onExport} />
+    </>
   );
 }
 
@@ -128,6 +183,13 @@ export function AccountAnalytics({
   const [loading, setLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [catalogReady, setCatalogReady] = useState(false);
+  const [pendingExport, setPendingExport] = useState<{
+    dataset: account.AccountExportDataset;
+    format: account.AccountExportFormat;
+  } | null>(null);
+  const [transferAssetFilter, setTransferAssetFilter] = useState("ALL");
+  const [transferDirectionFilter, setTransferDirectionFilter] = useState("ALL");
+  const [transferReasonFilter, setTransferReasonFilter] = useState("ALL");
   const requestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -147,6 +209,10 @@ export function AccountAnalytics({
     setLocalError(null);
     setCatalogReady(false);
     setLoading(false);
+    setPendingExport(null);
+    setTransferAssetFilter("ALL");
+    setTransferDirectionFilter("ALL");
+    setTransferReasonFilter("ALL");
   }, [session?.generation]);
 
   useEffect(() => () => requestRef.current?.abort(), []);
@@ -175,6 +241,7 @@ export function AccountAnalytics({
     requestRef.current = controller;
     setLoading(true);
     setSnapshot(null);
+    setPendingExport(null);
     setLocalError(null);
     setCatalogReady(false);
     try {
@@ -212,6 +279,55 @@ export function AccountAnalytics({
     return latest === null ? dataset.retrievedAtMs : Math.max(latest, dataset.retrievedAtMs);
   }, null);
   const hasIncomplete = datasets.some((dataset) => dataset.coverage.status !== "complete");
+  const loadedTransfers = snapshot?.transfers.data?.transfers ?? null;
+  const transferAssets = useMemo(
+    () => [...new Set((loadedTransfers ?? []).map((transfer) => transfer.asset))].sort(),
+    [loadedTransfers],
+  );
+  const transferReasons = useMemo(
+    () => [...new Set((loadedTransfers ?? []).map((transfer) => transfer.reasonLabel))].sort(),
+    [loadedTransfers],
+  );
+  const filteredTransfers = useMemo(() => (loadedTransfers ?? []).filter((transfer) => (
+    (transferAssetFilter === "ALL" || transfer.asset === transferAssetFilter) &&
+    (transferDirectionFilter === "ALL" || (transferDirectionFilter === "DEBIT" ? transfer.isDebit : !transfer.isDebit)) &&
+    (transferReasonFilter === "ALL" || transfer.reasonLabel === transferReasonFilter)
+  )), [loadedTransfers, transferAssetFilter, transferDirectionFilter, transferReasonFilter]);
+  const transferFiltersActive = transferAssetFilter !== "ALL" || transferDirectionFilter !== "ALL" || transferReasonFilter !== "ALL";
+  const resetTransferFilters = useCallback(() => {
+    setTransferAssetFilter("ALL");
+    setTransferDirectionFilter("ALL");
+    setTransferReasonFilter("ALL");
+  }, []);
+  const requestExport = useCallback((dataset: account.AccountExportDataset, format: account.AccountExportFormat) => {
+    setLocalError(null);
+    setPendingExport({ dataset, format });
+  }, []);
+  const confirmExport = useCallback(() => {
+    if (!snapshot || !pendingExport) return;
+    try {
+      const result = account.createAccountExport({
+        snapshot,
+        dataset: pendingExport.dataset,
+        format: pendingExport.format,
+        exportedAtMs: Date.now(),
+        ...(pendingExport.dataset === "transfers" ? {
+          transferRows: filteredTransfers,
+          transferFilters: {
+            asset: transferAssetFilter,
+            direction: transferDirectionFilter,
+            reason: transferReasonFilter,
+          },
+        } : {}),
+      });
+      downloadAccountExport(result);
+    } catch {
+      // Never surface a raw export error: source rows may contain private data.
+      setLocalError("The export could not be created safely. No file was downloaded; check loaded-row coverage and try again.");
+    } finally {
+      setPendingExport(null);
+    }
+  }, [snapshot, pendingExport, filteredTransfers, transferAssetFilter, transferDirectionFilter, transferReasonFilter]);
   const connectionLabel = loading
     ? "Checking read-only endpoints…"
     : !session
@@ -230,8 +346,8 @@ export function AccountAnalytics({
 
   return (
     <Card
-      title="R1 Account Analytics"
-      subtitle="Read-only balances, sampled equity, order history, fills, transfers, and actual execution fees. Official SpotConfig pair mapping is loaded separately; public MCP tools remain independent."
+      title="R2 Account Analytics"
+      subtitle="Read-only balances, sampled equity, order history, fills, labeled transfer activity, current rates, and explicit loaded-row exports. Official SpotConfig pair mapping is loaded separately; public MCP tools remain independent."
       actions={<Pill kind={snapshot && !hasIncomplete && successful > 0 ? "up" : "warn"}>{connectionLabel}</Pill>}
     >
       <div className="notice warn" role="note" style={{ marginBottom: 14 }}>
@@ -257,6 +373,7 @@ export function AccountAnalytics({
           <select className="select" value={range} onChange={(event) => {
             requestRef.current?.abort();
             setSnapshot(null);
+            setPendingExport(null);
             setRange(event.target.value as account.AccountHistoryRange);
           }} aria-label="Account reporting period">
             {RANGES.map((value) => <option key={value} value={value}>{value}</option>)}
@@ -280,7 +397,7 @@ export function AccountAnalytics({
             <MetricCell label="P&L" value="Unavailable" sub="Opening basis, complete flows, and fresh marks are not yet verified" />
           </MetricStrip>
 
-          <Card title="Current balances" subtitle="Total = trading + funding. Reserved and available are not added again." actions={<DatasetStatus dataset={snapshot.balances} />}>
+          <Card title="Current balances" subtitle="Total = trading + funding. Reserved and available are not added again." actions={<DatasetActions dataset={snapshot.balances} name="balances" rowCount={snapshot.balances.data?.balances.length ?? 0} onExport={requestExport} />}>
             {snapshot.balances.data ? (
               <>
                 <div className="table-wrap">
@@ -304,7 +421,7 @@ export function AccountAnalytics({
             ) : <><NoDataset dataset={snapshot.balances} /><DatasetMessages dataset={snapshot.balances} /></>}
           </Card>
 
-          <Card title="Sampled equity history" subtitle="Sampled valuation only — never live equity or P&L. Point timestamps are not invented when the server does not supply them." actions={<DatasetStatus dataset={snapshot.equity} />}>
+          <Card title="Sampled equity history" subtitle="Sampled valuation only — never live equity or P&L. Point timestamps are not invented when the server does not supply them." actions={<DatasetActions dataset={snapshot.equity} name="equity" rowCount={snapshot.equity.data?.response.series.reduce((count, series) => count + series.equity.length, 0) ?? 0} onExport={requestExport} />}>
             {snapshot.equity.data ? (
               <>
                 <div className="faint" style={{ marginBottom: 10 }}>
@@ -322,7 +439,7 @@ export function AccountAnalytics({
             ) : <><NoDataset dataset={snapshot.equity} /><DatasetMessages dataset={snapshot.equity} /></>}
           </Card>
 
-          <Card title="Order history" subtitle="Terminal order reads use the selected time window and opaque cursor chain. No cancellation or order-placement action is available." actions={<DatasetStatus dataset={snapshot.orders} />}>
+          <Card title="Order history" subtitle="Terminal order reads use the selected time window and opaque cursor chain. No cancellation or order-placement action is available." actions={<DatasetActions dataset={snapshot.orders} name="orders" rowCount={snapshot.orders.data?.orders.length ?? 0} onExport={requestExport} />}>
             {snapshot.orders.data ? (
               <>
                 {snapshot.orders.data.orders.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Order</th><th>Market</th><th>Side</th><th>Status</th><th>Price</th><th>Original qty</th><th>Filled qty</th><th>Created</th></tr></thead><tbody>
@@ -333,7 +450,7 @@ export function AccountAnalytics({
             ) : <><NoDataset dataset={snapshot.orders} /><DatasetMessages dataset={snapshot.orders} /></>}
           </Card>
 
-          <Card title="Fills and actual execution fees" subtitle="Fees come from execution records, grouped by their real fee asset. Net quote flow is observed activity, not profit." actions={<DatasetStatus dataset={snapshot.fills} />}>
+          <Card title="Fills and actual execution fees" subtitle="Fees come from execution records, grouped by their real fee asset. Net quote flow is observed activity, not profit." actions={<DatasetActions dataset={snapshot.fills} name="fills" rowCount={snapshot.fills.data?.summary.calculations.length ?? 0} onExport={requestExport} />}>
             {snapshot.fills.data ? (
               <>
                 {account.observedFillEligibility(snapshot.fills.data.summary, snapshot.fills.coverage).available ? (
@@ -351,18 +468,53 @@ export function AccountAnalytics({
             ) : <><NoDataset dataset={snapshot.fills} /><DatasetMessages dataset={snapshot.fills} /></>}
           </Card>
 
-          <Card title="Finalized transfer activity" subtitle="Read-only transfer legs. This endpoint has no reporting-period filter in the verified friendly contract; coverage is shown separately." actions={<DatasetStatus dataset={snapshot.transfers} />}>
+          <Card title="Finalized transfer activity" subtitle="Read-only transfer legs. This endpoint has no reporting-period filter in the verified friendly contract; coverage is shown separately. Deposits and transfers are capital/activity flows, not profit." actions={<DatasetActions dataset={snapshot.transfers} name="transfers" rowCount={filteredTransfers.length} onExport={requestExport} />}>
             {snapshot.transfers.data ? (
               <>
-                {snapshot.transfers.data.transfers.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Time (UTC)</th><th>Asset</th><th>Direction</th><th>Amount</th><th>Balance after</th><th>Reason</th></tr></thead><tbody>
-                  {snapshot.transfers.data.transfers.map((transfer, index) => <tr key={`${transfer.timestamp}-${transfer.linkId}-${index}`}><td className="align-left mono">{apiTime(transfer.timestamp, "micros")}</td><td className="mono">{transfer.asset}</td><td>{transfer.isDebit ? "Debit" : "Credit"}</td><td><ExactValue value={transfer.amount} digits={18} /></td><td><ExactValue value={transfer.balanceAfter} digits={18} /></td><td>{transfer.transferCode}</td></tr>)}
-                </tbody></table></div> : <EmptyState title="No transfers in validated coverage" description="No transfer or cash-flow value is inferred from unavailable history." />}
+                {snapshot.transfers.data.transfers.length > 0 && (
+                  <>
+                    <div className="notice info" role="note" style={{ marginBottom: 10 }}>
+                      <span><strong>Filter loaded rows.</strong> These client-side filters do not change server coverage, request a time/code partition, or prove complete history.</span>
+                    </div>
+                    <div className="row-flex" style={{ gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "flex-end" }}>
+                      <label className="field" style={{ minWidth: 130 }}>
+                        <span className="faint">Loaded asset</span>
+                        <select className="select" value={transferAssetFilter} onChange={(event) => setTransferAssetFilter(event.target.value)} aria-label="Filter loaded transfer rows by asset">
+                          <option value="ALL">All loaded assets</option>
+                          {transferAssets.map((asset) => <option key={asset} value={asset}>{asset}</option>)}
+                        </select>
+                      </label>
+                      <label className="field" style={{ minWidth: 130 }}>
+                        <span className="faint">Direction</span>
+                        <select className="select" value={transferDirectionFilter} onChange={(event) => setTransferDirectionFilter(event.target.value)} aria-label="Filter loaded transfer rows by direction">
+                          <option value="ALL">All directions</option>
+                          <option value="DEBIT">Debit</option>
+                          <option value="CREDIT">Credit</option>
+                        </select>
+                      </label>
+                      <label className="field" style={{ minWidth: 170 }}>
+                        <span className="faint">Activity</span>
+                        <select className="select" value={transferReasonFilter} onChange={(event) => setTransferReasonFilter(event.target.value)} aria-label="Filter loaded transfer rows by activity">
+                          <option value="ALL">All loaded activities</option>
+                          {transferReasons.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
+                        </select>
+                      </label>
+                      <button type="button" className="btn sm ghost" disabled={!transferFiltersActive} onClick={resetTransferFilters}>Reset loaded-row filters</button>
+                      <span className="faint" role="status">Showing {filteredTransfers.length} of {snapshot.transfers.data.transfers.length} loaded rows</span>
+                    </div>
+                  </>
+                )}
+                {snapshot.transfers.data.transfers.length > 0 ? (
+                  filteredTransfers.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Time (UTC)</th><th>Reason</th><th>Asset</th><th>Signed amount</th><th>Direction</th><th>Affected bucket</th><th>Source → destination</th><th>Balance after</th></tr></thead><tbody>
+                    {filteredTransfers.map((transfer, index) => <tr key={`${transfer.timestamp}-${transfer.linkId}-${index}`}><td className="align-left mono">{apiTime(transfer.timestamp, "micros")}</td><td><span>{transfer.reasonLabel}</span>{!transfer.reasonKnown && <span className="faint mono" title="Unrecognized contract transfer code"> ({transfer.transferCode})</span>}</td><td className="mono">{transfer.asset}</td><td><span className="mono">{transfer.isDebit ? "−" : "+"}<ExactValue value={transfer.amount} digits={18} /></span></td><td>{transfer.isDebit ? "Debit" : "Credit"}</td><td>{account.transferBucketLabel(transfer.account)}</td><td>{account.transferSideLabel(transfer.source.kind)} → {account.transferSideLabel(transfer.destination.kind)}</td><td><ExactValue value={transfer.balanceAfter} digits={18} /></td></tr>)}
+                  </tbody></table></div> : <div><EmptyState title="No loaded rows match these filters" description="The filtered result is empty only for the currently loaded rows; it is not a server-complete empty history." /><button type="button" className="btn sm ghost" onClick={resetTransferFilters}>Reset loaded-row filters</button></div>
+                ) : <EmptyState title="No transfers in validated coverage" description="No transfer or cash-flow value is inferred from unavailable history." />}
                 <DatasetMessages dataset={snapshot.transfers} />
               </>
             ) : <><NoDataset dataset={snapshot.transfers} /><DatasetMessages dataset={snapshot.transfers} /></>}
           </Card>
 
-          <Card title="Current effective fee-rate snapshot" subtitle="Current rates are not historical execution fees. Actual fees above come only from fills." actions={<DatasetStatus dataset={snapshot.feeRates} />}>
+          <Card title="Current effective fee-rate snapshot" subtitle="Current rates are not historical execution fees. Actual fees above come only from fills." actions={<DatasetActions dataset={snapshot.feeRates} name="feeRates" rowCount={snapshot.feeRates.data?.feeRates.length ?? 0} onExport={requestExport} />}>
             {snapshot.feeRates.data ? (
               <>
                 {snapshot.feeRates.data.feeRates.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Market</th><th>VIP tier</th><th>Maker rate</th><th>Taker rate</th></tr></thead><tbody>
@@ -373,7 +525,7 @@ export function AccountAnalytics({
             ) : <><NoDataset dataset={snapshot.feeRates} /><DatasetMessages dataset={snapshot.feeRates} /></>}
           </Card>
 
-          <Card title="P&L remains unavailable in R1" subtitle="Observed fills, deposits, equity changes, and net quote flow are not profit.">
+          <Card title="P&L remains unavailable in R2" subtitle="Observed fills, deposits, equity changes, and net quote flow are not profit.">
             <div className="notice info" role="note"><IconAlert size={15} /><span>Realized and unrealized P&L require opening lots, complete fills, resolved non-fill cash flows, and a fresh labeled valuation mark. Those gates are not yet established by this read-only integration, so no P&L number is displayed.</span></div>
           </Card>
         </>
@@ -387,6 +539,21 @@ export function AccountAnalytics({
         />
       )}
       {loading && <div className="notice info" role="status"><IconRefresh size={15} /><span>Reading independent GET datasets. Loading indicators are not account values; each result will retain its own coverage and permission state.</span></div>}
+      <ConfirmDialog
+        open={pendingExport !== null}
+        title="Download private financial activity?"
+        message={pendingExport && snapshot ? (
+          <div>
+            <p>{account.ACCOUNT_EXPORT_PRIVATE_WARNING}</p>
+            <p>Dataset: <strong>{pendingExport.dataset}</strong> · Format: <strong>{pendingExport.format.toUpperCase()}</strong> · Coverage: <strong>{snapshot[pendingExport.dataset].coverage.status}</strong>.</p>
+            <p className="faint">Only explicitly projected loaded rows and a coverage manifest are included. This is not complete history, a tax statement, or a P&amp;L statement. Credentials, cursors, raw account IDs, addresses, and secret-bearing errors are excluded.</p>
+          </div>
+        ) : ""}
+        confirmLabel={pendingExport ? `Download ${pendingExport.format.toUpperCase()}` : "Download"}
+        danger={false}
+        onConfirm={confirmExport}
+        onCancel={() => setPendingExport(null)}
+      />
     </Card>
   );
 }

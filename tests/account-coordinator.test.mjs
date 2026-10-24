@@ -262,6 +262,28 @@ describe("Account data coordinator (synthetic authenticated transport)", () => {
     assert.equal(account.observedFillEligibility(snapshot.fills.data.summary, snapshot.fills.coverage).available, false);
   });
 
+  it("keeps unknown transfer reasons visible while reconciling partial coverage", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, successRouter(calls, {
+      "/v1/transfers": () => jsonResponse({
+        nextPageToken: "",
+        transfers: [{ ...transfer, transferCode: "FUTURE_REASON" }],
+      }),
+    }));
+    const snapshot = await coordinator.loadAll({ markets });
+    const row = snapshot.transfers.data.transfers[0];
+    assert.equal(row.transferCode, "FUTURE_REASON");
+    assert.equal(row.reasonLabel, "Unknown activity");
+    assert.equal(row.reasonKnown, false);
+    assert.equal(snapshot.transfers.data.transfers.length, 1);
+    assert.equal(snapshot.transfers.coverage.status, "partial");
+    assert.equal(snapshot.transfers.coverage.rowsReceived, 1);
+    assert.equal(snapshot.transfers.coverage.rowsAccepted, 0);
+    assert.equal(snapshot.transfers.coverage.unknownRows, 1);
+    assert.equal(account.rowsReconcile(snapshot.transfers.coverage), true);
+  });
+
   it("marks same-session cached data stale on a temporary failure without hiding the error", async () => {
     const vault = await connected();
     const calls = [];
