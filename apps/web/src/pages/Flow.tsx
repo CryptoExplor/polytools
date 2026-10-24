@@ -1,5 +1,5 @@
 /**
- * TOOL 9 — Transaction & Lifecycle Flow Explorer (/#/flow)
+ * TOOL 9 — Transaction & Lifecycle Flow Explorer (/#/account/transactions)
  * Investigates cross-chain deposits, withdrawals, and transfers using the
  * three Polyester read-only lifecycle endpoints:
  *   1. /api/flow/explain?txHash=... (explain_transaction)
@@ -67,7 +67,7 @@ function parseMode(raw: string | null): LookupMode {
   return "explain";
 }
 
-export default function Flow() {
+export default function Flow({ embedded = false }: { embedded?: boolean } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialMode = parseMode(searchParams.get("mode"));
   const initialQ = searchParams.get("q") ?? "";
@@ -242,11 +242,13 @@ export default function Flow() {
 
   return (
     <div className="page-stack">
-      <PageHeader
+      {!embedded && (
+        <PageHeader
         title="Track a Deposit or Withdrawal"
         badge={<Pill kind="accent">Read-Only Trace</Pill>}
         subtitle="Paste a public transaction hash or Polyester flow ID to see what stage a deposit or withdrawal is in."
-      />
+        />
+      )}
 
       <MetricStrip>
         <MetricCell

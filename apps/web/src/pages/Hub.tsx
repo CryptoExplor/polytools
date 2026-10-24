@@ -127,7 +127,7 @@ const CHECKLIST: CheckItem[] = [
     id: "deposit",
     phase: "Step 6 · Bridge In",
     title: "Test a cross-chain deposit over Zipper",
-    hint: "Deposit test assets from a supported testnet chain and inspect the trace in the Tx Explorer tool (/#/flow).",
+    hint: "Deposit test assets from a supported testnet chain and inspect the trace in the Account Tx Explorer (/#/account/transactions).",
   },
   {
     id: "withdraw",

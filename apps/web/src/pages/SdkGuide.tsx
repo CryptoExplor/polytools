@@ -688,7 +688,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ? `tickSize ${pair.tickSize} ${quote} · stepSize ${pair.stepSize} ${base} · minNotional ${pair.minNotionalQuote} ${quote}`
                 : "select a listed pair to view exchange constraints"}
             </span>
-            <Link to="/portfolio">Need an Ed25519 keypair? Open Key Vault (/#/portfolio) →</Link>
+            <Link to="/account/api">Need an Ed25519 keypair? Open API setup (/#/account/api) →</Link>
           </>
         }
       >

@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { NETWORKS, vault } from "@poly/core";
 import {
   Card,
@@ -23,11 +23,15 @@ import {
 import {
   IconAlert,
   IconExternal,
+  IconFlow,
   IconKey,
   IconTrash,
   IconVault,
 } from "../components/icons";
 import { AccountAnalytics } from "../components/AccountAnalytics";
+import Book from "./Book";
+import Tape from "./Tape";
+import Flow from "./Flow";
 
 type CreateMode = "generate" | "import";
 type PendingConfirm =
@@ -38,6 +42,137 @@ type PendingConfirm =
 type SignedOutput = vault.SignedRequestResult & {
   headers: Record<string, string>;
 };
+
+type AccountSection = "overview" | "api" | "trade" | "order-book" | "pnl" | "transactions";
+
+const ACCOUNT_TABS: Array<{ to: string; section: AccountSection; label: string }> = [
+  { to: "/account", section: "overview", label: "Overview" },
+  { to: "/account/api", section: "api", label: "API setup" },
+  { to: "/account/trade", section: "trade", label: "Trade" },
+  { to: "/account/order-book", section: "order-book", label: "Order book" },
+  { to: "/account/pnl", section: "pnl", label: "Profit & loss" },
+  { to: "/account/transactions", section: "transactions", label: "Tx explorer" },
+];
+
+const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle: string }> = {
+  overview: {
+    title: "Account overview",
+    subtitle: "Read-only balances, sampled equity, execution activity, transfer coverage, current rates, and safe loaded-row exports.",
+  },
+  api: {
+    title: "API setup",
+    subtitle: "Passphrase-encrypted IndexedDB custody, nonextractable local Ed25519 sessions, and signatures restricted to known read-only GET operations.",
+  },
+  trade: {
+    title: "Trade",
+    subtitle: "Public matched trades for the selected market. This is a read-only trade tape; order placement and cancellation are not available.",
+  },
+  "order-book": {
+    title: "Order book",
+    subtitle: "Public resting liquidity for the selected market. No account key is required and no order action is available.",
+  },
+  pnl: {
+    title: "Profit & loss",
+    subtitle: "P&L remains gated until opening basis, complete flows, and fresh valuation marks are established.",
+  },
+  transactions: {
+    title: "Tx explorer",
+    subtitle: "Choose My accounts or public lifecycle lookup. No unverified account-wide or all-account transaction broadcast is presented as live.",
+  },
+};
+
+function accountSection(pathname: string): AccountSection {
+  if (pathname.startsWith("/account/api")) return "api";
+  if (pathname.startsWith("/account/trade")) return "trade";
+  if (pathname.startsWith("/account/order-book")) return "order-book";
+  if (pathname.startsWith("/account/pnl")) return "pnl";
+  if (pathname.startsWith("/account/transactions")) return "transactions";
+  return "overview";
+}
+
+function AccountTabs() {
+  return (
+    <nav className="account-tabs" aria-label="Account sections">
+      {ACCOUNT_TABS.map((tab) => (
+        <NavLink
+          key={tab.to}
+          to={tab.to}
+          end={tab.section === "overview"}
+          className={({ isActive }) => `account-tab ${isActive ? "active" : ""}`}
+        >
+          {tab.label}
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
+function AccountPnl() {
+  return (
+    <>
+      <MetricStrip>
+        <MetricCell label="Realized P&L" value="Unavailable" sub="Opening lots and complete covered flows are required" />
+        <MetricCell label="Unrealized P&L" value="Unavailable" sub="A fresh labeled valuation mark is required" />
+        <MetricCell label="Observed activity" value="Separate" sub="Fills, fees, deposits, and equity changes are not profit" />
+      </MetricStrip>
+      <Card title="P&L remains unavailable" subtitle="No partial or inferred profit figure is shown.">
+        <div className="notice warn" role="note">
+          <IconAlert size={15} />
+          <span>Realized and unrealized P&L require opening lots, complete fills, resolved non-fill cash flows, and a fresh labeled valuation mark. Those gates are not established by this read-only integration.</span>
+        </div>
+        <div className="row-flex mt-3" style={{ gap: 8 }}>
+          <Link to="/account" className="btn sm primary">Open observed account analytics</Link>
+          <Link to="/account/transactions" className="btn sm">Inspect transaction coverage</Link>
+        </div>
+      </Card>
+    </>
+  );
+}
+
+function AccountTransactions({ session }: { session: vault.VaultSessionInfo | null }) {
+  const [scope, setScope] = useState<"mine" | "all">("mine");
+  return (
+    <>
+      <Card
+        title="Transaction scope"
+        subtitle="My accounts is the default. Public lifecycle lookup remains credential-free; neither option claims an unverified live broadcast."
+      >
+        <div className="seg-group" role="group" aria-label="Transaction explorer scope">
+          <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} onClick={() => setScope("mine")}>
+            My accounts
+          </button>
+          <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} onClick={() => setScope("all")}>
+            All public activity
+          </button>
+        </div>
+        <div className={`notice ${scope === "mine" ? "info" : "warn"} mt-3`} role="note">
+          {scope === "mine" ? (
+            <span>Automatic account/subaccount transaction fetching is not enabled because a verified account-wide feed and its coverage contract are not established. No synthetic transactions or silent empty history are shown.</span>
+          ) : (
+            <span>All public activity currently offers manual lifecycle lookup only. A blockchain-style live broadcast of all transactions is not available in the verified public contract.</span>
+          )}
+        </div>
+      </Card>
+      {scope === "mine" ? (
+        <Card title="My account transactions" actions={<Pill kind="warn">Feed unavailable</Pill>}>
+          <EmptyState
+            icon={<IconFlow size={22} />}
+            title={session ? "Account transaction feed is not verified" : "Unlock an account to use My accounts"}
+            description={session
+              ? "Use Account overview to explicitly load finalized transfer activity with per-dataset coverage. This tab does not turn missing account/subaccount history into an empty feed."
+              : "No private request is made while locked. Set up or unlock an encrypted read-only key in API setup, or switch to All public activity for manual public lookup."}
+          />
+          <div className="row-flex mt-3" style={{ gap: 8 }}>
+            <Link to={session ? "/account" : "/account/api"} className="btn sm primary">
+              {session ? "Open finalized transfer activity" : "Open API setup"}
+            </Link>
+            <button type="button" className="btn sm" onClick={() => setScope("all")}>Use public lookup</button>
+          </div>
+        </Card>
+      ) : <Flow embedded />}
+    </>
+  );
+}
 
 const PASSPHRASE_HELP =
   "At least 12 characters. It is never stored and cannot be recovered.";
@@ -74,6 +209,9 @@ export default function Portfolio() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const supported = vault.ed25519Supported();
+  const location = useLocation();
+  const section = accountSection(location.pathname);
+  const header = ACCOUNT_HEADERS[section];
 
   // Construct in an effect so React StrictMode's development setup/cleanup
   // cycle cannot reuse a disposed BroadcastChannel or vault session.
@@ -274,14 +412,22 @@ export default function Portfolio() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        title="Secure Ed25519 Vault & Read-only Signer"
+      <AccountTabs />
+      {section !== "trade" && section !== "order-book" && (
+        <PageHeader
+        title={header.title}
         badge={
-          <Pill kind={session ? "up" : supported ? "warn" : "down"}>
-            {session ? "Unlocked · Memory Only" : supported ? "Locked" : "WebCrypto Unavailable"}
+          <Pill kind={section === "transactions" ? "accent" : session ? "up" : supported ? "warn" : "down"}>
+            {section === "transactions"
+              ? "Scoped · Read-only"
+              : session
+                ? "Unlocked · Memory Only"
+                : supported
+                  ? "Locked"
+                  : "WebCrypto Unavailable"}
           </Pill>
         }
-        subtitle="Passphrase-encrypted IndexedDB custody, nonextractable local Ed25519 sessions, and signatures restricted to known read-only GET operations."
+        subtitle={header.subtitle}
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             {session && (
@@ -304,8 +450,11 @@ export default function Portfolio() {
             </Link>
           </div>
         }
-      />
+        />
+      )}
 
+      {section === "api" && (
+        <>
       <div className="notice warn" role="note">
         <div>
           <strong>Real-key use remains deployment-gated.</strong>{" "}
@@ -338,8 +487,17 @@ export default function Portfolio() {
           sub="Fresh monotonic timestamps · no arbitrary writes"
         />
       </MetricStrip>
+        </>
+      )}
 
-      <AccountAnalytics accountVault={accountVault} session={session} />
+      {section === "overview" && <AccountAnalytics accountVault={accountVault} session={session} />}
+      {section === "trade" && <Tape />}
+      {section === "order-book" && <Book />}
+      {section === "pnl" && <AccountPnl />}
+      {section === "transactions" && <AccountTransactions session={session} />}
+
+      {section === "api" && (
+        <>
 
       {error && (
         <div className="notice error" role="alert">
@@ -868,6 +1026,8 @@ export default function Portfolio() {
           });
         }}
       />
+        </>
+      )}
     </div>
   );
 }
