@@ -632,7 +632,7 @@ export default function Dashboard() {
                           type="button"
                           className="row-action-btn"
                           title={`Open ${m.symbol} Order Book`}
-                          onClick={(e) => openTool(m.symbol, "/book", e)}
+                          onClick={(e) => openTool(m.symbol, "/account/order-book", e)}
                         >
                           Book
                         </button>

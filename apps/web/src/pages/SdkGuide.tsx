@@ -13,6 +13,7 @@ import {
   fmtNum,
   price,
   splitSymbol,
+  vault,
   type CandleTimeframe,
 } from "@poly/core";
 import { api } from "../lib/api";
@@ -49,49 +50,6 @@ const DOC_URLS = {
   ed25519: "https://testnet.polyester.com/docs/developer-docs/authentication-security/ed25519-api-keys",
 };
 
-const EMPTY_BODY_SHA256 =
-  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-/** RFC 3986 percent-encoding for canonical query parameters per Polyester spec. */
-function rfc3986Encode(str: string): string {
-  return encodeURIComponent(str).replace(
-    /[!'()*]/g,
-    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
-  );
-}
-
-/** Normalize raw query string per Polyester Ed25519 canonical query rules. */
-function normalizeQueryString(rawQuery: string): string {
-  const cleaned = rawQuery.trim().replace(/^\?/, "");
-  if (!cleaned) return "";
-  const pairs: Array<{ k: string; v: string }> = [];
-  for (const part of cleaned.split("&")) {
-    if (!part) continue;
-    const eqIdx = part.indexOf("=");
-    const rawK = eqIdx >= 0 ? part.slice(0, eqIdx) : part;
-    const rawV = eqIdx >= 0 ? part.slice(eqIdx + 1) : "";
-    try {
-      const k = decodeURIComponent(rawK.replace(/\+/g, " "));
-      const v = decodeURIComponent(rawV.replace(/\+/g, " "));
-      pairs.push({ k, v });
-    } catch {
-      pairs.push({ k: rawK, v: rawV });
-    }
-  }
-  pairs.sort((a, b) => (a.k !== b.k ? (a.k < b.k ? -1 : 1) : a.v < b.v ? -1 : a.v > b.v ? 1 : 0));
-  return pairs.map((p) => `${rfc3986Encode(p.k)}=${rfc3986Encode(p.v)}`).join("&");
-}
-
-async function sha256Hex(text: string): Promise<string> {
-  if (!text) return EMPTY_BODY_SHA256;
-  if (typeof crypto === "undefined" || !crypto.subtle) return EMPTY_BODY_SHA256;
-  const bytes = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 export default function SdkGuide() {
   const { symbol, setSymbol, pairBySymbol } = useApp();
   const { data: ov } = usePollData(() => api.overview([symbol]), 6000, [symbol]);
@@ -114,7 +72,8 @@ export default function SdkGuide() {
   const [reqBody, setReqBody] = useState<string>(
     '{"symbol":"BTC-USDT","side":"buy","qty":"0.001","price":"50000"}',
   );
-  const [bodyHash, setBodyHash] = useState<string>(EMPTY_BODY_SHA256);
+  const [bodyHash, setBodyHash] = useState<string>("");
+  const [bodyHashError, setBodyHashError] = useState<string | null>(null);
   const [sampleTs, setSampleTs] = useState<string>(() => String(Date.now()));
 
   const [base, quote] = splitSymbol(symbol);
@@ -123,9 +82,16 @@ export default function SdkGuide() {
   useEffect(() => {
     let alive = true;
     const effectiveBody = httpMethod === "GET" ? "" : reqBody;
-    void sha256Hex(effectiveBody).then((h) => {
-      if (alive) setBodyHash(h);
-    });
+    setBodyHash("");
+    setBodyHashError(null);
+    void vault
+      .sha256Hex(effectiveBody)
+      .then((hash) => {
+        if (alive) setBodyHash(hash);
+      })
+      .catch((caught) => {
+        if (alive) setBodyHashError(vault.vaultErrorMessage(caught));
+      });
     return () => {
       alive = false;
     };
@@ -140,18 +106,31 @@ export default function SdkGuide() {
     }
   };
 
-  const canonicalQuery = useMemo(() => normalizeQueryString(reqQuery), [reqQuery]);
-  const canonicalString5Line = useMemo(
-    () =>
-      [
-        sampleTs.trim(),
-        httpMethod.toUpperCase(),
-        reqPath.trim() || "/",
-        canonicalQuery,
-        bodyHash,
-      ].join("\n"),
-    [sampleTs, httpMethod, reqPath, canonicalQuery, bodyHash],
-  );
+  const canonicalPreview = useMemo(() => {
+    if (bodyHashError) {
+      return { query: "", text: "", error: bodyHashError };
+    }
+    if (!bodyHash) return { query: "", text: "", error: null };
+    try {
+      const canonicalQuery = vault.normalizeCanonicalQuery(reqQuery);
+      return {
+        query: canonicalQuery,
+        text: vault.buildCanonicalString({
+          timestamp: sampleTs,
+          method: httpMethod,
+          path: reqPath,
+          query: reqQuery,
+          bodySha256Hex: bodyHash,
+        }),
+        error: null,
+      };
+    } catch (caught) {
+      return { query: "", text: "", error: vault.vaultErrorMessage(caught) };
+    }
+  }, [sampleTs, httpMethod, reqPath, reqQuery, bodyHash, bodyHashError]);
+  const canonicalQuery = canonicalPreview.query;
+  const canonicalString5Line = canonicalPreview.text;
+  const canonicalError = canonicalPreview.error;
 
   const generatedCode = useMemo(() => {
     const cleanQty = orderQty.trim() || "0.001";
@@ -709,7 +688,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ? `tickSize ${pair.tickSize} ${quote} · stepSize ${pair.stepSize} ${base} · minNotional ${pair.minNotionalQuote} ${quote}`
                 : "select a listed pair to view exchange constraints"}
             </span>
-            <Link to="/portfolio">Need an Ed25519 keypair? Open Key Vault (/#/portfolio) →</Link>
+            <Link to="/account/api">Need an Ed25519 keypair? Open API setup (/#/account/api) →</Link>
           </>
         }
       >
@@ -953,7 +932,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               <strong style={{ fontSize: 12 }}>
                 Resulting 5-Line Canonical String (UTF-8, newline-separated):
               </strong>
-              <CopyButton text={canonicalString5Line} label="Copy Canonical String" />
+              {canonicalString5Line && !canonicalError && (
+                <CopyButton text={canonicalString5Line} label="Copy Canonical String" />
+              )}
             </div>
             <pre
               className="mono"
@@ -968,7 +949,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 lineHeight: 1.6,
               }}
             >
-              {canonicalString5Line}
+              {canonicalError
+                ? `Blocked: ${canonicalError}`
+                : canonicalString5Line || "Calculating SHA-256…"}
             </pre>
 
             <div className="mt-3">
@@ -986,12 +969,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               </div>
               <div className="kv">
                 <span className="k">Line 4 · Canonical Query</span>
-                <span className="v mono">{canonicalQuery || "(empty string)"}</span>
+                <span className="v mono">
+                  {canonicalError ? "Blocked" : canonicalQuery || "(empty string)"}
+                </span>
               </div>
               <div className="kv">
                 <span className="k">Line 5 · Body SHA-256 (hex)</span>
                 <span className="v mono" style={{ fontSize: 11 }}>
-                  {bodyHash.slice(0, 24)}…{bodyHash.slice(-12)}
+                  {bodyHash
+                    ? `${bodyHash.slice(0, 24)}…${bodyHash.slice(-12)}`
+                    : "Unavailable — hashing required"}
                 </span>
               </div>
             </div>

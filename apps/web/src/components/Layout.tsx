@@ -44,10 +44,20 @@ const INTRO_STORAGE_KEY = "poly-tools:intro:v1";
 
 const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
   {
+    group: "Account",
+    items: [
+      { to: "/account", label: "Overview", icon: <IconVault size={15} /> },
+      { to: "/account/api", label: "API setup", icon: <IconKey size={15} /> },
+      { to: "/account/trade", label: "Trade", icon: <IconTape size={15} /> },
+      { to: "/account/order-book", label: "Order book", icon: <IconBook size={15} /> },
+      { to: "/account/pnl", label: "Profit & loss", icon: <IconChart size={15} /> },
+      { to: "/account/transactions", label: "Tx explorer", icon: <IconFlow size={15} /> },
+    ],
+  },
+  {
     group: "Market Data",
     items: [
       { to: "/", label: "Markets", icon: <IconDashboard size={15} /> },
-      { to: "/book", label: "Order book", icon: <IconBook size={15} /> },
       { to: "/tape", label: "Recent trades", icon: <IconTape size={15} /> },
       { to: "/charts", label: "Price chart", icon: <IconChart size={15} /> },
       { to: "/heatmap", label: "Liquidity heatmap", icon: <IconActivity size={15} /> },
@@ -58,7 +68,6 @@ const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
     group: "Cross-Chain",
     items: [
       { to: "/zipper", label: "Zipper routes", icon: <IconZipper size={15} /> },
-      { to: "/flow", label: "Tx explorer", icon: <IconFlow size={15} /> },
     ],
   },
   {
@@ -67,7 +76,6 @@ const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
       { to: "/calc", label: "Calculators", icon: <IconCalc size={15} /> },
       { to: "/hub", label: "Testnet hub", icon: <IconHub size={15} /> },
       { to: "/sdk", label: "SDK quickstart", icon: <IconKey size={15} /> },
-      { to: "/portfolio", label: "API keys (Local)", icon: <IconVault size={15} /> },
       { to: "/brand-kit", label: "Brand kit", icon: <IconLayers size={15} /> },
     ],
   },
@@ -78,17 +86,23 @@ const ROUTE_META: Record<
   { title: string; group: string; showSymbolSelector: boolean }
 > = {
   "/": { title: "Markets", group: "Market Data", showSymbolSelector: true },
-  "/book": { title: "Order book", group: "Market Data", showSymbolSelector: true },
+  "/account": { title: "Overview", group: "Account", showSymbolSelector: false },
+  "/account/api": { title: "API setup", group: "Account", showSymbolSelector: false },
+  "/account/trade": { title: "Trade", group: "Account", showSymbolSelector: true },
+  "/account/order-book": { title: "Order book", group: "Account", showSymbolSelector: true },
+  "/account/pnl": { title: "Profit & loss", group: "Account", showSymbolSelector: false },
+  "/account/transactions": { title: "Tx explorer", group: "Account", showSymbolSelector: false },
+  "/book": { title: "Order book", group: "Account", showSymbolSelector: true },
   "/tape": { title: "Recent trades", group: "Market Data", showSymbolSelector: true },
   "/charts": { title: "Price chart", group: "Market Data", showSymbolSelector: true },
   "/heatmap": { title: "Liquidity heatmap", group: "Market Data", showSymbolSelector: true },
   "/compare": { title: "Venue compare", group: "Market Data", showSymbolSelector: false },
   "/zipper": { title: "Zipper routes", group: "Cross-Chain", showSymbolSelector: false },
-  "/flow": { title: "Tx explorer", group: "Cross-Chain", showSymbolSelector: false },
+  "/flow": { title: "Tx explorer", group: "Account", showSymbolSelector: false },
   "/calc": { title: "Calculators", group: "Toolkit & Docs", showSymbolSelector: true },
   "/hub": { title: "Testnet hub", group: "Toolkit & Docs", showSymbolSelector: false },
   "/sdk": { title: "SDK quickstart", group: "Toolkit & Docs", showSymbolSelector: true },
-  "/portfolio": { title: "API keys (Local)", group: "Toolkit & Docs", showSymbolSelector: false },
+  "/portfolio": { title: "API setup", group: "Account", showSymbolSelector: false },
   "/brand-kit": { title: "Brand kit", group: "Toolkit & Docs", showSymbolSelector: false },
 };
 
@@ -287,7 +301,7 @@ export function Layout() {
                 <NavLink
                   key={item.to}
                   to={item.to}
-                  end={item.to === "/"}
+                  end={item.to === "/" || item.to === "/account"}
                   className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
                 >
                   <span className="ico">{item.icon}</span>

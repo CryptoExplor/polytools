@@ -6,3 +6,4 @@ export * from "./normalize";
 export * from "./format";
 export * from "./poll";
 export * as vault from "./keys";
+export * as account from "./account/index";

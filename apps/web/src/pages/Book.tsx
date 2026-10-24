@@ -1,5 +1,5 @@
 /**
- * TOOL 2 — Live Order Book & Cumulative Depth (/#/book)
+ * TOOL 2 — Live Order Book & Cumulative Depth (/#/account/order-book)
  * L2 bid/ask ladders with selectable depth (10/20/50/100), cumulative depth chart,
  * liquidity imbalance gauge, spread telemetry, and automatic wall detection.
  */
