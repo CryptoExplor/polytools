@@ -9,7 +9,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   dec,
   fmtAgo,
-  fmtCompact,
   fmtNum,
   fmtTimeUTC,
   price,
@@ -17,6 +16,7 @@ import {
   type RecentTrade,
 } from "@poly/core";
 import { api } from "../lib/api";
+import { formatCompactQuoteNotional } from "../lib/format";
 import { useNow, usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -123,8 +123,8 @@ export default function Tape() {
   const qtyDecimals = assetByCode.get(base)?.quantityDisplayDecimals ?? 5;
 
   // Keep alert preferences and display metadata in a ref so toggling controls never re-runs trade ingestion or re-fires old alerts
-  const prefsRef = useRef({ threshold, sound, notify, base, qtyDecimals });
-  prefsRef.current = { threshold, sound, notify, base, qtyDecimals };
+  const prefsRef = useRef({ threshold, sound, notify, base, quote, qtyDecimals });
+  prefsRef.current = { threshold, sound, notify, base, quote, qtyDecimals };
 
   const showToastMsg = useCallback((msg: string) => {
     setToast(msg);
@@ -159,6 +159,7 @@ export default function Tape() {
       sound: curSound,
       notify: curNotify,
       base: curBase,
+      quote: curQuote,
       qtyDecimals: curQtyDecimals,
     } = prefsRef.current;
 
@@ -186,7 +187,7 @@ export default function Tape() {
           `Whale print on ${symbol}: ${biggest.sideLabel.toUpperCase()} ${fmtNum(
             biggest.qtyNum,
             curQtyDecimals,
-          )} ${curBase} @ ${fmtNum(biggest.px)} (≈ ${fmtCompact(biggest.notional, "$")})`,
+          )} ${curBase} @ ${fmtNum(biggest.px)} (≈ ${formatCompactQuoteNotional(biggest.notional, curQuote)})`,
         );
         if (curSound) playAlertTone();
         if (
@@ -197,10 +198,7 @@ export default function Tape() {
         ) {
           try {
             new Notification(`Whale on ${symbol}`, {
-              body: `${biggest.sideLabel.toUpperCase()} ${fmtNum(biggest.qtyNum)} ${curBase} ≈ ${fmtCompact(
-                biggest.notional,
-                "$",
-              )} @ ${fmtNum(biggest.px)}`,
+              body: `${biggest.sideLabel.toUpperCase()} ${fmtNum(biggest.qtyNum)} ${curBase} ≈ ${formatCompactQuoteNotional(biggest.notional, curQuote)} @ ${fmtNum(biggest.px)}`,
             });
           } catch {
             /* ignore notification error */
@@ -270,16 +268,16 @@ export default function Tape() {
   const triggerTestAlert = () => {
     if (sound) playAlertTone();
     showToastMsg(
-      `Test alert active: monitoring ${symbol} prints ≥ ${fmtCompact(threshold, "$")}`,
+      `Test alert active: monitoring ${symbol} prints ≥ ${formatCompactQuoteNotional(threshold, quote)}`,
     );
   };
 
   return (
     <div className="page-stack">
       <PageHeader
-        title={`Trade Tape & Large Prints · ${symbol}`}
-        badge={<Pill kind="accent">{rows.length} prints buffered</Pill>}
-        subtitle="Every trade that just matched on the selected pair, newest on top. Alerts are local. They are not orders."
+        title={`Recent Market Trades · ${symbol}`}
+        badge={<Pill kind="accent">{rows.length} recent trades</Pill>}
+        subtitle="Public trades for everyone on this market, newest first. No account key is used. These are not necessarily your trades."
         actions={
           <div className="row-flex">
             <SymbolSelect value={symbol} onChange={setSymbol} />
@@ -301,13 +299,13 @@ export default function Tape() {
           label="Buy Flow (Session)"
           trend="up"
           value={`${stats.buyCount} prints`}
-          sub={`Notional: ${fmtCompact(stats.buyNotional, "$")}`}
+          sub={`Notional: ${formatCompactQuoteNotional(stats.buyNotional, quote)}`}
         />
         <MetricCell
           label="Sell Flow (Session)"
           trend="down"
           value={`${stats.sellCount} prints`}
-          sub={`Notional: ${fmtCompact(stats.sellNotional, "$")}`}
+          sub={`Notional: ${formatCompactQuoteNotional(stats.sellNotional, quote)}`}
         />
         <MetricCell
           label="Aggressor Volume Ratio"
@@ -357,8 +355,8 @@ export default function Tape() {
             />
           }
           trend="warn"
-          value={stats.biggest ? fmtCompact(stats.biggest, "$") : "—"}
-          sub={`Large print threshold: ≥ ${fmtCompact(threshold, "$")}`}
+          value={stats.biggest ? formatCompactQuoteNotional(stats.biggest, quote) : "—"}
+          sub={`Large print threshold: ≥ ${formatCompactQuoteNotional(threshold, quote)}`}
         />
       </MetricStrip>
 
@@ -400,7 +398,7 @@ export default function Tape() {
             >
               {[500, 1000, 5000, 10000, 25000, 50000, 100000, 250000].map((v) => (
                 <option key={v} value={v}>
-                  ≥ {fmtCompact(v, "$")}
+                  ≥ {formatCompactQuoteNotional(v, quote)}
                 </option>
               ))}
             </select>
@@ -462,7 +460,7 @@ export default function Tape() {
               onClick={() => setSideFilter("whales")}
               title="Single trade notional (price × qty) above your chosen threshold"
             >
-              Large prints (≥ {fmtCompact(threshold, "$")})
+              Large prints (≥ {formatCompactQuoteNotional(threshold, quote)})
             </button>
           </div>
         </div>
@@ -472,7 +470,7 @@ export default function Tape() {
       {whales.length > 0 && (
         <Card
           title={`Whale Prints Detected (${whales.length})`}
-          subtitle={`Trades on ${symbol} with quote notional ≥ ${fmtCompact(threshold, "$")}`}
+          subtitle={`Trades on ${symbol} with quote notional ≥ ${formatCompactQuoteNotional(threshold, quote)}`}
         >
           <div className="row-flex" style={{ gap: 8 }}>
             {whales.map((w) => (
@@ -482,7 +480,7 @@ export default function Tape() {
                 title={`Match #${w.matchId} at ${fmtTimeUTC(w.tsMs)} UTC`}
               >
                 {w.sideLabel === "buy" ? "▲ BUY" : "▼ SELL"}{" "}
-                <strong>{fmtCompact(w.notional, "$")}</strong> ({fmtNum(w.qtyNum, qtyDecimals)}{" "}
+                <strong>{formatCompactQuoteNotional(w.notional, quote)}</strong> ({fmtNum(w.qtyNum, qtyDecimals)}{" "}
                 {base} @ {fmtNum(w.px)}) · {fmtTimeUTC(w.tsMs)}
               </Pill>
             ))}
@@ -545,7 +543,7 @@ export default function Tape() {
                 </span>
                 <span className="right muted">{fmtNum(r.qtyNum, qtyDecimals)}</span>
                 <span className="right hide-xs" style={{ fontWeight: isWhale ? 700 : 500 }}>
-                  {fmtCompact(r.notional, "$")}{" "}
+                  {formatCompactQuoteNotional(r.notional, quote)}{" "}
                   {isWhale && (
                     <Pill kind="warn" title="Exceeds whale threshold">
                       WHALE

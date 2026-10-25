@@ -1141,6 +1141,24 @@ table.data tbody tr:last-child td {
   font-weight: 500;
 }
 
+.market-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 2px 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.market-open-btn:hover {
+  color: var(--accent-text);
+  background: var(--bg-hover);
+}
+
 .row-actions {
   display: inline-flex;
   align-items: center;

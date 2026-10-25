@@ -5,9 +5,13 @@
  * Includes full edge-case validation and live exchange price integration.
  */
 
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useReducer, useState, type ReactNode } from "react";
 import { fmtNum, price, splitSymbol } from "@poly/core";
 import { api } from "../lib/api";
+import {
+  converterPriceReducer,
+  INITIAL_CONVERTER_PRICE_STATE,
+} from "../lib/converter";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -139,13 +143,17 @@ export default function Calc() {
 
   // --- 4. Unit & Asset Converter State
   const [amt, setAmt] = useState<number>(1);
-  const [convPrice, setConvPrice] = useState<number>(82000);
+  const [convPriceState, dispatchConvPrice] = useReducer(
+    converterPriceReducer,
+    INITIAL_CONVERTER_PRICE_STATE,
+  );
+  const convPrice = convPriceState.value;
   const [bpsInput, setBpsInput] = useState<number>(25);
 
-  // Sync converter reference price when live price first arrives
+  // Poll live prices only until the user edits the converter reference.
   useEffect(() => {
     if (isFinite(live) && live > 0) {
-      setConvPrice(live);
+      dispatchConvPrice({ type: "sync", value: live });
     }
   }, [live]);
 
@@ -156,7 +164,7 @@ export default function Calc() {
     setLiqEntry(live);
     setPEntry(live);
     setPExit(Number((live * 1.03).toPrecision(6)));
-    setConvPrice(live);
+    dispatchConvPrice({ type: "sync", value: live, force: true });
   };
 
   const applySampleSizing = () => {
@@ -781,7 +789,7 @@ export default function Calc() {
               label={`Reference Price (${symbol})`}
               suffix={quote}
               value={convPrice}
-              onChange={setConvPrice}
+              onChange={(value) => dispatchConvPrice({ type: "edit", value })}
               error={convResult.errors.convPrice}
             />
           </div>

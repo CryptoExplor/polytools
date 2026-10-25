@@ -35,12 +35,29 @@ import {
   Pill,
   Sparkline,
   SymBadge,
-  TermTip,
 } from "../components/ui";
 import { IconActivity, IconBook, IconChart, IconSearch, IconTape } from "../components/icons";
 
 type SortKey = "symbol" | "last" | "index" | "change" | "vol" | "spread";
 type TrendFilter = "all" | "up" | "down";
+
+export const DASHBOARD_TOOL_PATHS = {
+  book: "/book",
+  tape: "/tape",
+  charts: "/charts",
+  heatmap: "/heatmap",
+} as const;
+export type DashboardTool = keyof typeof DASHBOARD_TOOL_PATHS;
+
+export function openDashboardTool(
+  symbol: string,
+  tool: DashboardTool,
+  setSymbol: (symbol: string) => void,
+  navigate: (path: string) => void,
+): void {
+  setSymbol(symbol);
+  navigate(DASHBOARD_TOOL_PATHS[tool]);
+}
 
 export default function Dashboard() {
   const { setSymbol, pairBySymbol, watchlist, toggleWatchlist } = useApp();
@@ -198,7 +215,7 @@ export default function Dashboard() {
     }
   };
 
-  const renderSortTh = (k: SortKey, label: React.ReactNode, alignLeft = false) => {
+  const renderSortTh = (k: SortKey, label: string, alignLeft = false, tip?: string) => {
     const active = sortKey === k;
     const ariaSort = active ? (sortDir === 1 ? "ascending" : "descending") : "none";
     return (
@@ -207,6 +224,7 @@ export default function Dashboard() {
           type="button"
           className={`th-sort-btn ${active ? "active" : ""}`}
           onClick={() => handleSort(k)}
+          title={tip}
         >
           <span>{label}</span>
           <span aria-hidden="true">{active ? (sortDir === 1 ? "↑" : "↓") : "↕"}</span>
@@ -215,11 +233,8 @@ export default function Dashboard() {
     );
   };
 
-  const openTool = (sym: string, path: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    setSymbol(sym);
-    nav(path);
-  };
+  const openTool = (sym: string, tool: DashboardTool) =>
+    openDashboardTool(sym, tool, setSymbol, nav);
 
   const exportCsv = () => {
     if (!rows.length) return;
@@ -350,7 +365,7 @@ export default function Dashboard() {
       <Card
         flush
         title="Spot Markets"
-        subtitle="Click any row to open its chart, or jump directly to Book, Tape, Chart, or Heatmap."
+        subtitle="Open a market chart from its symbol, or jump directly to Book, Tape, Chart, or Heatmap."
         actions={
           <button
             type="button"
@@ -444,27 +459,24 @@ export default function Dashboard() {
                 {renderSortTh("symbol", "Market", true)}
                 {renderSortTh(
                   "last",
-                  <TermTip
-                    label="Last Price"
-                    tip="Last public trade on Polyester, decoded from the testnet feed (scaled integer ÷ 10³)."
-                  />,
+                  "Last Price",
+                  false,
+                  "Last public trade on Polyester, decoded from the testnet feed (scaled integer ÷ 10³).",
                 )}
                 {renderSortTh(
                   "index",
-                  <TermTip
-                    label="Index Price"
-                    tip="Exchange reference index price (scaled integer ÷ 10³)."
-                  />,
+                  "Index Price",
+                  false,
+                  "Exchange reference index price (scaled integer ÷ 10³).",
                 )}
                 {renderSortTh("change", "24h Change")}
                 <th>24h Low / High</th>
                 {renderSortTh("vol", "24h Volume ($)")}
                 {renderSortTh(
                   "spread",
-                  <TermTip
-                    label="Spread"
-                    tip="Top-of-book (Best Ask − Best Bid) ÷ Mid in basis points (1 bps = 0.01%)"
-                  />,
+                  "Spread",
+                  false,
+                  "Top-of-book (Best Ask − Best Bid) ÷ Mid in basis points (1 bps = 0.01%)",
                 )}
                 <th>Session Trend</th>
                 <th>Actions</th>
@@ -532,19 +544,7 @@ export default function Dashboard() {
                 return (
                   <tr
                     key={m.symbol}
-                    className={`interactive-row ${
-                      flash === "up" ? "flash-up" : flash === "down" ? "flash-down" : ""
-                    }`}
-                    tabIndex={0}
-                    role="button"
-                    aria-label={`Open ${m.symbol} chart. Last price ${fmtNum(last)} ${quote}`}
-                    onClick={() => openTool(m.symbol, "/charts")}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        openTool(m.symbol, "/charts");
-                      }
-                    }}
+                    className={flash === "up" ? "flash-up" : flash === "down" ? "flash-down" : ""}
                   >
                     <td>
                       <span
@@ -558,10 +558,7 @@ export default function Dashboard() {
                         <button
                           type="button"
                           className={`star-btn ${watchlist.includes(m.symbol) ? "active" : ""}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleWatchlist(m.symbol);
-                          }}
+                          onClick={() => toggleWatchlist(m.symbol)}
                           aria-label={
                             watchlist.includes(m.symbol)
                               ? `Remove ${m.symbol} from watchlist`
@@ -575,11 +572,19 @@ export default function Dashboard() {
                         >
                           {watchlist.includes(m.symbol) ? "★" : "☆"}
                         </button>
-                        <SymBadge asset={base} size={22} />
-                        <span className="mono">
-                          {base}
-                          <small>/{quote}</small>
-                        </span>
+                        <button
+                          type="button"
+                          className="market-open-btn"
+                          onClick={() => openTool(m.symbol, "charts")}
+                          aria-label={`Open ${m.symbol} candlestick chart`}
+                          title={`Open ${m.symbol} candlestick chart`}
+                        >
+                          <SymBadge asset={base} size={22} />
+                          <span className="mono">
+                            {base}
+                            <small>/{quote}</small>
+                          </span>
+                        </button>
                       </span>
                     </td>
                     <td className="mono" style={{ fontWeight: 650 }}>
@@ -628,13 +633,13 @@ export default function Dashboard() {
                     <td>
                       <Sparkline data={spark} width={88} height={22} />
                     </td>
-                    <td onClick={(e) => e.stopPropagation()}>
+                    <td>
                       <div className="row-actions">
                         <button
                           type="button"
                           className="row-action-btn"
                           title={`Open ${m.symbol} Order Book`}
-                          onClick={(e) => openTool(m.symbol, "/account/order-book", e)}
+                          onClick={() => openTool(m.symbol, "book")}
                         >
                           Book
                         </button>
@@ -642,7 +647,7 @@ export default function Dashboard() {
                           type="button"
                           className="row-action-btn"
                           title={`Open ${m.symbol} Trade Tape`}
-                          onClick={(e) => openTool(m.symbol, "/tape", e)}
+                          onClick={() => openTool(m.symbol, "tape")}
                         >
                           Tape
                         </button>
@@ -650,7 +655,7 @@ export default function Dashboard() {
                           type="button"
                           className="row-action-btn"
                           title={`Open ${m.symbol} Candlestick Chart`}
-                          onClick={(e) => openTool(m.symbol, "/charts", e)}
+                          onClick={() => openTool(m.symbol, "charts")}
                         >
                           Chart
                         </button>
@@ -658,7 +663,7 @@ export default function Dashboard() {
                           type="button"
                           className="row-action-btn"
                           title={`Open ${m.symbol} Liquidity Heatmap`}
-                          onClick={(e) => openTool(m.symbol, "/heatmap", e)}
+                          onClick={() => openTool(m.symbol, "heatmap")}
                         >
                           Heat
                         </button>
