@@ -165,6 +165,30 @@ function successRouter(calls, overrides = {}) {
   };
 }
 
+function pagedHistoryRouter(calls, fillPages = 3, transferPages = 2) {
+  return successRouter(calls, {
+    "/v1/spot/trades": (parsed) => {
+      const token = parsed.searchParams.get("pageToken");
+      const index = token ? Number(token.slice("fill-".length)) : 0;
+      const id = index + 1;
+      return jsonResponse({
+        nextPageToken: index + 1 < fillPages ? `fill-${id}` : "",
+        trades: [{ ...fill, matchId: String(id), orderId: `order${id}`, lineage: { generation: 1, id: `order${id}` } }],
+        transfers: [],
+      });
+    },
+    "/v1/transfers": (parsed) => {
+      const token = parsed.searchParams.get("page_token");
+      const index = token ? Number(token.slice("transfer-".length)) : 0;
+      const id = index + 1;
+      return jsonResponse({
+        nextPageToken: index + 1 < transferPages ? `transfer-${id}` : "",
+        transfers: [{ ...transfer, amount: String(id), flowId: `flow-${id}` }],
+      });
+    },
+  });
+}
+
 function makeCoordinator(vault, fetchImpl, options = {}) {
   const client = new account.AccountRestClient({ vault, fetchImpl });
   const store = new account.MemoryDatasetStore();
@@ -576,5 +600,116 @@ describe("Account data coordinator (synthetic authenticated transport)", () => {
     await vault.lock();
     assert.equal(store.size, 0);
     await assert.rejects(() => coordinator.loadAll({ markets }), (error) => error?.code === "ACCOUNT_STALE");
+  });
+
+  it("keeps the default snapshot capped while explicit import follows cursors with exact period and count progress", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, pagedHistoryRouter(calls), { maxPages: 1 });
+    const capped = await coordinator.loadAll({ range: "7d", markets });
+    assert.equal(capped.fills.coverage.status, "partial");
+    assert.equal(capped.fills.coverage.stoppedAtCap, true);
+    assert.equal(capped.fills.coverage.pagesFetched, 1);
+    assert.equal(capped.transfers.coverage.status, "partial");
+    assert.equal(capped.transfers.coverage.stoppedAtCap, true);
+
+    const progress = [];
+    const beforeImportCalls = calls.length;
+    const imported = await coordinator.importCursorHistory({
+      period: capped.period,
+      maxPages: 5,
+      markets,
+      onProgress: (value) => progress.push(value),
+    });
+    assert.equal(imported.period.startTime, capped.period.startTime);
+    assert.equal(imported.period.endTime, capped.period.endTime);
+    assert.equal(imported.fills.coverage.status, "complete");
+    assert.equal(imported.fills.coverage.pagesFetched, 3);
+    assert.equal(imported.fills.coverage.cursorExhausted, true);
+    assert.equal(imported.fills.data.summary.calculations.length, 3);
+    assert.equal(imported.transfers.coverage.status, "complete");
+    assert.equal(imported.transfers.coverage.pagesFetched, 2);
+    assert.equal(imported.transfers.data.transfers.length, 2);
+    assert.deepEqual(progress.map((value) => value.operation), ["fills", "fills", "fills", "transfers", "transfers"]);
+    assert.deepEqual(progress.filter((value) => value.operation === "fills").map((value) => value.pagesFetched), [1, 2, 3]);
+    assert.deepEqual(progress.filter((value) => value.operation === "transfers").map((value) => value.pagesFetched), [1, 2]);
+    assert.equal(progress.every((value) => value.maxPages === 5 && value.rowsReceived >= 1), true);
+    const importCalls = calls.slice(beforeImportCalls);
+    assert.equal(importCalls.every(({ url }) => ["/v1/spot/trades", "/v1/transfers"].includes(new URL(url).pathname)), true);
+    assert.equal(importCalls.some(({ url }) => new URL(url).searchParams.get("pageToken") === "fill-2"), true);
+    assert.equal(importCalls.some(({ url }) => new URL(url).searchParams.get("page_token") === "transfer-1"), true);
+    assert.equal(JSON.stringify(imported).includes("fill-2"), false);
+    assert.equal(JSON.stringify(imported).includes("transfer-1"), false);
+  });
+
+  it("imports only selected order history without adding fills or transfer requests", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, pagedHistoryRouter(calls));
+    const snapshot = await coordinator.loadAll({ markets });
+    const beforeImport = calls.length;
+    const progress = [];
+    const result = await coordinator.importCursorHistory({
+      period: snapshot.period,
+      maxPages: 5,
+      operations: ["orders"],
+      markets,
+      onProgress: (value) => progress.push(value),
+    });
+    assert.equal(result.orders.coverage.status, "complete");
+    assert.equal(result.orders.coverage.pagesFetched, 2);
+    assert.equal(result.orders.data.orders.length, 2);
+    assert.equal(result.fills, undefined);
+    assert.equal(result.transfers, undefined);
+    assert.deepEqual(progress.map((value) => [value.operation, value.pagesFetched]), [["orders", 1], ["orders", 2]]);
+    assert.equal(calls.slice(beforeImport).every(({ url }) => new URL(url).pathname === "/v1/orders/history"), true);
+  });
+
+  it("keeps an explicit import partial at its selected cap and rejects an unsafe page policy before reading", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, pagedHistoryRouter(calls));
+    const snapshot = await coordinator.loadAll({ markets });
+    const before = calls.length;
+    await assert.rejects(
+      () => coordinator.importCursorHistory({ period: snapshot.period, maxPages: 0, markets }),
+      (error) => error?.code === "INVALID_REQUEST",
+    );
+    assert.equal(calls.length, before);
+    await assert.rejects(
+      () => coordinator.importCursorHistory({ period: snapshot.period, maxPages: 2, operations: ["fills", "fills"], markets }),
+      (error) => error?.code === "INVALID_REQUEST",
+    );
+    assert.equal(calls.length, before);
+    const result = await coordinator.importCursorHistory({ period: snapshot.period, maxPages: 1, markets });
+    assert.equal(result.fills.coverage.status, "partial");
+    assert.equal(result.fills.coverage.stoppedAtCap, true);
+    assert.equal(result.fills.coverage.cursorExhausted, false);
+    assert.equal(result.transfers.coverage.status, "partial");
+    assert.equal(result.transfers.coverage.stoppedAtCap, true);
+  });
+
+  it("aborts explicit cursor import without requesting another page or marking the prefix complete", async () => {
+    const vault = await connected();
+    const calls = [];
+    const { coordinator } = makeCoordinator(vault, pagedHistoryRouter(calls));
+    const snapshot = await coordinator.loadAll({ markets });
+    const beforeImport = calls.length;
+    const controller = new AbortController();
+    const result = await coordinator.importCursorHistory({
+      period: snapshot.period,
+      maxPages: 10,
+      markets,
+      signal: controller.signal,
+      onProgress: (value) => {
+        if (value.operation === "fills" && value.pagesFetched === 1) controller.abort();
+      },
+    });
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(result.fills.coverage.status, "partial");
+    assert.equal(result.fills.coverage.cursorExhausted, false);
+    assert.equal(result.fills.error.code, "ABORTED");
+    const fillCalls = calls.slice(beforeImport).filter(({ url }) => new URL(url).pathname === "/v1/spot/trades");
+    assert.equal(fillCalls.some(({ url }) => new URL(url).searchParams.get("pageToken") === "fill-1"), false);
   });
 });

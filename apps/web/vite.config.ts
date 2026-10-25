@@ -3,6 +3,11 @@ import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { WIRE_SAMPLE_DATA_SOURCE, WIRE_SAMPLE_HEADER } from "./src/lib/provenance";
+import {
+  META_CONTENT_SECURITY_POLICY,
+  REFERRER_POLICY,
+} from "../../packages/core/src/deploymentSecurity";
 
 const coreSrc = fileURLToPath(
   new URL("../../packages/core/src/index.ts", import.meta.url),
@@ -25,13 +30,13 @@ function readWireSample(file: string): Record<string, unknown> | null {
       parsed?.result?.structuredContent ??
       parsed?.structuredContent ??
       (parsed as Record<string, unknown>);
-    return { ...data, dataSource: "wire-samples" };
+    return { ...data, dataSource: WIRE_SAMPLE_DATA_SOURCE };
   } catch {
     return null;
   }
 }
 
-function devWireSampleFallback(url: URL): { status: number; body: unknown } | null {
+export function devWireSampleFallback(url: URL): { status: number; body: unknown } | null {
   const p = url.pathname.replace(/\/+$/, "") || "/";
   const q = url.searchParams;
 
@@ -102,7 +107,7 @@ function devWireSampleFallback(url: URL): { status: number; body: unknown } | nu
           asset,
           chainFilter: chainFilter ?? null,
           routes,
-          dataSource: "wire-samples",
+          dataSource: WIRE_SAMPLE_DATA_SOURCE,
         },
       };
     }
@@ -137,7 +142,7 @@ function devWireSampleFallback(url: URL): { status: number; body: unknown } | nu
           chainFilter: chainFilter ?? null,
           compareBy,
           routes,
-          dataSource: "wire-samples",
+          dataSource: WIRE_SAMPLE_DATA_SOURCE,
         },
       };
     }
@@ -170,7 +175,7 @@ function devWireSampleFallback(url: URL): { status: number; body: unknown } | nu
           flowId,
           flow: null,
           summary: "No public deposit/withdrawal flow indexed for this flowId.",
-          dataSource: "wire-samples",
+          dataSource: WIRE_SAMPLE_DATA_SOURCE,
         },
       };
     }
@@ -197,11 +202,44 @@ function devWireSampleFallback(url: URL): { status: number; body: unknown } | nu
         summary: "No public deposit/withdrawal flow indexed for this transaction hash.",
         explanation:
           "Polyester has no public Zipper bridge flow indexed for this hash. That does not mean an on-chain transaction failed.",
-        dataSource: "wire-samples",
+        dataSource: WIRE_SAMPLE_DATA_SOURCE,
       },
     };
   }
   return null;
+}
+
+/** Production validation/errors pass through; only upstream 502 may use samples. */
+export function devWireSampleFallbackForStatus(
+  url: URL,
+  productionStatus: number,
+): { status: number; body: unknown } | null {
+  return productionStatus === 502 ? devWireSampleFallback(url) : null;
+}
+
+export function injectProductionSecurityMeta(html: string): string {
+  if (/http-equiv=["']Content-Security-Policy["']/i.test(html)) return html;
+  const tags = [
+    `    <meta http-equiv="Content-Security-Policy" content="${META_CONTENT_SECURITY_POLICY}" />`,
+    `    <meta name="referrer" content="${REFERRER_POLICY}" />`,
+  ].join("\n");
+  const charset = /<meta\s+charset\s*=\s*["'][^"']+["'][^>]*>/i;
+  if (charset.test(html)) {
+    return html.replace(charset, (tag) => `${tag}\n${tags}`);
+  }
+  return html.replace(/<head\b[^>]*>/i, (tag) => `${tag}\n${tags}`);
+}
+
+/** Static meta fallback only; supported platforms must send real headers. */
+export function productionSecurityMetaPlugin(): Plugin {
+  return {
+    name: "poly-production-security-meta",
+    apply: "build",
+    transformIndexHtml: {
+      order: "post",
+      handler: injectProductionSecurityMeta,
+    },
+  };
 }
 
 /**
@@ -229,14 +267,13 @@ function devApiPlugin(): Plugin {
                 method: req.method ?? "GET",
               });
               const webRes = await api(webReq, { env: process.env });
-              if (webRes.status === 502) {
-                const fb = devWireSampleFallback(new URL(webReq.url));
-                if (fb) {
-                  res.statusCode = fb.status;
-                  res.setHeader("Content-Type", "application/json; charset=utf-8");
-                  res.end(JSON.stringify(fb.body));
-                  return;
-                }
+              const fb = devWireSampleFallbackForStatus(new URL(webReq.url), webRes.status);
+              if (fb) {
+                res.statusCode = fb.status;
+                res.setHeader("Content-Type", "application/json; charset=utf-8");
+                res.setHeader(WIRE_SAMPLE_HEADER, WIRE_SAMPLE_DATA_SOURCE);
+                res.end(JSON.stringify(fb.body));
+                return;
               }
               res.statusCode = webRes.status;
               webRes.headers.forEach((v, k) => res.setHeader(k, v));
@@ -254,7 +291,7 @@ function devApiPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), devApiPlugin()],
+  plugins: [react(), devApiPlugin(), productionSecurityMetaPlugin()],
   resolve: {
     alias: { "@poly/core": coreSrc },
   },

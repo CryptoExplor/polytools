@@ -1,6 +1,6 @@
 # PolyTools — modular toolkit for the Polyester exchange
 
-Community-built, **read-only** tools for [Polyester](https://testnet.polyester.com) (non-custodial
+Community-built tools for **read-only market and account research** on [Polyester](https://testnet.polyester.com) (non-custodial
 cross-chain spot exchange). Works on **testnet today** and is **mainnet-ready** — when the mainnet
 endpoint is announced, update the network configuration or deployment override.
 
@@ -17,18 +17,20 @@ endpoint is announced, update the network configuration or deployment override.
 ## What's inside
 
 The SPA uses hash routes so deep links work on static hosts. Account features are grouped under
-`/account`; the older `/book`, `/flow`, and `/portfolio` links redirect to their account sections.
+`/account`; the older `/flow` and `/portfolio` links redirect to account sections, while `/book`
+remains a public market-data route.
 
 | Area | Route | What it provides |
 |---|---|---|
-| Account overview | `/#/account` | Read-only balances, sampled equity, execution activity, transfer coverage, current rates, and explicitly confirmed exports |
+| Account overview | `/#/account` | Authenticated balances, sampled balance/equity history, current fee rates, and explicitly confirmed exports; no unsupported P&L |
 | API setup | `/#/account/api` | Passphrase-encrypted IndexedDB key vault, nonextractable local Ed25519 sessions, and read-only request signing |
-| Trade | `/#/account/trade` | Public matched-trade tape for the selected market; no order placement or cancellation |
-| Order book | `/#/account/order-book` | Public resting liquidity and depth; no account key or order action |
-| Profit & loss | `/#/account/pnl` | Explicit unavailable state until opening basis, complete flows, and fresh valuation marks are established |
-| Tx explorer | `/#/account/transactions` | Public lifecycle lookup; account-wide retrieval is not presented as a verified live feed |
+| Your Trades | `/#/account/trade` | Authenticated, validated account executions and their actual execution fees; never the public trade tape |
+| Orders | `/#/account/orders` | Authenticated open and completed orders, with supported read-only order details |
+| Profit and Loss | `/#/account/pnl` | Experimental, user-assisted exact FIFO or moving-weighted-average cost-basis estimates after complete fills, opening basis, resolved flows, and method provenance; realized output is independently gated, while unrealized/total also require fresh marks. Not verified tax output |
+| Money Movements | `/#/account/transactions` | Authenticated transfers, with a clearly separate credential-free public transaction lookup |
 | Markets | `/#/` | Market overview, prices, 24-hour stats, sparklines, watchlist, and CSV export |
-| Recent trades | `/#/tape` | Live public tape and configurable whale alerts |
+| Recent Trades | `/#/tape` | Live public tape and configurable whale alerts; no account key is used |
+| Public Order Book | `/#/book` | Public resting liquidity and depth; no account key or order action |
 | Price chart | `/#/charts` | Candle timeframes, volume, crosshair, and live refresh |
 | Liquidity heatmap | `/#/heatmap` | Order-book depth density and imbalance over time |
 | Venue compare | `/#/compare` | Polyester index versus CoinGecko, with premium/discount in basis points |
@@ -87,10 +89,23 @@ npm run dev          # http://localhost:5173 — frontend + backend in one proce
 npm test             # synthetic unit/regression tests; no live account credentials required
 npm run typecheck    # web + backend TypeScript projects (including core)
 npm run build        # web typecheck + static production build → apps/web/dist
+
+# Offline/local maintenance checks
+npm run check:runtime
+npm run check:whitespace
+npm run check:external       # inventory only; no network
+npm run check:dependencies   # lock/license metadata; no install
+npm run check:performance    # after npm run build
 ```
 
 The account tests use synthetic keys and fake transports only. They are not evidence of live
 private API access, permissions, CORS, or schema compatibility.
+
+External freshness checks are separate opt-in public-network commands, never part of `npm test`:
+`npm run check:links:live`, `npm run check:assets:live`, and `npm run check:sdk:live`. They use
+read-only HEAD/GET requests and do not execute generated SDK/trading examples. `npm audit` is a
+separate registry review; do not run `npm audit fix` as an opportunistic maintenance step.
+See `docs/audit/PHASE3_MAINTENANCE.md` for current measurements, findings, and unverified limits.
 
 ## Deploy (pick one)
 
@@ -122,8 +137,11 @@ npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put TELEGRAM_CHAT_ID
 ```
 
-Alerts are sent when a market's 24-hour move exceeds `ALERT_MIN_BPS` (default 300 = 3%). These
-secrets are for the optional notification bot, not for account custody or signing.
+Alerts are sent when a market's 24-hour move exceeds `ALERT_MIN_BPS` (default 300 = 3%). When
+configured, this standalone/root Worker performs public-mover reads and **POSTs notifications to
+Telegram every 15 minutes**. That is a separate outbound side effect, not an exchange-account
+mutation, and it is not a behavior of every deployment adapter. The Telegram secrets are only for
+the optional notification bot, never for account custody or signing. Account reads remain read-only.
 
 ## Mainnet switch
 

@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation, useSearchParams } from "react-router-dom";
 import { NETWORKS, vault } from "@poly/core";
 import {
   Card,
@@ -29,9 +29,12 @@ import {
   IconVault,
 } from "../components/icons";
 import { AccountAnalytics } from "../components/AccountAnalytics";
-import Book from "./Book";
-import Tape from "./Tape";
 import Flow from "./Flow";
+import {
+  moneyMovementScope,
+  withMoneyMovementScope,
+  type MoneyMovementScope,
+} from "../lib/navigation";
 
 type CreateMode = "generate" | "import";
 type PendingConfirm =
@@ -43,48 +46,48 @@ type SignedOutput = vault.SignedRequestResult & {
   headers: Record<string, string>;
 };
 
-type AccountSection = "overview" | "api" | "trade" | "order-book" | "pnl" | "transactions";
+type AccountSection = "overview" | "api" | "trade" | "orders" | "pnl" | "transactions";
 
 const ACCOUNT_TABS: Array<{ to: string; section: AccountSection; label: string }> = [
   { to: "/account", section: "overview", label: "Overview" },
   { to: "/account/api", section: "api", label: "API setup" },
-  { to: "/account/trade", section: "trade", label: "Trade" },
-  { to: "/account/order-book", section: "order-book", label: "Order book" },
-  { to: "/account/pnl", section: "pnl", label: "Profit & loss" },
-  { to: "/account/transactions", section: "transactions", label: "Tx explorer" },
+  { to: "/account/trade", section: "trade", label: "Your Trades" },
+  { to: "/account/orders", section: "orders", label: "Orders" },
+  { to: "/account/pnl", section: "pnl", label: "Profit and Loss" },
+  { to: "/account/transactions", section: "transactions", label: "Money Movements" },
 ];
 
 const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle: string }> = {
   overview: {
     title: "Account overview",
-    subtitle: "Read-only balances, sampled equity, execution activity, transfer coverage, current rates, and safe loaded-row exports.",
+    subtitle: "Your balances, orders, trades, money movements, and current fee rates. Each section reports its own loading, permission, and data-coverage status.",
   },
   api: {
     title: "API setup",
-    subtitle: "Passphrase-encrypted IndexedDB custody, nonextractable local Ed25519 sessions, and signatures restricted to known read-only GET operations.",
+    subtitle: "Connect a registered read-only account key. Your key is encrypted in this browser and can sign only approved read requests.",
   },
   trade: {
-    title: "Trade",
-    subtitle: "Public matched trades for the selected market. This is a read-only trade tape; order placement and cancellation are not available.",
+    title: "Your Trades",
+    subtitle: "Only executions belonging to your connected account. Public market trades are available under Market Data → Recent Trades.",
   },
-  "order-book": {
-    title: "Order book",
-    subtitle: "Public resting liquidity for the selected market. No account key is required and no order action is available.",
+  orders: {
+    title: "Your Orders",
+    subtitle: "Open and completed orders from your connected account. This is not the public order book.",
   },
   pnl: {
-    title: "Profit & loss",
-    subtitle: "P&L remains gated until opening basis, complete flows, and fresh valuation marks are established.",
+    title: "Profit and Loss",
+    subtitle: "User-assisted cost-basis estimates require complete fills, opening basis, resolved flows, and method provenance. Realized P&L does not require a current mark; unrealized and total P&L also require a fresh labeled valuation.",
   },
   transactions: {
-    title: "Tx explorer",
-    subtitle: "Choose My accounts or public lifecycle lookup. No unverified account-wide or all-account transaction broadcast is presented as live.",
+    title: "Money Movements",
+    subtitle: "Review deposits, withdrawals, and transfers from your account, or look up a public transaction by its exact ID.",
   },
 };
 
 function accountSection(pathname: string): AccountSection {
   if (pathname.startsWith("/account/api")) return "api";
   if (pathname.startsWith("/account/trade")) return "trade";
-  if (pathname.startsWith("/account/order-book")) return "order-book";
+  if (pathname.startsWith("/account/orders") || pathname.startsWith("/account/order-book")) return "orders";
   if (pathname.startsWith("/account/pnl")) return "pnl";
   if (pathname.startsWith("/account/transactions")) return "transactions";
   return "overview";
@@ -107,68 +110,56 @@ function AccountTabs() {
   );
 }
 
-function AccountPnl() {
-  return (
-    <>
-      <MetricStrip>
-        <MetricCell label="Realized P&L" value="Unavailable" sub="Opening lots and complete covered flows are required" />
-        <MetricCell label="Unrealized P&L" value="Unavailable" sub="A fresh labeled valuation mark is required" />
-        <MetricCell label="Observed activity" value="Separate" sub="Fills, fees, deposits, and equity changes are not profit" />
-      </MetricStrip>
-      <Card title="P&L remains unavailable" subtitle="No partial or inferred profit figure is shown.">
-        <div className="notice warn" role="note">
-          <IconAlert size={15} />
-          <span>Realized and unrealized P&L require opening lots, complete fills, resolved non-fill cash flows, and a fresh labeled valuation mark. Those gates are not established by this read-only integration.</span>
-        </div>
-        <div className="row-flex mt-3" style={{ gap: 8 }}>
-          <Link to="/account" className="btn sm primary">Open observed account analytics</Link>
-          <Link to="/account/transactions" className="btn sm">Inspect transaction coverage</Link>
-        </div>
-      </Card>
-    </>
-  );
-}
-
-function AccountTransactions({ session }: { session: vault.VaultSessionInfo | null }) {
-  const [scope, setScope] = useState<"mine" | "all">("mine");
+function AccountTransactions({
+  accountVault,
+  session,
+}: {
+  accountVault: vault.AccountVault | null;
+  session: vault.VaultSessionInfo | null;
+}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const scope = moneyMovementScope(searchParams);
+  const selectScope = (next: MoneyMovementScope) => {
+    setSearchParams(withMoneyMovementScope(searchParams, next), { replace: true });
+  };
   return (
     <>
       <Card
-        title="Transaction scope"
-        subtitle="My accounts is the default. Public lifecycle lookup does not require credentials; neither option claims an unverified live broadcast."
+        title="Choose a money-movement view"
+        subtitle="Your account view uses signed private reads. Public lookup is separate and never requires your account key."
       >
-        <div className="seg-group" role="group" aria-label="Transaction explorer scope">
-          <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} onClick={() => setScope("mine")}>
-            My accounts
+        <div className="seg-group" role="group" aria-label="Money movement view">
+          <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} aria-pressed={scope === "mine"} onClick={() => selectScope("mine")}>
+            My account
           </button>
-          <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} onClick={() => setScope("all")}>
-            All public activity
+          <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} aria-pressed={scope === "all"} onClick={() => selectScope("all")}>
+            Public transaction lookup
           </button>
         </div>
         <div className={`notice ${scope === "mine" ? "info" : "warn"} mt-3`} role="note">
           {scope === "mine" ? (
-            <span>Automatic account/subaccount transaction fetching is not enabled because a verified account-wide feed and its coverage contract are not established. No synthetic transactions or silent empty history are shown.</span>
+            <span>Private transfers are shown only after you unlock an account and explicitly load them. Missing or incomplete data is never shown as an empty history.</span>
           ) : (
-            <span>All public activity currently offers manual lifecycle lookup only. A blockchain-style live broadcast of all transactions is not available in the verified public contract.</span>
+            <span>Public lookup finds a transaction or flow by the ID you enter. It is not a feed of every transaction and does not show your private account history.</span>
           )}
         </div>
       </Card>
       {scope === "mine" ? (
-        <Card title="My account transactions" actions={<Pill kind="warn">Feed unavailable</Pill>}>
-          <EmptyState
-            icon={<IconFlow size={22} />}
-            title={session ? "Account transaction feed is not verified" : "Unlock an account to use My accounts"}
-            description={session
-              ? "Use Account overview to explicitly load finalized transfer activity with per-dataset coverage. This tab does not turn missing account/subaccount history into an empty feed."
-              : "No private request is made while locked. Set up or unlock an encrypted read-only key in API setup, or switch to All public activity for manual public lookup."}
-          />
-          <div className="row-flex mt-3" style={{ gap: 8 }}>
-            <Link to={session ? "/account" : "/account/api"} className="btn sm primary">
-              {session ? "Open finalized transfer activity" : "Open API setup"}
-            </Link>
-            <button type="button" className="btn sm" onClick={() => setScope("all")}>Use public lookup</button>
-          </div>
-        </Card>
+        session && accountVault ? (
+          <AccountAnalytics accountVault={accountVault} session={session} view="transfers" />
+        ) : (
+          <Card title="Your money movements" actions={<Pill kind="info">Account locked</Pill>}>
+            <EmptyState
+              icon={<IconFlow size={22} />}
+              title="Unlock an account to view your transfers"
+              description="No private request is made while locked. Set up or unlock an encrypted read-only key in API setup, or choose Public transaction lookup for a credential-free search."
+            />
+            <div className="row-flex mt-3" style={{ gap: 8 }}>
+              <Link to="/account/api" className="btn sm primary">Open API setup</Link>
+              <button type="button" className="btn sm" onClick={() => selectScope("all")}>Use public lookup</button>
+            </div>
+          </Card>
+        )
       ) : <Flow embedded />}
     </>
   );
@@ -413,8 +404,7 @@ export default function Portfolio() {
   return (
     <div className="page-stack">
       <AccountTabs />
-      {section !== "trade" && section !== "order-book" && (
-        <PageHeader
+      <PageHeader
         title={header.title}
         badge={
           <Pill kind={section === "transactions" ? "accent" : session ? "up" : supported ? "warn" : "down"}>
@@ -450,51 +440,54 @@ export default function Portfolio() {
             </Link>
           </div>
         }
-        />
-      )}
+      />
 
       {section === "api" && (
         <>
       <div className="notice warn" role="note">
         <div>
-          <strong>Real-key use requires an owner-controlled deployment.</strong>{" "}
+          <strong>Use real account keys only in a deployment you control.</strong>{" "}
           Do not enter a real key in a development server or shared preview. Account reads
-          are explicit GET requests; target-browser, dependency/CSP, exact-origin CORS, and
-          owner-controlled read-policy checks still determine whether they succeed. The local
-          signer below never sends its inspection signatures.
+          happen only after an explicit click. Browser security settings, service access,
+          and the key's read permissions still determine whether a request succeeds. The
+          signature inspector below never sends a request.
         </div>
       </div>
 
       <MetricStrip>
         <MetricCell
-          label="Encrypted Entries"
+          label="Saved account keys"
           value={entries.length}
-          sub="Random local references · labels encrypted"
+          sub="Encrypted in this browser · labels are private"
+          tooltip="A saved key is an encrypted local entry. It is not a live account balance or a connection to another user."
         />
         <MetricCell
-          label="Session"
+          label="Connection"
           value={session ? "Unlocked" : "Locked"}
-          sub={session ? "Nonextractable CryptoKey in memory" : "New tabs always start locked"}
+          sub={session ? "Key available only in this tab's memory" : "New tabs start locked"}
+          tooltip="Unlocking allows approved read requests. Locking removes the session and clears private account snapshots."
         />
         <MetricCell
-          label="Persistence"
-          value="AES-GCM · PBKDF2"
-          sub={`${vault.PBKDF2_ITERATIONS.toLocaleString()} iterations · IndexedDB`}
+          label="Key storage"
+          value="Encrypted browser storage"
+          sub="Your passphrase is required to unlock"
+          tooltip="The app uses AES-GCM encryption and PBKDF2 passphrase stretching. These protect stored keys; they do not grant account permissions."
         />
         <MetricCell
-          label="Signing Boundary"
-          value="GET Allowlist"
-          sub="Fresh monotonic timestamps · no arbitrary writes"
+          label="Request permissions"
+          value="Read-only requests"
+          sub="No trading, cancellation, or money movement"
+          tooltip="Only approved GET requests can be signed. Each request uses a fresh timestamp and cannot place or change orders."
         />
       </MetricStrip>
         </>
       )}
 
-      {section === "overview" && <AccountAnalytics accountVault={accountVault} session={session} />}
-      {section === "trade" && <Tape />}
-      {section === "order-book" && <Book />}
-      {section === "pnl" && <AccountPnl />}
-      {section === "transactions" && <AccountTransactions session={session} />}
+      {section === "overview" && <AccountAnalytics accountVault={accountVault} session={session} view="overview" />}
+      {section === "trade" && <AccountAnalytics accountVault={accountVault} session={session} view="trades" />}
+      {section === "orders" && <AccountAnalytics accountVault={accountVault} session={session} view="orders" />}
+      {section === "pnl" && <AccountAnalytics accountVault={accountVault} session={session} view="pnl" />}
+      {section === "transactions" && <AccountTransactions accountVault={accountVault} session={session} />}
 
       {section === "api" && (
         <>
@@ -566,11 +559,10 @@ export default function Portfolio() {
         title="Create an Encrypted Key Entry"
         subtitle="Generate a new Ed25519 pair or import a raw 32-byte seed with its matching public key. Private material is exported only transiently for authenticated encryption, then imported as nonextractable."
         actions={
-          <div className="seg-group" role="tablist" aria-label="Key creation mode">
+          <div className="seg-group" role="group" aria-label="Key creation mode">
             <button
               type="button"
-              role="tab"
-              aria-selected={createMode === "generate"}
+              aria-pressed={createMode === "generate"}
               className={`seg-btn ${createMode === "generate" ? "active" : ""}`}
               onClick={() => setCreateMode("generate")}
             >
@@ -578,8 +570,7 @@ export default function Portfolio() {
             </button>
             <button
               type="button"
-              role="tab"
-              aria-selected={createMode === "import"}
+              aria-pressed={createMode === "import"}
               className={`seg-btn ${createMode === "import" ? "active" : ""}`}
               onClick={() => setCreateMode("import")}
             >

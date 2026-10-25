@@ -10,12 +10,17 @@ import {
   fmtAgo,
   fmtNum,
   fmtTimeUTC,
-  price,
   splitSymbol,
   trendSign,
 } from "@poly/core";
 import { api } from "../lib/api";
+import {
+  buildCompareRows,
+  compareMatchLabel,
+  selectVisibleCompareRows,
+} from "../lib/compare";
 import { COINGECKO_IDS, fetchUsdPrices, type CgPrices } from "../lib/coingecko";
+import { isWireSamplePayload } from "../lib/provenance";
 import { useNow, usePollData } from "../lib/hooks";
 import {
   Card,
@@ -32,18 +37,46 @@ import {
 } from "../components/ui";
 import { IconRefresh } from "../components/icons";
 
-interface CompareRow {
-  symbol: string;
-  base: string;
-  quote: string;
-  indexPx: number;
-  lastPx: number;
-  lastTradeTsMs: number;
-  geckoId: string | undefined;
-  refUsd: number | null;
-  absDiff: number | null;
-  premBps: number | null;
-  status: "matched" | "non_usd_quote" | "unmapped" | "ref_unavailable";
+export function CompareEmptyState({
+  allRowsCount,
+  overviewReceived,
+  overviewError,
+  onShowAll,
+  onRetry,
+}: {
+  allRowsCount: number;
+  overviewReceived: boolean;
+  overviewError: boolean;
+  onShowAll: () => void;
+  onRetry: () => void;
+}) {
+  if (allRowsCount > 0) {
+    return (
+      <EmptyState
+        title="No matched pairs"
+        description="No listed USDT/USDC market currently has a valid CoinGecko USD reference match. Unavailable references, unmapped assets, non-USD quotes, and invalid prices are not counted as matches."
+        action={<button type="button" className="btn sm" onClick={onShowAll}>Show All Listed</button>}
+      />
+    );
+  }
+  if (overviewReceived) {
+    return (
+      <EmptyState
+        title="No listed markets"
+        description="Polyester returned an empty market overview. This is distinct from a zero-match filter result; no market or reference value is inferred."
+        action={<button type="button" className="btn sm" onClick={onRetry}>Retry Both Feeds</button>}
+      />
+    );
+  }
+  return (
+    <EmptyState
+      title="No comparison data available"
+      description={overviewError
+        ? "Polyester market overview is unavailable, so no match count can be calculated. CoinGecko data alone cannot create a comparison row."
+        : "Neither Polyester market rows nor a completed reference comparison is available yet. Missing values are not treated as zero."}
+      action={<button type="button" className="btn sm" onClick={onRetry}>Retry Both Feeds</button>}
+    />
+  );
 }
 
 export default function Compare() {
@@ -92,111 +125,26 @@ export default function Compare() {
     [geckoTargetBases.join(",")],
   );
 
-  const allRows: CompareRow[] = useMemo(() => {
-    const markets = ov?.markets ?? [];
-    return markets.map((m) => {
-      const [base, quote] = splitSymbol(m.symbol);
-      const indexPx = price(m.indexPrice);
-      const lastPx = price(m.lastPrice);
-      const activePolyPx =
-        priceBasis === "index"
-          ? isFinite(indexPx) && indexPx > 0
-            ? indexPx
-            : lastPx
-          : isFinite(lastPx) && lastPx > 0
-            ? lastPx
-            : indexPx;
-
-      const geckoId = COINGECKO_IDS[base];
-      const isUsdQuote = quote === "USDT" || quote === "USDC";
-
-      if (!isUsdQuote) {
-        return {
-          symbol: m.symbol,
-          base,
-          quote,
-          indexPx,
-          lastPx,
-          lastTradeTsMs: m.lastTradeTsMs,
-          geckoId,
-          refUsd: null,
-          absDiff: null,
-          premBps: null,
-          status: "non_usd_quote",
-        };
-      }
-
-      if (!geckoId) {
-        return {
-          symbol: m.symbol,
-          base,
-          quote,
-          indexPx,
-          lastPx,
-          lastTradeTsMs: m.lastTradeTsMs,
-          geckoId: undefined,
-          refUsd: null,
-          absDiff: null,
-          premBps: null,
-          status: "unmapped",
-        };
-      }
-
-      const rawRef = cg?.[geckoId]?.usd;
-      const refUsd =
-        typeof rawRef === "number" && isFinite(rawRef) && rawRef > 0 ? rawRef : null;
-
-      if (refUsd === null || !isFinite(activePolyPx)) {
-        return {
-          symbol: m.symbol,
-          base,
-          quote,
-          indexPx,
-          lastPx,
-          lastTradeTsMs: m.lastTradeTsMs,
-          geckoId,
-          refUsd: null,
-          absDiff: null,
-          premBps: null,
-          status: "ref_unavailable",
-        };
-      }
-
-      const absDiff = activePolyPx - refUsd;
-      const premBps = (absDiff / refUsd) * 10_000;
-
-      return {
-        symbol: m.symbol,
-        base,
-        quote,
-        indexPx,
-        lastPx,
-        lastTradeTsMs: m.lastTradeTsMs,
-        geckoId,
-        refUsd,
-        absDiff,
-        premBps,
-        status: "matched",
-      };
-    });
-  }, [ov, cg, priceBasis]);
+  const allRows = useMemo(
+    () => buildCompareRows(ov?.markets ?? [], cg, priceBasis),
+    [ov, cg, priceBasis],
+  );
 
   const matchedRows = useMemo(
-    () => allRows.filter((r) => r.status === "matched"),
+    () => allRows.filter((row) => row.status === "matched"),
     [allRows],
   );
 
-  const visibleRows = useMemo(() => {
-    const list = viewMode === "matched" && matchedRows.length > 0 ? matchedRows : allRows;
-    return [...list].sort((a, b) => {
-      if (a.premBps !== null && b.premBps !== null) {
-        return Math.abs(b.premBps) - Math.abs(a.premBps);
-      }
-      if (a.premBps !== null) return -1;
-      if (b.premBps !== null) return 1;
-      return a.symbol.localeCompare(b.symbol);
-    });
-  }, [viewMode, matchedRows, allRows]);
+  const visibleRows = useMemo(
+    () => selectVisibleCompareRows(allRows, matchedRows, viewMode),
+    [viewMode, matchedRows, allRows],
+  );
+
+  const polyesterSample = isWireSamplePayload(ov);
+  const matchHasStaleFeed = Boolean(ovError || cgError);
+  const awaitingInitialReference = Boolean(
+    cgLoading && !cg && viewMode === "matched" && matchedRows.length === 0 && allRows.length > 0,
+  );
 
   const maxAbsBps = useMemo(
     () =>
@@ -264,11 +212,11 @@ export default function Compare() {
       <MetricStrip>
         <MetricCell
           label="Polyester Feed Status"
-          trend={ovError ? "down" : ovAt ? "up" : undefined}
-          value={ovError ? "Unavailable" : ovAt ? `Synced ${fmtAgo(ovAt, now)}` : "Syncing…"}
+          trend={ovError ? "down" : polyesterSample ? "warn" : ovAt ? "up" : undefined}
+          value={ovError ? "Unavailable" : polyesterSample ? "Sample data" : ovAt ? `Synced ${fmtAgo(ovAt, now)}` : "Syncing…"}
           sub={
             ovAt
-              ? `Polled every 5s · ${fmtTimeUTC(ovAt)} UTC`
+              ? `${polyesterSample ? "Development wire sample · not live" : "Polled every 5s"} · ${fmtTimeUTC(ovAt)} UTC`
               : "Via backend MCP facade"
           }
         />
@@ -293,7 +241,11 @@ export default function Compare() {
           sub={
             summary.avgAbsBps !== null
               ? `Mean divergence: ${summary.avgAbsBps.toFixed(1)} bps`
-              : "Awaiting both feeds"
+              : ov && allRows.length === 0
+                ? "No listed markets"
+                : allRows.length > 0
+                  ? "No active matches; review All Listed"
+                  : "Awaiting both feeds"
           }
         />
         <MetricCell
@@ -415,31 +367,25 @@ export default function Compare() {
               </tr>
             </thead>
             <tbody>
-              {(ovLoading || cgLoading) && !allRows.length && (
+              {(((ovLoading || cgLoading) && !allRows.length) || awaitingInitialReference) && (
                 <tr>
                   <td colSpan={8} style={{ padding: 16 }}>
                     <Loading lines={6} />
                   </td>
                 </tr>
               )}
-              {!ovLoading && visibleRows.length === 0 && (
+              {!ovLoading && !awaitingInitialReference && visibleRows.length === 0 && (
                 <tr>
                   <td colSpan={8}>
-                    <EmptyState
-                      title="No comparison data available"
-                      description="Neither Polyester market overview nor CoinGecko reference prices have loaded yet."
-                      action={
-                        <button
-                          type="button"
-                          className="btn sm"
-                          onClick={() => {
-                            refreshOv();
-                            refreshCg();
-                          }}
-                        >
-                          Retry Both Feeds
-                        </button>
-                      }
+                    <CompareEmptyState
+                      allRowsCount={allRows.length}
+                      overviewReceived={Boolean(ov)}
+                      overviewError={Boolean(ovError)}
+                      onShowAll={() => setViewMode("all")}
+                      onRetry={() => {
+                        refreshOv();
+                        refreshCg();
+                      }}
                     />
                   </td>
                 </tr>
@@ -542,12 +488,10 @@ export default function Compare() {
                     <td>
                       {r.status === "matched" && (
                         <Pill
-                          kind="up"
-                          title={`Polyester trade: ${fmtTimeUTC(r.lastTradeTsMs)} UTC · CoinGecko fetch: ${
-                            cgAt ? fmtTimeUTC(cgAt) : "—"
-                          } UTC`}
+                          kind={polyesterSample || matchHasStaleFeed ? "warn" : "up"}
+                          title={`${polyesterSample ? "Polyester wire sample" : "Polyester live response"} · CoinGecko public reference${matchHasStaleFeed ? " · Feed error; last valid data retained" : ""} · Polyester trade: ${fmtTimeUTC(r.lastTradeTsMs)} UTC · CoinGecko fetch: ${cgAt ? fmtTimeUTC(cgAt) : "—"} UTC`}
                         >
-                          Live Match ({cgAt ? fmtAgo(cgAt, now) : "synced"})
+                          {compareMatchLabel({ sample: polyesterSample, stale: matchHasStaleFeed })} ({cgAt ? fmtAgo(cgAt, now) : "synced"})
                         </Pill>
                       )}
                       {r.status === "non_usd_quote" && (
@@ -563,9 +507,17 @@ export default function Compare() {
                       {r.status === "ref_unavailable" && (
                         <Pill
                           kind="warn"
-                          title="CoinGecko reference price did not return or is rate-limited"
+                          title="No valid CoinGecko USD reference is currently available; missing values are not zero"
                         >
                           Ref Unavailable
+                        </Pill>
+                      )}
+                      {r.status === "poly_unavailable" && (
+                        <Pill
+                          kind="warn"
+                          title="No valid positive Polyester index or last price is available for the selected basis and fallback"
+                        >
+                          Poly Price Unavailable
                         </Pill>
                       )}
                     </td>

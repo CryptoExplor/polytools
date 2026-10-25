@@ -71,6 +71,33 @@ export interface OrderDetailsLoadOptions extends AccountDataLoadOptions {
   orderId: string;
 }
 
+export type AccountCursorImportOperation = "orders" | "fills" | "transfers";
+
+export interface AccountCursorProgress {
+  operation: AccountCursorImportOperation;
+  pagesFetched: number;
+  rowsReceived: number;
+  maxPages: number;
+  hasNextPage: boolean;
+}
+
+export interface AccountHistoryImportOptions extends AccountDataLoadOptions {
+  /** Reuse the exact snapshot window; do not silently move the end time. */
+  period: AccountPeriod;
+  /** Explicit safety cap. Reaching it remains partial, never complete. */
+  maxPages: number;
+  /** Defaults to fills + transfers for the R2 activity/R3 input path. */
+  operations?: readonly AccountCursorImportOperation[];
+  onProgress?: (progress: AccountCursorProgress) => void;
+}
+
+export interface AccountHistoryImportResult {
+  period: AccountPeriod;
+  orders?: AccountDataset<OrdersData>;
+  fills?: AccountDataset<FillsData>;
+  transfers?: AccountDataset<TransfersData>;
+}
+
 export interface AccountDataset<T> {
   data: T | null;
   coverage: Coverage;
@@ -148,6 +175,11 @@ interface PageCollection<T> {
   repeatedCursor: boolean;
   retrievedAtMs: number | null;
   error?: unknown;
+}
+
+interface PageReadPolicy {
+  maxPages?: number;
+  onPage?: (pagesFetched: number, rowsReceived: number, hasNextPage: boolean) => void;
 }
 
 interface RequestGeneration {
@@ -422,13 +454,17 @@ export class AccountDataCoordinator {
     request: RequestGeneration,
     signal: AbortSignal | undefined,
     adapt: (value: unknown) => PageAdapter<T>,
+    policy: PageReadPolicy = {},
   ): Promise<PageCollection<T>> {
     const quarantined: unknown[] = [];
     let receivedRows = 0;
     let retrievedAtMs: number | null = null;
     const result = await collectCursorPages<T>({
-      maxPages: this.maxPages,
+      maxPages: policy.maxPages ?? this.maxPages,
       signal,
+      onPage: (page, pagesFetched) => {
+        policy.onPage?.(pagesFetched, receivedRows, Boolean(page.nextPageToken));
+      },
       fetchPage: async (pageToken) => {
         const response = await this.client.request(
           operation,
@@ -526,13 +562,14 @@ export class AccountDataCoordinator {
     markets: Readonly<Record<string, FillMarket>>,
     request: RequestGeneration,
     signal?: AbortSignal,
+    policy?: PageReadPolicy,
   ): Promise<AccountDataset<OrdersData>> {
     const context = this.pagedBase<OrdersData>(session, "ordersHistory", params, period);
     try {
       const collection = await this.collectPages(session, "ordersHistory", params, request, signal, (value) => {
         const page = validateOrderHistoryResponse(value, markets);
         return { nextPageToken: page.nextPageToken, rows: page.orders, quarantined: page.quarantined };
-      });
+      }, policy);
       return this.finishPaged(session, "ordersHistory", params, period, request, context, collection, {
         orders: collection.rows,
         quarantined: collection.quarantined,
@@ -549,6 +586,7 @@ export class AccountDataCoordinator {
     markets: Readonly<Record<string, FillMarket>>,
     request: RequestGeneration,
     signal?: AbortSignal,
+    policy?: PageReadPolicy,
   ): Promise<AccountDataset<FillsData>> {
     const context = this.pagedBase<FillsData>(session, "fills", params, period);
     try {
@@ -558,7 +596,7 @@ export class AccountDataCoordinator {
           markets,
         });
         return { nextPageToken: page.nextPageToken, rows: page.fills, quarantined: page.quarantined };
-      });
+      }, policy);
       const preliminary = summarizeFills(collection.rows, { status: "partial" });
       const status: CoverageStatus = collection.error || collection.stoppedAtCap || collection.repeatedCursor ||
         !collection.cursorExhausted || collection.quarantined.length > 0 || !preliminary.eligible
@@ -591,13 +629,14 @@ export class AccountDataCoordinator {
     period: AccountPeriod | undefined,
     request: RequestGeneration,
     signal?: AbortSignal,
+    policy?: PageReadPolicy,
   ): Promise<AccountDataset<TransfersData>> {
     const context = this.pagedBase<TransfersData>(session, "transfers", params, period);
     try {
       const collection = await this.collectPages(session, "transfers", params, request, signal, (value) => {
         const page = validateTransfersResponse(value);
         return { nextPageToken: page.nextPageToken, rows: page.transfers, quarantined: page.quarantined };
-      });
+      }, policy);
       const unknownReasons = collection.rows.filter((transfer) => !transfer.reasonKnown).length;
       return this.finishPaged(session, "transfers", params, period, request, context, collection, {
         // Unknown reasons remain visible; they are excluded only from accepted
@@ -708,6 +747,89 @@ export class AccountDataCoordinator {
     } catch (error) {
       return this.failure(session, "orderDetails", params, undefined, context.previous, error, request);
     }
+  }
+
+  /**
+   * Explicitly import fills and transfers with a caller-selected page policy.
+   * This is separate from loadAll(), whose existing bounded snapshot behavior
+   * is unchanged. The exact supplied period is reused so selected datasets can
+   * safely replace their counterparts in an existing snapshot.
+   */
+  async importCursorHistory(options: AccountHistoryImportOptions): Promise<AccountHistoryImportResult> {
+    if (!Number.isSafeInteger(options.maxPages) || options.maxPages < 1 || options.maxPages > 10_000) {
+      throw new AccountRestError("INVALID_REQUEST", "account", "Cursor import page cap must be between 1 and 10000.");
+    }
+    const period = options.period;
+    const startMs = period ? Date.parse(period.startTime) : Number.NaN;
+    const endMs = period ? Date.parse(period.endTime) : Number.NaN;
+    if (
+      !period ||
+      !Object.prototype.hasOwnProperty.call(RANGE_DAYS, period.range) ||
+      !Number.isFinite(startMs) ||
+      !Number.isFinite(endMs) ||
+      startMs >= endMs
+    ) {
+      throw new AccountRestError("INVALID_REQUEST", "account", "Cursor import requires the existing valid snapshot period.");
+    }
+    const operations: readonly AccountCursorImportOperation[] = options.operations ?? ["fills", "transfers"];
+    const validOperations = new Set<AccountCursorImportOperation>(["orders", "fills", "transfers"]);
+    if (
+      operations.length === 0 ||
+      operations.length > validOperations.size ||
+      new Set(operations).size !== operations.length ||
+      operations.some((operation) => !validOperations.has(operation))
+    ) {
+      throw new AccountRestError("INVALID_REQUEST", "account", "Choose each cursor import operation at most once.");
+    }
+    const session = this.sessionOrThrow();
+    // Use the same generation key as loadAll so either operation supersedes an
+    // older broad snapshot read instead of racing to overwrite its datasets.
+    const request = this.beginRequest("all");
+    const markets = options.markets ?? {};
+    const scope = options.subaccountId === undefined ? {} : { subaccountId: options.subaccountId };
+    const paged = { ...scope, limit: 100 };
+    const timeWindow = { startTime: period.startTime, endTime: period.endTime };
+    const policy = (operation: AccountCursorImportOperation): PageReadPolicy => ({
+      maxPages: options.maxPages,
+      onPage: (pagesFetched, rowsReceived, hasNextPage) => options.onProgress?.({
+        operation,
+        pagesFetched,
+        rowsReceived,
+        maxPages: options.maxPages,
+        hasNextPage,
+      }),
+    });
+    const result: AccountHistoryImportResult = { period: { ...period } };
+    // Full-history imports are deliberately sequential. The ordinary snapshot
+    // may read independent datasets concurrently, but a cursor import must not
+    // create parallel request streams or obscure rate-limit behavior.
+    for (const operation of operations) {
+      if (operation === "orders") {
+        result.orders = await this.readOrders(
+          session,
+          { ...paged, ...timeWindow },
+          period,
+          markets,
+          request,
+          options.signal,
+          policy("orders"),
+        );
+      } else if (operation === "fills") {
+        result.fills = await this.readFills(
+          session,
+          { ...paged, ...timeWindow },
+          period,
+          markets,
+          request,
+          options.signal,
+          policy("fills"),
+        );
+      } else {
+        result.transfers = await this.readTransfers(session, paged, undefined, request, options.signal, policy("transfers"));
+      }
+    }
+    this.assertRequestCurrent(session, request);
+    return result;
   }
 
   async loadAll(options: AccountDataLoadOptions = {}): Promise<AccountDataSnapshot> {

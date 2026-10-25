@@ -36,6 +36,7 @@ import {
   type BookDepth,
   type CandleTimeframe,
 } from "../../packages/core/src/index";
+import { applySecurityHeaders } from "../../packages/core/src/deploymentSecurity";
 import { cached, cacheStats } from "./cache";
 import { dataFor } from "./mcpServer";
 
@@ -75,6 +76,7 @@ function json(body: unknown, init: ResponseInit = {}, extra?: Record<string, str
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json; charset=utf-8");
   for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  applySecurityHeaders(headers);
   if (extra) for (const [k, v] of Object.entries(extra)) headers.set(k, v);
   return new Response(JSON.stringify(body, null, 0), { ...init, headers });
 }
@@ -135,7 +137,10 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, {
+      status: 204,
+      headers: applySecurityHeaders(new Headers(CORS_HEADERS)),
+    });
   }
   if (request.method !== "GET") return error(405, "Method not allowed");
 

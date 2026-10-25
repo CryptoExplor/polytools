@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { dec, fmtNum, price, splitSymbol } from "@poly/core";
 import { api } from "../lib/api";
 import { formatCompactQuoteNotional } from "../lib/format";
-import { decodeHeatmapBuckets, HEATMAP_PRICE_BINS } from "../lib/heatmap";
+import { decodeHeatmapBuckets, HEATMAP_PRICE_BINS, inspectHeatmapCell } from "../lib/heatmap";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -36,6 +36,81 @@ type HeatInterval = "1m" | "5m" | "1h";
 type HeatDepth = 10 | 50 | 100;
 
 const PRICE_BINS = HEATMAP_PRICE_BINS;
+
+type DecodedHeatmap = NonNullable<ReturnType<typeof decodeHeatmapBuckets>>;
+
+export function HeatmapTextInspector({
+  decoded,
+  base,
+  quote,
+}: {
+  decoded: DecodedHeatmap;
+  base: string;
+  quote: string;
+}) {
+  const [selection, setSelection] = useState({ bucketIdx: 0, binIdx: 0 });
+  const bucketIdx = Math.min(selection.bucketIdx, Math.max(0, decoded.buckets.length - 1));
+  const inspection = inspectHeatmapCell(decoded, bucketIdx, selection.binIdx);
+  // Keep adjacent native options distinguishable even for narrow or low-priced books.
+  const priceDecimals = Math.min(12, Math.max(2, Math.ceil(-Math.log10(decoded.binSize)) + 2));
+  const formatBandPrice = (value: number) => fmtNum(value, priceDecimals);
+
+  return (
+    <details className="heatmap-text-inspector mt-3">
+      <summary>Keyboard and text inspection</summary>
+      <p className="faint">
+        Choose any time bucket and price band with native controls. The readout includes zero-liquidity cells and uses the same decoded data as pointer hover.
+      </p>
+      <div className="grid cols-2">
+        <label className="field">
+          <span className="faint">Time bucket</span>
+          <select
+            className="select"
+            aria-label="Heatmap time bucket"
+            value={bucketIdx}
+            onChange={(event) => setSelection((current) => ({
+              ...current,
+              bucketIdx: Number(event.target.value),
+            }))}
+          >
+            {decoded.buckets.map((bucket, index) => (
+              <option key={`${bucket.tsSec}-${index}`} value={index}>
+                Bucket {index + 1} · {new Date(bucket.tsSec * 1000).toISOString().slice(11, 16)} UTC
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span className="faint">Price band ({quote})</span>
+          <select
+            className="select"
+            aria-label={`Heatmap price band in ${quote}`}
+            value={selection.binIdx}
+            onChange={(event) => setSelection((current) => ({
+              ...current,
+              binIdx: Number(event.target.value),
+            }))}
+          >
+            {Array.from({ length: PRICE_BINS }, (_, binIdx) => {
+              const low = decoded.renderMinPx + binIdx * decoded.binSize;
+              const high = low + decoded.binSize;
+              return (
+                <option key={binIdx} value={binIdx}>
+                  {formatBandPrice(low)} – {formatBandPrice(high)} {quote}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+      </div>
+      {inspection && (
+        <p className="notice info" style={{ marginTop: 12 }}>
+          <strong>Selected cell:</strong> {new Date(inspection.tsSec * 1000).toISOString().slice(0, 19).replace("T", " ")} UTC · Price {formatBandPrice(inspection.priceLow)}–{formatBandPrice(inspection.priceHigh)} {quote} · Resting bid {fmtNum(inspection.bidQty)} {base} · Resting ask {fmtNum(inspection.askQty)} {base}
+        </p>
+      )}
+    </details>
+  );
+}
 
 export function HeatmapPage() {
   const { symbol, setSymbol } = useApp();
@@ -229,23 +304,7 @@ export function HeatmapPage() {
       Math.max(0, Math.floor(((my - padT) / plotH) * PRICE_BINS)),
     );
     const binIdx = PRICE_BINS - 1 - rowFromTop;
-    const cell = decoded.grid[bucketIdx]?.[binIdx];
-    const bucket = decoded.buckets[bucketIdx];
-    if (!cell || !bucket) {
-      setHoverCell(null);
-      return;
-    }
-    const priceLow = decoded.renderMinPx + binIdx * decoded.binSize;
-    const priceHigh = priceLow + decoded.binSize;
-    setHoverCell({
-      bucketIdx,
-      binIdx,
-      tsSec: bucket.tsSec,
-      priceLow,
-      priceHigh,
-      bidQty: cell.bidQty,
-      askQty: cell.askQty,
-    });
+    setHoverCell(inspectHeatmapCell(decoded, bucketIdx, binIdx));
   };
 
   return (
@@ -409,6 +468,7 @@ export function HeatmapPage() {
                 aria-label={`Order book liquidity heatmap for ${symbol}`}
               />
             </div>
+            <HeatmapTextInspector decoded={decoded} base={base} quote={quote} />
           </Card>
 
           <div className="mt-3">

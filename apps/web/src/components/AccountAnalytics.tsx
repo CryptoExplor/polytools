@@ -3,10 +3,71 @@ import { account, fmtAgo } from "@poly/core";
 import { Card, ConfirmDialog, EmptyState, MetricCell, MetricStrip, Pill } from "./ui";
 import { IconActivity, IconAlert, IconClock, IconRefresh } from "./icons";
 import { downloadAccountExport } from "../lib/download";
+import { AccountCostBasis } from "./AccountCostBasis";
 
 const RANGES: account.AccountHistoryRange[] = ["1d", "7d", "30d", "90d", "180d", "365d"];
+const RANGE_LABELS: Record<account.AccountHistoryRange, string> = {
+  "1d": "Last 1 day",
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
+  "90d": "Last 90 days",
+  "180d": "Last 180 days",
+  "365d": "Last 365 days",
+};
+
+function isAccountHistoryRange(value: string): value is account.AccountHistoryRange {
+  return RANGES.some((range) => range === value);
+}
+
+function rangeLabel(value: string): string {
+  return isAccountHistoryRange(value) ? RANGE_LABELS[value] : value;
+}
+
+type AccountAnalyticsView = "overview" | "trades" | "orders" | "transfers" | "pnl";
+
+const VIEW_COPY: Record<AccountAnalyticsView, { title: string; subtitle: string; emptyTitle: string; emptyDescription: string }> = {
+  overview: {
+    title: "Account overview",
+    subtitle: "Your private account data, with a separate status for each read. Public market data is not used as a substitute.",
+    emptyTitle: "No account data loaded",
+    emptyDescription: "Unlock a registered read-only key, then choose Load account data. Nothing is shown as empty or zero when a read is denied or unavailable.",
+  },
+  trades: {
+    title: "Your Trades",
+    subtitle: "Only executions returned by the authenticated account fills read. Actual fees come from those executions; public market trades are never substituted.",
+    emptyTitle: "Your Trades are not loaded",
+    emptyDescription: "Unlock a registered read-only key, then choose Load your trades. If the private read is denied or unavailable, you will see that status instead of public trades.",
+  },
+  orders: {
+    title: "Your Orders",
+    subtitle: "Open and completed orders returned by authenticated account reads. This is separate from the public order book.",
+    emptyTitle: "Your Orders are not loaded",
+    emptyDescription: "Unlock a registered read-only key, then choose Load your orders. Missing or denied data is not shown as an empty order history.",
+  },
+  transfers: {
+    title: "Money Movements",
+    subtitle: "Deposits, withdrawals, and transfers returned by the authenticated account read. Public transaction lookup is a separate option.",
+    emptyTitle: "Your money movements are not loaded",
+    emptyDescription: "Unlock a registered read-only key, then choose Load money movements. Missing or denied data is not shown as an empty history.",
+  },
+  pnl: {
+    title: "Profit and Loss",
+    subtitle: "Exact cost-basis accounting only after complete fills, opening lots, resolved non-fill flows, and method provenance are established. Unrealized values also need a fresh labeled mark.",
+    emptyTitle: "Profit and loss inputs are not loaded",
+    emptyDescription: "Unlock a registered read-only key, then choose Load P&L inputs. Missing or denied data is never treated as zero activity or opening cost.",
+  },
+};
+
+const CURSOR_IMPORT_OPERATIONS: Record<AccountAnalyticsView, readonly account.AccountCursorImportOperation[]> = {
+  overview: [],
+  trades: ["fills"],
+  orders: ["orders"],
+  transfers: ["transfers"],
+  pnl: ["fills", "transfers"],
+};
 
 type AnyDataset = {
+  data: unknown | null;
   coverage: account.Coverage;
   retrievedAtMs: number | null;
   error?: account.SafeAccountError;
@@ -15,18 +76,18 @@ type AnyDataset = {
 function errorText(error?: account.SafeAccountError): string {
   if (!error) return "";
   switch (error.code) {
-    case "PERMISSION_DENIED": return "Permission required for this read; no rows were inferred.";
-    case "UNAUTHENTICATED": return "Authentication failed; check the registered key ID and read-only key status.";
-    case "CORS_BLOCKED": return "Browser CORS or network policy blocked the read; no proxy fallback was used.";
-    case "TIMESTAMP_SKEW": return "The signing timestamp was rejected; check the device clock before retrying.";
-    case "SIGNATURE_INVALID": return "The signature was rejected; automatic signing retries are stopped.";
-    case "SCHEMA_INCOMPATIBLE": return "The response schema is incompatible; affected metrics are blocked.";
-    case "CONTRACT_CONFLICT": return "The request contract is ambiguous or incompatible; the read was stopped.";
-    case "ACCOUNT_STALE": return "The vault session changed; late private data was discarded.";
-    case "ABORTED": return "The read was aborted before coverage completed.";
-    case "RATE_LIMITED": return "The read is rate-limited; bounded retry limits still apply.";
-    case "SERVER": return "The read endpoint is temporarily unavailable.";
-    default: return "The read failed safely; no private response was retained.";
+    case "PERMISSION_DENIED": return "Your account key does not have permission to read this information. No rows were inferred.";
+    case "UNAUTHENTICATED": return "We could not verify your account connection. Check the registered key ID and that the key is still active.";
+    case "CORS_BLOCKED": return "Your browser could not reach the account service. No proxy or public-data fallback was used.";
+    case "TIMESTAMP_SKEW": return "The account service rejected your device clock. Check the date and time before retrying.";
+    case "SIGNATURE_INVALID": return "The account service rejected the request signature. Automatic signing retries are stopped.";
+    case "SCHEMA_INCOMPATIBLE": return "The account service returned a format this app does not understand. Affected numbers are blocked.";
+    case "CONTRACT_CONFLICT": return "The request could not be made safely because the account API formats disagree. The read was stopped.";
+    case "ACCOUNT_STALE": return "Your account connection changed. Late private data was discarded; unlock and load again.";
+    case "ABORTED": return "This account read was cancelled before it finished.";
+    case "RATE_LIMITED": return "The account service asked us to slow down. You can retry after a short wait.";
+    case "SERVER": return "The account service is temporarily unavailable. Try again later; no public data was substituted.";
+    default: return "The account read failed safely. No private response was retained and no public data was substituted.";
   }
 }
 
@@ -37,15 +98,26 @@ function statusKind(status?: account.CoverageStatus): "up" | "down" | "warn" | "
   return "info";
 }
 
-function DatasetStatus({ dataset, loading = false }: { dataset?: AnyDataset | null; loading?: boolean }) {
+const STATUS_LABELS: Record<account.CoverageStatus, string> = {
+  complete: "Data loaded",
+  "filter-complete": "Filtered data loaded",
+  partial: "Partial data",
+  stale: "May be out of date",
+  denied: "Permission needed",
+  blocked: "Unavailable",
+  unavailable: "Unavailable",
+  loading: "Loading",
+};
+
+export function DatasetStatus({ dataset, loading = false }: { dataset?: AnyDataset | null; loading?: boolean }) {
   if (!dataset) return <Pill kind={loading ? "info" : undefined}>{loading ? "Loading" : "Not loaded"}</Pill>;
   const status = dataset.coverage.status;
   return (
     <span className="row-flex" style={{ gap: 6, justifyContent: "flex-end" }}>
-      <Pill kind={statusKind(status)}>{status}</Pill>
+      <Pill kind={statusKind(status)}>{STATUS_LABELS[status]}</Pill>
       {loading && <Pill kind="info">Refreshing</Pill>}
       {dataset.retrievedAtMs && (
-        <span className="faint" title={new Date(dataset.retrievedAtMs).toISOString()}>
+        <span className="faint" title={`Last account response: ${new Date(dataset.retrievedAtMs).toISOString()}`}>
           {fmtAgo(dataset.retrievedAtMs)}
         </span>
       )}
@@ -67,7 +139,7 @@ function ExportControls({
   // Transfers can be filtered client-side, so their export is always described
   // as loaded rows rather than implying a server-complete covered partition.
   const covered = name !== "transfers" && (dataset.coverage.status === "complete" || dataset.coverage.status === "filter-complete");
-  const label = covered ? "Export covered rows" : "Export loaded rows";
+  const label = covered ? "Export validated rows" : "Export loaded rows";
   return (
     <span className="row-flex" style={{ gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
       <span className="faint">{label}</span>
@@ -107,39 +179,43 @@ function DatasetActions({
   );
 }
 
-function DatasetMessages({ dataset, fixedRange = false }: { dataset: AnyDataset; fixedRange?: boolean }) {
+export function DatasetMessages({ dataset, fixedRange = false }: { dataset: AnyDataset; fixedRange?: boolean }) {
   const coverage = dataset.coverage;
   return (
     <>
       {dataset.error && (
-        <div className="notice error" role="alert" style={{ marginBottom: 10 }}>
+        <div className="notice error" role="alert" style={{ marginBottom: 10 }} title={`Technical error code: ${dataset.error.code}`}>
           <IconAlert size={15} />
-          <span><strong>{dataset.error.code}</strong> · {errorText(dataset.error)}</span>
+          <span>{errorText(dataset.error)}</span>
         </div>
       )}
       {(coverage.status === "partial" || coverage.status === "stale") && !dataset.error && (
         <div className="notice warn" role="note" style={{ marginBottom: 10 }}>
-          <span>Coverage is {coverage.status}; figures, where shown, are limited to validated loaded rows and are not complete history.</span>
+          <span>{coverage.status === "stale" ? "This data may be out of date. " : "Only part of the requested data is loaded. "}Shown figures use validated loaded rows only and are not a complete history.</span>
         </div>
       )}
-      <div className="faint" style={{ marginTop: 10 }}>
-        {coverage.pagesFetched} {fixedRange ? "fixed-range response" : `page${coverage.pagesFetched === 1 ? "" : "s"}`} · {coverage.rowsAccepted}/{coverage.rowsReceived} rows accepted · {fixedRange ? "no cursor; fixed server window" : coverage.cursorExhausted ? "cursor exhausted" : "cursor not exhausted"}
-        {coverage.duplicateRows > 0 && ` · ${coverage.duplicateRows} duplicate`}
-        {coverage.conflictingRows > 0 && ` · ${coverage.conflictingRows} conflicting`}
-        {coverage.unknownRows > 0 && ` · ${coverage.unknownRows} unknown`}
-        {coverage.stoppedAtCap && " · page cap reached"}
+      <div
+        className="faint"
+        style={{ marginTop: 10 }}
+        title="Data Loaded describes how much of the requested response was validated. It does not prove that your account has no other activity."
+      >
+        Data loaded: {coverage.rowsAccepted}/{coverage.rowsReceived} rows · {coverage.pagesFetched} {fixedRange ? "fixed-period response" : `page${coverage.pagesFetched === 1 ? "" : "s"}`} · {fixedRange ? "fixed server time window" : coverage.cursorExhausted ? "all available pages loaded" : "more pages may remain"}
+        {coverage.duplicateRows > 0 && ` · ${coverage.duplicateRows} duplicate row${coverage.duplicateRows === 1 ? "" : "s"}`}
+        {coverage.conflictingRows > 0 && ` · ${coverage.conflictingRows} conflicting row${coverage.conflictingRows === 1 ? "" : "s"}`}
+        {coverage.unknownRows > 0 && ` · ${coverage.unknownRows} unrecognized row${coverage.unknownRows === 1 ? "" : "s"}`}
+        {coverage.stoppedAtCap && " · page limit reached"}
       </div>
     </>
   );
 }
 
-function NoDataset({ dataset }: { dataset: AnyDataset }) {
+export function NoDataset({ dataset }: { dataset: AnyDataset }) {
   const status = dataset.coverage.status;
-  const title = status === "denied" ? "Permission required" : status === "blocked" ? "Read blocked" : status === "stale" ? "Session data unavailable" : "No validated response";
+  const title = status === "denied" ? "Permission needed" : status === "blocked" || status === "unavailable" ? "Account data unavailable" : status === "stale" ? "Previous account data is unavailable" : "No account data loaded";
   return (
     <EmptyState
       title={title}
-      description="This is not an empty account. No numeric value is substituted for unavailable, denied, or incompatible data."
+      description="This does not mean your account is empty. We could not validate this information, so no numbers or public-market substitute are shown."
     />
   );
 }
@@ -148,10 +224,19 @@ function ExactValue({ value, digits = 18 }: { value: account.ExactDecimal | stri
   try {
     const parsed = typeof value === "string" ? account.parseDecimal(value) : value;
     const raw = typeof value === "string" ? value : value.raw;
-    return <span className="mono" title={`Exact API value: ${raw}`}>{account.formatDecimal(parsed, digits)}</span>;
+    return <span className="mono" title={`Exact value returned by the account service: ${raw}`}>{account.formatDecimal(parsed, digits)}</span>;
   } catch {
     return <span className="mono">Unavailable</span>;
   }
+}
+
+export function ExecutionFee({ fill }: { fill: account.FillInput }) {
+  const feeAsset = fill.feeAsset === "BASE" ? fill.baseAsset : fill.quoteAsset;
+  return (
+    <span className="mono" title={fill.feeIsRebate ? "Actual execution rebate" : "Actual execution fee"}>
+      {fill.feeIsRebate ? "+" : "−"}<ExactValue value={fill.feeMagnitude} /> {feeAsset} {fill.feeIsRebate ? "rebate" : "fee"}
+    </span>
+  );
 }
 
 function apiTime(value: string | undefined, unit: "rfc3339" | "micros" | "millis" = "rfc3339"): string {
@@ -269,26 +354,26 @@ function BalanceHistoryCard({ dataset, loading, range }: {
   const data = dataset?.data ?? null;
   return (
     <Card
-      title="Sampled balance history"
-      subtitle="Fixed-range asset/account series, separate from current balances and equity. Values are sampled history, not live balances or P&L."
+      title="Balance History"
+      subtitle="Past balance samples for each asset and account area. These are not current balances or profit; the samples use the service's fixed chart units."
       actions={<DatasetStatus dataset={dataset} loading={loading} />}
     >
-      {loading && <div className="notice info" role="status" style={{ marginBottom: 10 }}><IconRefresh size={15} /><span>Refreshing balance history; previous validated samples remain labeled with their retrieval time.</span></div>}
+      {loading && <div className="notice info" role="status" style={{ marginBottom: 10 }}><IconRefresh size={15} /><span>Refreshing balance history. Previous validated samples remain labeled with their last update time.</span></div>}
       {data ? (
         <>
           <div className="faint" style={{ marginBottom: 10 }}>
-            Range: <strong>{data.range}</strong> (requested {range}) · Bucket: {data.bucket ?? "not supplied"} · Points: {data.points ?? "aligned by series"} · Start: {epochSecondsTime(data.startTsSec)} · End: {epochSecondsTime(data.endTsSec)}
+            Time period: <strong>{rangeLabel(data.range)}</strong> (requested {rangeLabel(range)}) · Sample interval: {data.bucket ?? "not supplied"} · Samples: {data.points ?? "aligned by series"} · Start: {epochSecondsTime(data.startTsSec)} · End: {epochSecondsTime(data.endTsSec)}
           </div>
-          {!data.timing.available && <div className="notice warn" role="note" style={{ marginBottom: 10 }}>Point timestamps are unavailable because the optional aligned timing fields are incomplete. Samples remain ordered; no dates are invented.</div>}
+          {!data.timing.available && <div className="notice warn" role="note" style={{ marginBottom: 10 }}>Sample times are unavailable because the service did not provide complete timing information. Samples remain in order; no dates are invented.</div>}
           {data.series.length > 0 ? data.series.map((series, index) => <BalanceHistorySeriesView key={`${series.asset}-${series.account}-${index}`} data={data} series={series} index={index} />) : (
-            <EmptyState title="No balance-history series in validated response" description="The fixed-range response is empty. No historical balance or zero value is inferred." />
+            <EmptyState title="No balance history in the validated response" description="The selected time period returned no balance samples. No historical balance or zero value is inferred." />
           )}
           <DatasetMessages dataset={dataset!} fixedRange />
         </>
       ) : dataset ? (
         <><NoDataset dataset={dataset} /><DatasetMessages dataset={dataset} fixedRange /></>
       ) : !loading ? (
-        <EmptyState title="Balance history not loaded" description="Use the explicit read-only refresh to request this independent fixed-range dataset." />
+        <EmptyState title="Balance history is not loaded" description="Choose Load account data to request this separate balance-history read." />
       ) : null}
     </Card>
   );
@@ -303,26 +388,26 @@ function OpenOrdersCard({ dataset, loading, onDetails }: {
   const complete = dataset?.coverage.status === "complete" || dataset?.coverage.status === "filter-complete";
   return (
     <Card
-      title="Open orders"
-      subtitle="Independent non-terminal order coverage. PENDING and PENDING_CANCEL remain visible; no cancel or modify action is available."
+      title="Open Orders"
+      subtitle="Orders connected to your account that are not finished. Pending orders remain visible; no cancel or modify action is available."
       actions={<DatasetStatus dataset={dataset} loading={loading} />}
     >
-      {loading && <div className="notice info" role="status" style={{ marginBottom: 10 }}><IconRefresh size={15} /><span>Refreshing open orders independently from terminal history.</span></div>}
+      {loading && <div className="notice info" role="status" style={{ marginBottom: 10 }}><IconRefresh size={15} /><span>Refreshing open orders separately from completed orders.</span></div>}
       {data ? (
         <>
           {data.orders.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Order</th><th>Market</th><th>Side</th><th>Type</th><th>Status</th><th>Price</th><th>Original qty</th><th>Filled qty</th><th>Remaining</th><th>Created</th><th>Details</th></tr></thead><tbody>
             {data.orders.map((order) => <tr key={`${order.orderId}-${order.generation}`}><td className="align-left mono">{order.orderId}</td><td>{order.marketSymbol ?? order.symbol}</td><td>{order.side}</td><td>{order.orderType}</td><td><Pill kind="info">{order.status}</Pill></td><td><ExactValue value={order.price} /></td><td><ExactValue value={order.origQty} /></td><td><ExactValue value={order.cumQty} /></td><td><ExactValue value={order.leavesQty} /></td><td className="mono">{apiTime(order.createdAt)}</td><td><button type="button" className="btn sm ghost order-details-trigger" onClick={() => onDetails(order)} aria-label={`View details for order ${order.orderId}`}>Details</button></td></tr>)}
           </tbody></table></div> : complete ? (
-            <EmptyState title="No open orders in validated coverage" description="The open-order cursor is exhausted with no validated rows. This is an empty result for this scope/filter, not an inference about another dataset." />
+            <EmptyState title="No open orders in the loaded response" description="The account service returned no open orders for this account and filter. This does not describe any other account or dataset." />
           ) : (
-            <EmptyState title="No validated open-order rows loaded" description={`Coverage is ${dataset?.coverage.status ?? "unavailable"}; this is not proof that the account has no open orders.`} />
+            <EmptyState title="No open-order rows loaded" description={`The data status is ${STATUS_LABELS[dataset?.coverage.status ?? "unavailable"]}. This is not proof that your account has no open orders.`} />
           )}
           <DatasetMessages dataset={dataset!} />
         </>
       ) : dataset ? (
         <><NoDataset dataset={dataset} /><DatasetMessages dataset={dataset} /></>
       ) : !loading ? (
-        <EmptyState title="Open orders not loaded" description="Use the explicit read-only refresh to request open orders independently from terminal history." />
+        <EmptyState title="Open orders are not loaded" description="Choose Load your orders to request open orders separately from completed orders." />
       ) : null}
     </Card>
   );
@@ -392,7 +477,7 @@ function OrderDetailsDrawer({ selection, dataset, loading, onClose, onRetry }: {
       <aside ref={drawerRef} className="order-drawer" role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(event) => event.stopPropagation()}>
         <header className="order-drawer-header">
           <div>
-            <span className="faint">Read-only validated order details</span>
+            <span className="faint">Read-only order details from your account</span>
             <h2 id={titleId} className="mono">Order {selection.orderId}</h2>
             <span className="faint">Scope: {selection.subaccountId ? "Selected subaccount" : "Main account"}</span>
           </div>
@@ -402,17 +487,17 @@ function OrderDetailsDrawer({ selection, dataset, loading, onClose, onRetry }: {
           </div>
         </header>
         <div className="order-drawer-body">
-          {loading && <div className="notice info" role="status"><IconRefresh size={15} /><span>Loading validated order details and execution pages…</span></div>}
+          {loading && <div className="notice info" role="status"><IconRefresh size={15} /><span>Loading order details and linked trades…</span></div>}
           {dataset?.error && !order && <DatasetMessages dataset={dataset} />}
           {order ? (
             <>
-              <div className="order-detail-status"><Pill kind={order.status === "FILLED" ? "up" : "info"}>{order.status}</Pill><span className="faint">Physical ID and logical lineage are preserved separately.</span></div>
+              <div className="order-detail-status"><Pill kind={order.status === "FILLED" ? "up" : "info"}>{order.status}</Pill><span className="faint">Order replacements and linked trades keep their original IDs.</span></div>
               <dl className="order-detail-grid">
                 <DetailValue label="Order ID" value={order.orderId} mono />
                 <DetailValue label="Market" value={order.marketSymbol ?? order.symbol} mono />
                 <DetailValue label="Side / type" value={`${order.side} / ${order.orderType}`} />
-                <DetailValue label="Lineage ID" value={order.lineageId} mono />
-                <DetailValue label="Generation / version" value={`${order.generation} / ${order.version}`} />
+                <DetailValue label="Order family ID" value={order.lineageId} mono />
+                <DetailValue label="Replacement / state version" value={`${order.generation} / ${order.version}`} />
                 <DetailValue label="Price" value={<ExactValue value={order.price} />} />
                 <DetailValue label="Original quantity" value={<ExactValue value={order.origQty} />} />
                 <DetailValue label="Cumulative filled quantity" value={<ExactValue value={order.cumQty} />} />
@@ -430,19 +515,16 @@ function OrderDetailsDrawer({ selection, dataset, loading, onClose, onRetry }: {
                 <DetailValue label="Self-trade prevention" value={order.stpMode ?? "Unavailable"} />
                 <DetailValue label="Client order ID" value={order.clientOrderId === undefined ? "Unavailable" : order.clientOrderId || "None supplied"} mono />
               </dl>
-              <div className="notice info" role="note" style={{ marginTop: 14 }}>Attached-risk policy/state, origin metadata, and settlement-leg details are not normalized in this drawer. They are unavailable here; no values are reconstructed. Execution fees below come from validated fills, not current fee rates.</div>
+              <div className="notice info" role="note" style={{ marginTop: 14 }}>Some risk settings, origin details, and settlement-leg details are not shown here. No values are reconstructed. Fees below come from the linked executions, not current fee rates.</div>
               <section className="order-executions" aria-labelledby={`${titleId}-executions`}>
                 <div className="row-flex" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                  <h3 id={`${titleId}-executions`}>Lineage executions</h3>
+                  <h3 id={`${titleId}-executions`}>Trades linked to this order</h3>
                   <DatasetStatus dataset={dataset} loading={loading} />
                 </div>
-                <p className="faint">Returned by the order-details endpoint for this validated lineage through the requested generation. Physical order IDs can differ after replacement. The execution cursor is not an order-state or settlement reconciliation watermark.</p>
-                {data!.executions.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Executed (UTC)</th><th>Market</th><th>Physical order</th><th>Generation</th><th>Match</th><th>Side</th><th>Quantity</th><th>Price</th><th>Actual fee / rebate</th><th>Maker / taker</th></tr></thead><tbody>
-                  {data!.executions.map((fill) => {
-                    const feeAsset = fill.feeAsset === "BASE" ? fill.baseAsset : fill.quoteAsset;
-                    return <tr key={`${fill.symbol}-${fill.matchId}-${fill.orderId}`}><td className="align-left mono">{apiTime(fill.timestamp)}</td><td>{fill.marketSymbol ?? fill.symbol}</td><td className="mono">{fill.orderId}</td><td>{fill.generation ?? "Unavailable"}</td><td className="mono">{fill.matchId}</td><td>{fill.side}</td><td><ExactValue value={fill.quantity} /></td><td><ExactValue value={fill.price} /></td><td><span className="mono" title={fill.feeIsRebate ? "Actual execution rebate" : "Actual execution fee"}>{fill.feeIsRebate ? "+" : "−"}<ExactValue value={fill.feeMagnitude} /> {feeAsset} {fill.feeIsRebate ? "rebate" : "fee"}</span></td><td>{fill.isMaker === undefined ? "Unavailable" : fill.isMaker ? "Maker" : "Taker"}</td></tr>;
-                  })}
-                </tbody></table></div> : <EmptyState title="No validated lineage executions loaded" description={dataset?.coverage.status === "complete" ? "The validated execution cursor is exhausted with no rows; this is not independent proof of order or settlement reconciliation." : "Execution coverage is incomplete or rows were quarantined; no fill is inferred."} />}
+                <p className="faint">These executions belong to this order family through the requested replacement. Order IDs can change after a replacement. The list does not prove that order settlement is complete.</p>
+                {data!.executions.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Executed (UTC)</th><th>Market</th><th>Order ID for this execution</th><th>Replacement</th><th>Match</th><th>Side</th><th>Quantity</th><th>Price</th><th>Actual fee / rebate</th><th>Maker / taker</th></tr></thead><tbody>
+                  {data!.executions.map((fill) => <tr key={`${fill.symbol}-${fill.matchId}-${fill.orderId}`}><td className="align-left mono">{apiTime(fill.timestamp)}</td><td>{fill.marketSymbol ?? fill.symbol}</td><td className="mono">{fill.orderId}</td><td>{fill.generation ?? "Unavailable"}</td><td className="mono">{fill.matchId}</td><td>{fill.side}</td><td><ExactValue value={fill.quantity} /></td><td><ExactValue value={fill.price} /></td><td><ExecutionFee fill={fill} /></td><td>{fill.isMaker === undefined ? "Unavailable" : fill.isMaker ? "Maker" : "Taker"}</td></tr>)}
+                </tbody></table></div> : <EmptyState title="No linked trades loaded" description={dataset?.coverage.status === "complete" ? "The account service returned no linked trades. This does not prove that order settlement is complete." : "The linked-trade data is incomplete or contains unrecognized rows. No trade is inferred."} />}
                 {dataset && <DatasetMessages dataset={dataset} />}
               </section>
             </>
@@ -462,9 +544,11 @@ function OrderDetailsDrawer({ selection, dataset, loading, onClose, onRetry }: {
 export function AccountAnalytics({
   accountVault,
   session,
+  view = "overview",
 }: {
   accountVault: account.AccountVault | null;
   session: account.VaultSessionInfo | null;
+  view?: AccountAnalyticsView;
 }) {
   const [coordinator, setCoordinator] = useState<account.AccountDataCoordinator | null>(null);
   const [snapshot, setSnapshot] = useState<account.AccountDataSnapshot | null>(null);
@@ -486,7 +570,12 @@ export function AccountAnalytics({
   const [transferAssetFilter, setTransferAssetFilter] = useState("ALL");
   const [transferDirectionFilter, setTransferDirectionFilter] = useState("ALL");
   const [transferReasonFilter, setTransferReasonFilter] = useState("ALL");
+  const [importing, setImporting] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
+  const [importPageCap, setImportPageCap] = useState(500);
+  const [importProgress, setImportProgress] = useState<Partial<Record<account.AccountCursorImportOperation, account.AccountCursorProgress>>>({});
   const requestRef = useRef<AbortController | null>(null);
+  const importRequestRef = useRef<AbortController | null>(null);
   const requestContextRef = useRef<string | null>(null);
   const activatedRef = useRef(false);
   const selectedOrderRef = useRef<OrderSelection | null>(null);
@@ -501,8 +590,10 @@ export function AccountAnalytics({
     return () => {
       requestRef.current?.abort();
       detailsRequestRef.current?.abort();
+      importRequestRef.current?.abort();
       requestRef.current = null;
       detailsRequestRef.current = null;
+      importRequestRef.current = null;
       selectedOrderRef.current = null;
       instance.dispose();
       setCoordinator(null);
@@ -512,8 +603,10 @@ export function AccountAnalytics({
   useEffect(() => {
     requestRef.current?.abort();
     detailsRequestRef.current?.abort();
+    importRequestRef.current?.abort();
     requestRef.current = null;
     detailsRequestRef.current = null;
+    importRequestRef.current = null;
     requestContextRef.current = null;
     activatedRef.current = false;
     selectedOrderRef.current = null;
@@ -527,6 +620,9 @@ export function AccountAnalytics({
     setLocalError(null);
     setCatalogReady(false);
     setLoading(false);
+    setImporting(false);
+    setImportNotice(null);
+    setImportProgress({});
     setBalanceHistoryLoading(false);
     setOpenOrdersLoading(false);
     setDetailsLoading(false);
@@ -539,12 +635,13 @@ export function AccountAnalytics({
   useEffect(() => () => {
     requestRef.current?.abort();
     detailsRequestRef.current?.abort();
+    importRequestRef.current?.abort();
     selectedOrderRef.current = null;
   }, []);
 
   const secureContext = typeof window !== "undefined" && window.isSecureContext;
   const canAttempt = Boolean(
-    secureContext && coordinator && session?.registeredKeyId && !loading,
+    secureContext && coordinator && session?.registeredKeyId && !loading && !importing,
   );
 
   const loadDetails = useCallback(async (selection: OrderSelection, preserve = false) => {
@@ -603,7 +700,7 @@ export function AccountAnalytics({
   }, []);
 
   const load = useCallback(async (explicit = false) => {
-    if (!coordinator || !session || !accountVault) return;
+    if (!coordinator || !session || !accountVault || importRequestRef.current) return;
     // The first private read always requires the explicit button. Visibility
     // may refresh only a connection that the user already chose to verify.
     if (!explicit && !activatedRef.current) return;
@@ -628,6 +725,8 @@ export function AccountAnalytics({
     setOpenOrdersLoading(true);
     setPendingExport(null);
     setLocalError(null);
+    setImportNotice(null);
+    setImportProgress({});
     try {
       const catalog = await account.fetchOfficialSpotCatalog({ signal: controller.signal });
       if (!isCurrent()) return;
@@ -683,6 +782,66 @@ export function AccountAnalytics({
     }
   }, [accountVault, coordinator, loadDetails, secureContext, session, range]);
 
+  const importHistory = useCallback(async () => {
+    if (!coordinator || !session || !accountVault || !secureContext || !session.registeredKeyId || !snapshot || !catalogReady || loading || importRequestRef.current) return;
+    const controller = new AbortController();
+    importRequestRef.current = controller;
+    const period = { ...snapshot.period };
+    const isCurrent = () => importRequestRef.current === controller && !controller.signal.aborted;
+    setImporting(true);
+    setImportProgress({});
+    setPendingExport(null);
+    setLocalError(null);
+    setImportNotice(null);
+    try {
+      const result = await coordinator.importCursorHistory({
+        period,
+        maxPages: importPageCap,
+        operations: CURSOR_IMPORT_OPERATIONS[view],
+        markets: marketsRef.current,
+        signal: controller.signal,
+        onProgress: (progress) => {
+          if (isCurrent()) {
+            setImportProgress((current) => ({ ...current, [progress.operation]: progress }));
+          }
+        },
+      });
+      if (!isCurrent()) return;
+      const failed = result.orders?.error ?? result.fills?.error ?? result.transfers?.error;
+      if (failed) {
+        // A failed import must not replace a previously useful visible snapshot
+        // with an aborted, denied, or otherwise unavailable partial result.
+        setLocalError(`${failed.code}: Cursor import did not finish. The previous snapshot remains visible; ${errorText(failed)}`);
+        return;
+      }
+      setSnapshot((current) => {
+        if (!current || current.period.startTime !== period.startTime || current.period.endTime !== period.endTime) return current;
+        return {
+          ...current,
+          ...(result.orders ? { orders: result.orders } : {}),
+          ...(result.fills ? { fills: result.fills } : {}),
+          ...(result.transfers ? { transfers: result.transfers } : {}),
+        };
+      });
+    } catch (error) {
+      if (isCurrent()) {
+        const safe = account.safeAccountError(error);
+        setLocalError(`${safe.code}: Cursor import did not finish. The previous snapshot remains visible; ${errorText(safe)}`);
+      }
+    } finally {
+      if (importRequestRef.current === controller) {
+        importRequestRef.current = null;
+        setImporting(false);
+      }
+    }
+  }, [accountVault, catalogReady, coordinator, importPageCap, loading, secureContext, session, snapshot, view]);
+
+  const cancelImport = useCallback(() => {
+    if (!importRequestRef.current) return;
+    importRequestRef.current.abort();
+    setImportNotice("Import cancelled; previous snapshot retained. The cancelled prefix was not merged.");
+  }, []);
+
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === "visible") void load(false);
@@ -691,14 +850,22 @@ export function AccountAnalytics({
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [load]);
 
-  const datasets = snapshot ? [snapshot.balances, snapshot.equity, snapshot.orders, snapshot.fills, snapshot.transfers, snapshot.feeRates] : [];
-  const allDatasets = [...datasets, ...(balanceHistory ? [balanceHistory] : []), ...(openOrders ? [openOrders] : [])];
-  const successful = allDatasets.filter((dataset) => dataset.data !== null).length;
-  const latest = allDatasets.reduce<number | null>((latest, dataset) => {
+  const visibleDatasets: AnyDataset[] = view === "overview"
+    ? [...(snapshot ? [snapshot.balances, snapshot.equity, snapshot.feeRates] : []), ...(balanceHistory ? [balanceHistory] : [])]
+    : view === "trades"
+      ? (snapshot ? [snapshot.fills] : [])
+      : view === "orders"
+        ? [...(snapshot ? [snapshot.orders] : []), ...(openOrders ? [openOrders] : [])]
+        : view === "pnl"
+          ? (snapshot ? [snapshot.fills, snapshot.transfers] : [])
+          : (snapshot ? [snapshot.transfers] : []);
+  const visibleSuccessful = visibleDatasets.filter((dataset) => dataset.data !== null).length;
+  const hasViewResponse = visibleDatasets.length > 0;
+  const latest = visibleDatasets.reduce<number | null>((latest, dataset) => {
     if (!dataset.retrievedAtMs) return latest;
     return latest === null ? dataset.retrievedAtMs : Math.max(latest, dataset.retrievedAtMs);
   }, null);
-  const hasIncomplete = allDatasets.some((dataset) => dataset.coverage.status !== "complete");
+  const hasIncomplete = visibleDatasets.some((dataset) => dataset.coverage.status !== "complete" && dataset.coverage.status !== "filter-complete");
   const loadedTransfers = snapshot?.transfers.data?.transfers ?? null;
   const transferAssets = useMemo(
     () => [...new Set((loadedTransfers ?? []).map((transfer) => transfer.asset))].sort(),
@@ -749,29 +916,62 @@ export function AccountAnalytics({
     }
   }, [snapshot, pendingExport, filteredTransfers, transferAssetFilter, transferDirectionFilter, transferReasonFilter]);
   const connectionLabel = loading
-    ? "Checking read-only endpoints…"
+    ? "Checking your account…"
     : !session
-      ? "Locked"
+      ? "Account locked"
       : !session.registeredKeyId
-        ? "Registered key ID required"
-        : (snapshot || balanceHistory || openOrders)
-          ? successful === 0
-            ? "No read granted or available"
+        ? "Account key ID needed"
+        : hasViewResponse
+          ? visibleSuccessful === 0
+            ? "No account data is available"
             : hasIncomplete
-              ? "Partial read coverage"
-              : "Validated read responses received"
-          : "Ready for owner-controlled verification";
+              ? "Some account data is incomplete"
+              : "Account data loaded"
+          : "Ready to check your account";
+  const copy = VIEW_COPY[view];
+  const costBasisAccountScope = snapshot?.fills.data?.summary.calculations[0]?.fill.accountScope
+    ?? (session ? JSON.stringify([session.entryId, "root"]) : "");
+  const loadLabel = view === "overview" ? "Load account data" : view === "trades" ? "Load your trades" : view === "orders" ? "Load your orders" : view === "pnl" ? "Load P&L inputs" : "Load money movements";
+  const refreshLabel = view === "overview" ? "Refresh account data" : view === "trades" ? "Refresh your trades" : view === "orders" ? "Refresh your orders" : view === "pnl" ? "Refresh P&L inputs" : "Refresh money movements";
+  const periodLabel = view === "trades" ? "Trade time period" : view === "orders" ? "Completed-order time period" : view === "pnl" ? "P&L analysis time period" : "Balance and equity time period";
+  const emptyDescription = !session
+    ? copy.emptyDescription
+    : !session.registeredKeyId
+      ? "Save the server-issued account key ID in API setup before loading this view."
+      : copy.emptyDescription.replace("Unlock a registered read-only key, then choose ", "Choose ");
+
+  useEffect(() => {
+    detailsRequestRef.current?.abort();
+    importRequestRef.current?.abort();
+    detailsRequestRef.current = null;
+    importRequestRef.current = null;
+    setImporting(false);
+    setImportNotice(null);
+    setImportProgress({});
+    selectedOrderRef.current = null;
+    setSelectedOrder(null);
+    setOrderDetails(null);
+    setDetailsLoading(false);
+    setLocalError(null);
+    setPendingExport(null);
+  }, [view]);
 
   return (
     <Card
-      title="Account analytics"
-      subtitle="Read-only balances, sampled balance/equity history, open and terminal orders, validated order details, fills, labeled transfer activity, current rates, and explicit loaded-row exports. Official SpotConfig pair mapping is loaded separately; public MCP tools remain independent."
-      actions={<Pill kind={allDatasets.length > 0 && !hasIncomplete && successful > 0 ? "up" : "warn"}>{connectionLabel}</Pill>}
+      title={copy.title}
+      subtitle={copy.subtitle}
+      actions={<Pill kind={hasViewResponse && !hasIncomplete && visibleSuccessful > 0 ? "up" : "warn"}>{connectionLabel}</Pill>}
     >
       <div className="notice warn" role="note" style={{ marginBottom: 14 }}>
         <div>
           <strong>Live compatibility remains unverified.</strong>{" "}
           Authenticated GET reads are enabled, but each operation still succeeds or fails independently. Browser CORS, origin, and owner-controlled read-policy checks determine whether a real response is available; a response is not evidence of another permission.
+        </div>
+      </div>
+
+      <div className="notice info" role="note" style={{ marginBottom: 14 }}>
+        <div>
+          <strong>Section-scoped memory.</strong> Changing account sections intentionally discards this section&apos;s in-memory snapshots, cursor imports, and manual P&amp;L inputs. Reload or re-enter them when you return; no private data is persisted to retain them.
         </div>
       </div>
 
@@ -784,13 +984,15 @@ export function AccountAnalytics({
       </div>
 
       <div className="row-flex" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-        <label className="field" style={{ minWidth: 180 }}>
-          <span className="faint">Reporting period for balance/equity history, orders, and fills</span>
+        {view !== "transfers" && <label className="field" style={{ minWidth: 180 }}>
+          <span className="faint">{periodLabel}</span>
           <select className="select" value={range} onChange={(event) => {
             requestRef.current?.abort();
             detailsRequestRef.current?.abort();
+            importRequestRef.current?.abort();
             requestRef.current = null;
             detailsRequestRef.current = null;
+            importRequestRef.current = null;
             requestContextRef.current = null;
             detailsGenerationRef.current += 1;
             setSnapshot(null);
@@ -800,6 +1002,9 @@ export function AccountAnalytics({
             setSelectedOrder(null);
             selectedOrderRef.current = null;
             setLoading(false);
+            setImporting(false);
+            setImportNotice(null);
+            setImportProgress({});
             setBalanceHistoryLoading(false);
             setOpenOrdersLoading(false);
             setDetailsLoading(false);
@@ -808,28 +1013,60 @@ export function AccountAnalytics({
           }} aria-label="Account reporting period">
             {RANGES.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
-        </label>
+        </label>}
         <button type="button" className="btn primary" disabled={!canAttempt} onClick={() => void load(true)}>
-          <IconActivity size={14} /> {loading ? "Reading…" : allDatasets.length > 0 ? "Refresh read-only data" : "Verify & load read-only data"}
+          <IconActivity size={14} /> {loading ? "Loading…" : hasViewResponse ? refreshLabel : loadLabel}
         </button>
-        {allDatasets.length > 0 && <span className="faint"><IconClock size={12} /> {latest ? `Latest response ${fmtAgo(latest)}` : "No successful response timestamp"}</span>}
+        {hasViewResponse && <span className="faint"><IconClock size={12} /> {latest ? `Latest update ${fmtAgo(latest)}` : "No successful response time"}</span>}
       </div>
+      {snapshot && CURSOR_IMPORT_OPERATIONS[view].length > 0 && (
+        <div className="notice info" role="note" style={{ marginBottom: 14 }}>
+          <div className="row-flex" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div>
+              <strong>Need every cursor page?</strong>{" "}
+              This explicit import can make many authenticated GET requests, one dataset at a time. Selected order/fill history uses the reporting window; transfers keep their existing unfiltered account scope. The ordinary 25-page snapshot is unchanged until the import finishes.
+            </div>
+            <div className="row-flex" style={{ gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <label className="field" style={{ minWidth: 130 }}>
+                <span className="faint">Page safety cap</span>
+                <select className="select" value={importPageCap} disabled={importing} onChange={(event) => setImportPageCap(Number(event.target.value))} aria-label="Cursor import page safety cap">
+                  {[100, 500, 1000, 5000, 10000].map((cap) => <option key={cap} value={cap}>{cap} pages</option>)}
+                </select>
+              </label>
+              <button type="button" className={`btn sm ${importing ? "ghost" : "primary"}`} disabled={importing ? false : !canAttempt || !catalogReady} onClick={importing ? cancelImport : () => void importHistory()}>
+                {importing ? "Cancel import" : "Import full history (capped)"}
+              </button>
+            </div>
+          </div>
+          {(importing || importProgress.orders || importProgress.fills || importProgress.transfers) && (
+            <div className="row-flex mt-2" style={{ gap: 14, flexWrap: "wrap" }} aria-live="polite">
+              {CURSOR_IMPORT_OPERATIONS[view].map((operation) => {
+                const progress = importProgress[operation];
+                const label = operation === "orders" ? "Orders" : operation === "fills" ? "Fills" : "Transfers";
+                return <span key={operation}>{label}: {progress ? `${progress.pagesFetched} pages · ${progress.rowsReceived} rows received` : "not started"}</span>;
+              })}
+              <span className="faint">No total or percentage is inferred.</span>
+            </div>
+          )}
+        </div>
+      )}
+      {importNotice && <div className="notice info" role="status" style={{ marginBottom: 14 }}>{importNotice}</div>}
       {localError && <div className="notice error" role="alert" style={{ marginBottom: 14 }}><IconAlert size={15} /><span>{localError}</span></div>}
       <p className="faint">Amounts retain the API's exact decimal strings; no additional scale divisor is applied. Rounded display never updates the underlying exact arithmetic.</p>
 
-      <BalanceHistoryCard dataset={balanceHistory} loading={balanceHistoryLoading} range={range} />
-      <OpenOrdersCard dataset={openOrders} loading={openOrdersLoading} onDetails={openDetails} />
+      {view === "overview" && (snapshot || balanceHistory || balanceHistoryLoading) && <BalanceHistoryCard dataset={balanceHistory} loading={balanceHistoryLoading} range={range} />}
+      {view === "orders" && (snapshot || openOrders || openOrdersLoading) && <OpenOrdersCard dataset={openOrders} loading={openOrdersLoading} onDetails={openDetails} />}
 
       {snapshot && (
         <>
-          <MetricStrip>
-            <MetricCell label="Reporting period" value={snapshot.period.range} sub={`${snapshot.period.startTime} → ${snapshot.period.endTime}`} />
-            <MetricCell label="Datasets with responses" value={`${successful}/8`} sub="A response is not a permission grant for other reads" />
-            <MetricCell label="Latest freshness" value={latest ? fmtAgo(latest) : "—"} sub="Per-dataset timestamps remain authoritative" />
-            <MetricCell label="P&L" value="Unavailable" sub="Opening basis, complete flows, and fresh marks are not yet verified" />
-          </MetricStrip>
+          {view === "overview" && <MetricStrip>
+            <MetricCell label="Reporting period" value={rangeLabel(snapshot.period.range)} sub={`${snapshot.period.startTime} → ${snapshot.period.endTime}`} />
+            <MetricCell label="Overview reads with responses" value={`${visibleSuccessful}/4`} sub="Only overview reads are counted; each keeps its own permission and data status" />
+            <MetricCell label="Latest update" value={latest ? fmtAgo(latest) : "—"} sub="Each section keeps its own response time" />
+            <MetricCell label="Profit and loss" value="Unavailable" sub="Opening costs, complete activity, and current valuations are not verified" />
+          </MetricStrip>}
 
-          <Card title="Current balances" subtitle="Total = trading + funding. Reserved and available are not added again." actions={<DatasetActions dataset={snapshot.balances} name="balances" rowCount={snapshot.balances.data?.balances.length ?? 0} onExport={requestExport} />}>
+          {view === "overview" && <Card title="Current balances" subtitle="Total = trading + funding. Reserved and available are not added again." actions={<DatasetActions dataset={snapshot.balances} name="balances" rowCount={snapshot.balances.data?.balances.length ?? 0} onExport={requestExport} />}>
             {snapshot.balances.data ? (
               <>
                 <div className="table-wrap">
@@ -851,9 +1088,9 @@ export function AccountAnalytics({
                 <DatasetMessages dataset={snapshot.balances} />
               </>
             ) : <><NoDataset dataset={snapshot.balances} /><DatasetMessages dataset={snapshot.balances} /></>}
-          </Card>
+          </Card>}
 
-          <Card title="Sampled equity history" subtitle="Sampled valuation only — never live equity or P&L. Point timestamps are not invented when the server does not supply them." actions={<DatasetActions dataset={snapshot.equity} name="equity" rowCount={snapshot.equity.data?.response.series.reduce((count, series) => count + series.equity.length, 0) ?? 0} onExport={requestExport} />}>
+          {view === "overview" && <Card title="Sampled equity history" subtitle="Sampled valuation only — never live equity or P&L. Point timestamps are not invented when the server does not supply them." actions={<DatasetActions dataset={snapshot.equity} name="equity" rowCount={snapshot.equity.data?.response.series.reduce((count, series) => count + series.equity.length, 0) ?? 0} onExport={requestExport} />}>
             {snapshot.equity.data ? (
               <>
                 <div className="faint" style={{ marginBottom: 10 }}>
@@ -869,9 +1106,9 @@ export function AccountAnalytics({
                 <DatasetMessages dataset={snapshot.equity} />
               </>
             ) : <><NoDataset dataset={snapshot.equity} /><DatasetMessages dataset={snapshot.equity} /></>}
-          </Card>
+          </Card>}
 
-          <Card title="Order history" subtitle="Terminal order reads use the selected time window and opaque cursor chain. No cancellation or order-placement action is available." actions={<DatasetActions dataset={snapshot.orders} name="orders" rowCount={snapshot.orders.data?.orders.length ?? 0} onExport={requestExport} />}>
+          {view === "orders" && <Card title="Order history" subtitle="Terminal order reads use the selected time window and opaque cursor chain. No cancellation or order-placement action is available." actions={<DatasetActions dataset={snapshot.orders} name="orders" rowCount={snapshot.orders.data?.orders.length ?? 0} onExport={requestExport} />}>
             {snapshot.orders.data ? (
               <>
                 {snapshot.orders.data.orders.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Order</th><th>Market</th><th>Side</th><th>Status</th><th>Price</th><th>Original qty</th><th>Filled qty</th><th>Created</th><th>Details</th></tr></thead><tbody>
@@ -880,9 +1117,9 @@ export function AccountAnalytics({
                 <DatasetMessages dataset={snapshot.orders} />
               </>
             ) : <><NoDataset dataset={snapshot.orders} /><DatasetMessages dataset={snapshot.orders} /></>}
-          </Card>
+          </Card>}
 
-          <Card title="Fills and actual execution fees" subtitle="Fees come from execution records, grouped by their real fee asset. Net quote flow is observed activity, not profit." actions={<DatasetActions dataset={snapshot.fills} name="fills" rowCount={snapshot.fills.data?.summary.calculations.length ?? 0} onExport={requestExport} />}>
+          {view === "trades" && <Card title="Your Trades and Actual Fees" subtitle="Fees come from execution records, grouped by their real fee asset. Net quote flow is observed activity, not profit." actions={<DatasetActions dataset={snapshot.fills} name="fills" rowCount={snapshot.fills.data?.summary.calculations.length ?? 0} onExport={requestExport} />}>
             {snapshot.fills.data ? (
               <>
                 {account.observedFillEligibility(snapshot.fills.data.summary, snapshot.fills.coverage).available ? (
@@ -890,17 +1127,20 @@ export function AccountAnalytics({
                     {snapshot.fills.data.summary.feesByAsset.length > 0 && <div className="table-wrap" style={{ marginBottom: 14 }}><table className="data"><thead><tr><th className="align-left">Fee asset</th><th>Gross charges</th><th>Gross rebates</th><th>Net actual fees</th></tr></thead><tbody>
                       {snapshot.fills.data.summary.feesByAsset.map((fee) => <tr key={fee.asset}><td className="align-left mono">{fee.asset}</td><td><ExactValue value={fee.grossCharges} digits={18} /></td><td><ExactValue value={fee.grossRebates} digits={18} /></td><td><ExactValue value={fee.netFees} digits={18} /></td></tr>)}
                     </tbody></table></div>}
-                    {snapshot.fills.data.summary.calculations.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Fill</th><th>Market</th><th>Side</th><th>Quantity</th><th>Price</th><th>Observed net quote flow</th><th>Executed</th></tr></thead><tbody>
-                      {snapshot.fills.data.summary.calculations.map((calculation) => <tr key={`${calculation.fill.symbol}-${calculation.fill.matchId}-${calculation.fill.orderId}`}><td className="align-left mono">{calculation.fill.matchId}</td><td>{calculation.fill.marketSymbol ?? calculation.fill.symbol}</td><td>{calculation.fill.side}</td><td><ExactValue value={calculation.fill.quantity} /></td><td><ExactValue value={calculation.fill.price} /></td><td><ExactValue value={calculation.dQuote} digits={18} /></td><td className="mono">{apiTime(calculation.fill.timestamp)}</td></tr>)}
+                    {snapshot.fills.data.summary.calculations.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Match ID</th><th>Market</th><th>Side</th><th>Quantity</th><th>Price</th><th>Actual fee / rebate</th><th>Observed quote flow</th><th>Executed (UTC)</th></tr></thead><tbody>
+                      {snapshot.fills.data.summary.calculations.map((calculation) => {
+                        const fill = calculation.fill;
+                        return <tr key={`${fill.symbol}-${fill.matchId}-${fill.orderId}`}><td className="align-left mono">{fill.matchId}</td><td>{fill.marketSymbol ?? fill.symbol}</td><td>{fill.side}</td><td><ExactValue value={fill.quantity} /></td><td><ExactValue value={fill.price} /></td><td><ExecutionFee fill={fill} /></td><td><ExactValue value={calculation.dQuote} digits={18} /></td><td className="mono">{apiTime(fill.timestamp)}</td></tr>;
+                      })}
                     </tbody></table></div> : <EmptyState title="No fills in validated coverage" description="No fee or volume value is inferred when the validated fill set is empty." />}
                   </>
                 ) : <div className="notice error" role="alert"><IconAlert size={15} /><span>Conflicting or unknown fill rows block all affected fee and flow aggregates. Raw rows are not silently repaired.</span></div>}
                 <DatasetMessages dataset={snapshot.fills} />
               </>
             ) : <><NoDataset dataset={snapshot.fills} /><DatasetMessages dataset={snapshot.fills} /></>}
-          </Card>
+          </Card>}
 
-          <Card title="Finalized transfer activity" subtitle="Read-only transfer legs. This endpoint has no reporting-period filter in the verified friendly contract; coverage is shown separately. Deposits and transfers are capital/activity flows, not profit." actions={<DatasetActions dataset={snapshot.transfers} name="transfers" rowCount={filteredTransfers.length} onExport={requestExport} />}>
+          {view === "transfers" && <Card title="Money Movements" subtitle="Read-only transfer legs. This endpoint has no reporting-period filter in the verified friendly contract; coverage is shown separately. Deposits and transfers are capital/activity flows, not profit." actions={<DatasetActions dataset={snapshot.transfers} name="transfers" rowCount={filteredTransfers.length} onExport={requestExport} />}>
             {snapshot.transfers.data ? (
               <>
                 {snapshot.transfers.data.transfers.length > 0 && (
@@ -944,9 +1184,9 @@ export function AccountAnalytics({
                 <DatasetMessages dataset={snapshot.transfers} />
               </>
             ) : <><NoDataset dataset={snapshot.transfers} /><DatasetMessages dataset={snapshot.transfers} /></>}
-          </Card>
+          </Card>}
 
-          <Card title="Current effective fee-rate snapshot" subtitle="Current rates are not historical execution fees. Actual fees above come only from fills." actions={<DatasetActions dataset={snapshot.feeRates} name="feeRates" rowCount={snapshot.feeRates.data?.feeRates.length ?? 0} onExport={requestExport} />}>
+          {view === "overview" && <Card title="Current fee rates" subtitle="Current rates are not historical execution fees. Actual execution fees appear only in Your Trades and come from validated fills." actions={<DatasetActions dataset={snapshot.feeRates} name="feeRates" rowCount={snapshot.feeRates.data?.feeRates.length ?? 0} onExport={requestExport} />}>
             {snapshot.feeRates.data ? (
               <>
                 {snapshot.feeRates.data.feeRates.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Market</th><th>VIP tier</th><th>Maker rate</th><th>Taker rate</th></tr></thead><tbody>
@@ -955,23 +1195,27 @@ export function AccountAnalytics({
                 <DatasetMessages dataset={snapshot.feeRates} />
               </>
             ) : <><NoDataset dataset={snapshot.feeRates} /><DatasetMessages dataset={snapshot.feeRates} /></>}
-          </Card>
+          </Card>}
 
-          <Card title="Profit & loss remains unavailable" subtitle="Observed fills, deposits, equity changes, and net quote flow are not profit.">
-            <div className="notice info" role="note"><IconAlert size={15} /><span>Realized and unrealized P&L require opening lots, complete fills, resolved non-fill cash flows, and a fresh labeled valuation mark. Those gates are not yet established by this read-only integration, so no P&L number is displayed.</span></div>
-          </Card>
+          {view === "pnl" && (
+            <AccountCostBasis snapshot={snapshot} accountScope={costBasisAccountScope} />
+          )}
+
+          {view === "overview" && <Card title="Profit and loss require cost basis" subtitle="Trades, deposits, equity changes, and quote flows are not automatically profit.">
+            <div className="notice info" role="note"><IconAlert size={15} /><span>Use the Profit and Loss view to supply opening lots, resolve non-fill flows, and choose an exact accounting method. No profit number appears until every required gate passes.</span></div>
+          </Card>}
         </>
       )}
 
-      {allDatasets.length === 0 && !loading && (
+      {visibleDatasets.length === 0 && !loading && (
         <EmptyState
           icon={<IconActivity size={22} />}
-          title="No account analytics response loaded"
-          description="Unlock a registered read-only key, then explicitly verify and load the independent GET datasets. No synthetic fixture is presented as account data."
+          title={copy.emptyTitle}
+          description={emptyDescription}
         />
       )}
       {loading && <div className="notice info" role="status"><IconRefresh size={15} /><span>Reading independent GET datasets. Loading indicators are not account values; each result will retain its own coverage and permission state.</span></div>}
-      {selectedOrder && <OrderDetailsDrawer selection={selectedOrder} dataset={orderDetails} loading={detailsLoading} onClose={closeDetails} onRetry={() => void loadDetails(selectedOrder, true)} />}
+      {view === "orders" && selectedOrder && <OrderDetailsDrawer selection={selectedOrder} dataset={orderDetails} loading={detailsLoading} onClose={closeDetails} onRetry={() => void loadDetails(selectedOrder, true)} />}
       <ConfirmDialog
         open={pendingExport !== null}
         title="Download private financial activity?"

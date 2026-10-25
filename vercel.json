@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "comment": "Vercel monorepo deploy: frontend from apps/web, API from backend/api (Edge). No rewrites needed — HashRouter handles SPA routing.",
+  "comment": "Vercel monorepo deploy: frontend from apps/web, API from backend/api (Edge). No rewrites needed \u2014 HashRouter handles SPA routing.",
   "buildCommand": "npm -w apps/web run build",
   "outputDirectory": "apps/web/dist",
   "installCommand": "npm install",
@@ -8,5 +8,32 @@
     "backend/api/**": {
       "runtime": "edge"
     }
-  }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://assets.polyester.com; media-src 'self' https://assets.polyester.com; connect-src 'self' https://api.coingecko.com https://api.testnet.polyester.com https://*.workers.dev; font-src 'self'; manifest-src 'self'"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "accelerometer=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), fullscreen=(self), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(self), serial=(), usb=()"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        }
+      ]
+    }
+  ]
 }

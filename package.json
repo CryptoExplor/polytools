@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Modular, open tools for the Polyester exchange — static frontend + reusable serverless backend. Testnet today, mainnet-ready.",
+  "description": "Modular, open tools for the Polyester exchange \u2014 static frontend + reusable serverless backend. Testnet today, mainnet-ready.",
   "workspaces": [
     "packages/*",
     "apps/*",
@@ -15,7 +15,16 @@
     "typecheck": "npm -w apps/web run typecheck && npm -w backend run typecheck",
     "preview": "npm -w apps/web run preview",
     "test": "node --test tests/*.test.mjs",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "check:external": "node scripts/check-external-content.mjs inventory",
+    "check:external:live": "node scripts/check-external-content.mjs all --network",
+    "check:links:live": "node scripts/check-external-content.mjs links --network",
+    "check:assets:live": "node scripts/check-external-content.mjs assets --network",
+    "check:sdk:live": "node scripts/check-external-content.mjs sdk --network",
+    "check:performance": "node scripts/check-build-performance.mjs",
+    "check:runtime": "node scripts/check-runtime.mjs",
+    "check:dependencies": "node scripts/check-dependencies.mjs",
+    "check:whitespace": "node scripts/check-whitespace.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.135.0"

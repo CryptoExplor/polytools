@@ -156,3 +156,35 @@ export function decodeHeatmapBuckets(rawBuckets: HeatmapBucket[]) {
     bandTotals,
   };
 }
+
+export interface HeatmapCellInspection {
+  bucketIdx: number;
+  binIdx: number;
+  tsSec: number;
+  priceLow: number;
+  priceHigh: number;
+  bidQty: number;
+  askQty: number;
+}
+
+/** Return the same cell readout for pointer hover and native text controls. */
+export function inspectHeatmapCell(
+  decoded: NonNullable<ReturnType<typeof decodeHeatmapBuckets>>,
+  bucketIdx: number,
+  binIdx: number,
+): HeatmapCellInspection | null {
+  if (!Number.isInteger(bucketIdx) || !Number.isInteger(binIdx)) return null;
+  const bucket = decoded.buckets[bucketIdx];
+  const cell = decoded.grid[bucketIdx]?.[binIdx];
+  if (!bucket || !cell) return null;
+  const priceLow = decoded.renderMinPx + binIdx * decoded.binSize;
+  return {
+    bucketIdx,
+    binIdx,
+    tsSec: bucket.tsSec,
+    priceLow,
+    priceHigh: priceLow + decoded.binSize,
+    bidQty: cell.bidQty,
+    askQty: cell.askQty,
+  };
+}

@@ -166,6 +166,8 @@ export default function Hub() {
     marketsError,
     marketsLoading,
     marketsUpdatedAt,
+    marketsRefreshing,
+    marketsCacheStatus,
     connectionStatus,
     refreshMarkets,
     pairs,
@@ -210,10 +212,13 @@ export default function Hub() {
   const environmentTelemetry = metadataAvailable
     ? apiEnv
     : telemetryFallback(metadataPending);
+  const metadataStale = marketsCacheStatus ? now >= marketsCacheStatus.freshUntil : false;
   const dataSourceLabel = metadataAvailable
-    ? dataSource === "wire-samples"
-      ? "wire-samples (sandbox offline fallback)"
-      : "live MCP endpoint"
+    ? marketsCacheStatus
+      ? `${metadataStale ? "Stale" : "Fresh"} local public metadata cache${marketsRefreshing ? " (refreshing)" : ""}`
+      : dataSource === "wire-samples"
+        ? "wire-samples (sandbox offline fallback)"
+        : "live MCP endpoint"
     : telemetryFallback(metadataPending);
   const envTelemetryPending = !envInfo && marketsLoading && !marketsError;
 
@@ -243,7 +248,9 @@ export default function Hub() {
           value={environmentLabel}
           sub={
             metadataAvailable
-              ? "Read-only MCP data source"
+              ? marketsCacheStatus
+                ? "Validated cached public catalog"
+                : "Read-only MCP data source"
               : metadataPending
                 ? "Waiting for market metadata"
                 : "Market metadata unavailable"
