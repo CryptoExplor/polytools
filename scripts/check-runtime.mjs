@@ -66,7 +66,7 @@ export async function measureRuntime(rootDir = ROOT) {
   };
   return evaluateRuntime({
     nodeVersion: process.version,
-    engineRange: rootPackage.engines?.node ?? ">=18",
+    engineRange: rootPackage.engines?.node ?? ">=24",
     features,
   });
 }
@@ -75,7 +75,7 @@ function main() {
   return measureRuntime().then((report) => {
     const output = {
       ...report,
-      scope: "Current runtime only. The Node 18/20/22 CI matrix is separate and no other local runtime is claimed.",
+      scope: "Current runtime only. CI and deployment runtimes are separate and are not inferred from this result.",
     };
     if (process.argv.includes("--json")) {
       console.log(JSON.stringify(output, null, 2));

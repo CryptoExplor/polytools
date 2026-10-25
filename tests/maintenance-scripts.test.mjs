@@ -166,11 +166,11 @@ describe("P3-4/P3-6 measured build and repository assurance helpers", () => {
 
   it("checks the current engine/features without claiming another runtime", () => {
     const features = Object.fromEntries(REQUIRED_RUNTIME_FEATURES.map((name) => [name, true]));
-    assert.equal(evaluateRuntime({ nodeVersion: "v22.22.3", engineRange: ">=18", features }).ok, true);
-    assert.equal(evaluateRuntime({ nodeVersion: "v16.20.0", engineRange: ">=18", features }).ok, false);
+    assert.equal(evaluateRuntime({ nodeVersion: "v24.0.0", engineRange: ">=24", features }).ok, true);
+    assert.equal(evaluateRuntime({ nodeVersion: "v22.22.3", engineRange: ">=24", features }).ok, false);
     assert.equal(evaluateRuntime({
-      nodeVersion: "v22.0.0",
-      engineRange: ">=18",
+      nodeVersion: "v24.0.0",
+      engineRange: ">=24",
       features: { ...features, ed25519: false },
     }).ok, false);
   });
