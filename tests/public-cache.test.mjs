@@ -27,6 +27,7 @@ const response = (id, cacheControl = "public, max-age=60") => ({
 let vite;
 let cacheLib;
 let marketLib;
+let requestSequencing;
 let PublicCacheStatus;
 
 before(async () => {
@@ -37,6 +38,7 @@ before(async () => {
   });
   cacheLib = await vite.ssrLoadModule("/apps/web/src/lib/publicCache.ts");
   marketLib = await vite.ssrLoadModule("/apps/web/src/lib/marketMetadataCache.ts");
+  requestSequencing = await vite.ssrLoadModule("/apps/web/src/lib/metadataRequestSequencer.ts");
   ({ PublicCacheStatus } = await vite.ssrLoadModule(
     "/apps/web/src/components/PublicCacheStatus.tsx",
   ));
@@ -112,6 +114,68 @@ describe("public cache hits, freshness, validation, and persistence", () => {
     assert.equal(await storage.get(KEY), null);
   });
 
+  it("keeps newer or equal in-memory data when an older persistent read finishes late", async () => {
+    for (const advanceMs of [100, 0]) {
+      let now = 100_000;
+      const persistent = new cacheLib.MemoryPublicCacheStorage();
+      const old = envelope(KEY, now, { id: 1 });
+      await persistent.putIfNewer(old);
+      const gate = deferred();
+      let firstGet = true;
+      const storage = {
+        get: async (key) => {
+          if (firstGet) {
+            firstGet = false;
+            return gate.promise;
+          }
+          return persistent.get(key);
+        },
+        putIfNewer: (entry, isCurrent) => persistent.putIfNewer(entry, isCurrent),
+        delete: (key, savedAt, isCurrent) => persistent.delete(key, savedAt, isCurrent),
+        getAll: () => persistent.getAll(),
+      };
+      const cache = new cacheLib.PublicDataCache({ storage, now: () => now });
+      const delayedRead = cache.read(KEY, POLICY, decode);
+
+      now += advanceMs;
+      await cache.refresh({ key: KEY, policy: POLICY, decode, fetcher: async () => response(2) });
+      gate.resolve(old);
+      const result = await delayedRead;
+      assert.equal(result.origin, "memory");
+      assert.equal(result.entry.value.id, 2);
+      assert.equal((await cache.read(KEY, POLICY, decode)).entry.value.id, 2);
+    }
+  });
+
+  it("does not resurrect a persistent read that was pending during invalidation", async () => {
+    const now = 100_000;
+    const persistent = new cacheLib.MemoryPublicCacheStorage();
+    const old = envelope(KEY, now, { id: 1 });
+    await persistent.putIfNewer(old);
+    const gate = deferred();
+    let firstGet = true;
+    const storage = {
+      get: async (key) => {
+        if (firstGet) {
+          firstGet = false;
+          return gate.promise;
+        }
+        return persistent.get(key);
+      },
+      putIfNewer: (entry, isCurrent) => persistent.putIfNewer(entry, isCurrent),
+      delete: (key, savedAt, isCurrent) => persistent.delete(key, savedAt, isCurrent),
+      getAll: () => persistent.getAll(),
+    };
+    const cache = new cacheLib.PublicDataCache({ storage, now: () => now });
+    const delayedRead = cache.read(KEY, POLICY, decode);
+    await cache.invalidate(KEY);
+    gate.resolve(old);
+
+    assert.equal(await delayedRead, null);
+    assert.equal(await cache.read(KEY, POLICY, decode), null);
+    assert.equal(await persistent.get(KEY), null);
+  });
+
   it("rejects outdated schemas, invalid envelopes, and invalid cached values", async () => {
     const now = 100_000;
     const invalidEntries = [
@@ -119,6 +183,7 @@ describe("public cache hits, freshness, validation, and persistence", () => {
       envelope(KEY, now, { id: 1 }, { format: "old-format" }),
       envelope(KEY, now, { id: "invalid" }),
       envelope(KEY, now + 1, { id: 1 }),
+      envelope(KEY, now, { id: 1 }, { savedAt: "unavailable" }),
       envelope(KEY, now, { id: 1 }, { expiresAt: now - 1 }),
     ];
     for (const invalid of invalidEntries) {
@@ -171,6 +236,8 @@ describe("public cache refresh safety and request coordination", () => {
       (error) => error?.code === "INVALID_DATA",
     );
     assert.deepEqual((await cache.read(KEY, POLICY, decode)).entry.value, { id: 1 });
+    const reloadedAfterFailure = new cacheLib.PublicDataCache({ storage, now: () => now });
+    assert.deepEqual((await reloadedAfterFailure.read(KEY, POLICY, decode)).entry.value, { id: 1 });
 
     const noStore = await cache.refresh({
       ...options,
@@ -179,6 +246,268 @@ describe("public cache refresh safety and request coordination", () => {
     assert.deepEqual(noStore.value, { id: 2 });
     assert.equal(noStore.entry, null);
     assert.equal(await cache.read(KEY, POLICY, decode), null);
+  });
+
+  it("invalidates an older reusable entry after an oversized successful response", async () => {
+    let now = 100_000;
+    const storage = new cacheLib.MemoryPublicCacheStorage();
+    const policy = { ...POLICY, maxBytes: 1_024 };
+    const variableDecode = (value) => value && Number.isSafeInteger(value.id)
+      ? { id: value.id, ...(value.note ? { note: value.note } : {}) }
+      : null;
+    const cache = new cacheLib.PublicDataCache({ storage, now: () => now });
+    await cache.refresh({
+      key: KEY,
+      policy,
+      decode: variableDecode,
+      fetcher: async () => ({ data: { id: 1 }, cacheControl: "public, max-age=60" }),
+    });
+
+    now += 100;
+    const oversized = await cache.refresh({
+      key: KEY,
+      policy,
+      decode: variableDecode,
+      fetcher: async () => ({
+        data: { id: 2, note: "x".repeat(2_000) },
+        cacheControl: "public, max-age=60",
+      }),
+    });
+    assert.equal(oversized.value.id, 2);
+    assert.equal(oversized.entry, null);
+    assert.equal(await cache.read(KEY, policy, variableDecode), null);
+    assert.equal(await storage.get(KEY), null);
+    const reloaded = new cacheLib.PublicDataCache({ storage, now: () => now });
+    assert.equal(await reloaded.read(KEY, policy, variableDecode), null);
+  });
+
+  it("clears older entries for non-cacheable and zero-retention success directives", async () => {
+    for (const cacheControl of ["no-store", "private", "public, max-age=0, must-revalidate"]) {
+      let now = 100_000;
+      const storage = new cacheLib.MemoryPublicCacheStorage();
+      const cache = new cacheLib.PublicDataCache({ storage, now: () => now });
+      const options = { key: KEY, policy: POLICY, decode };
+      await cache.refresh({ ...options, fetcher: async () => response(1) });
+      now += 1;
+      const result = await cache.refresh({
+        ...options,
+        fetcher: async () => response(2, cacheControl),
+      });
+      assert.equal(result.value.id, 2);
+      assert.equal(result.entry, null);
+      assert.equal(await cache.read(KEY, POLICY, decode), null);
+      assert.equal(await storage.get(KEY), null);
+    }
+  });
+
+  it("prevents a delayed non-cacheable delete from removing a newer post-invalidation result", async () => {
+    const now = 100_000;
+    const persistent = new cacheLib.MemoryPublicCacheStorage();
+    const deleteStarted = deferred();
+    const releaseDelete = deferred();
+    let deferDelete = false;
+    const storage = {
+      get: (key) => persistent.get(key),
+      putIfNewer: (entry, isCurrent) => persistent.putIfNewer(entry, isCurrent),
+      delete: async (key, savedAt, isCurrent) => {
+        if (deferDelete) {
+          deferDelete = false;
+          deleteStarted.resolve();
+          await releaseDelete.promise;
+        }
+        return persistent.delete(key, savedAt, isCurrent);
+      },
+      getAll: () => persistent.getAll(),
+    };
+    const cache = new cacheLib.PublicDataCache({ storage, now: () => now });
+    const options = { key: KEY, policy: POLICY, decode };
+    await cache.refresh({ ...options, fetcher: async () => response(1) });
+
+    deferDelete = true;
+    const older = cache.refresh({ ...options, fetcher: async () => response(2, "no-store") });
+    const olderRejected = assert.rejects(older, (error) => error?.code === "STALE_RESPONSE");
+    await deleteStarted.promise;
+    await cache.invalidate(KEY);
+    await cache.refresh({ ...options, fetcher: async () => response(3) });
+    releaseDelete.resolve();
+    await olderRejected;
+
+    assert.equal((await cache.read(KEY, POLICY, decode)).entry.value.id, 3);
+    assert.equal((await persistent.get(KEY)).value.id, 3);
+  });
+
+  it("does not let a read started during non-cacheable cleanup restore the old record", async () => {
+    const now = 100_000;
+    const persistent = new cacheLib.MemoryPublicCacheStorage();
+    const deleteStarted = deferred();
+    const releaseDelete = deferred();
+    const getStarted = deferred();
+    const releaseGet = deferred();
+    let deferDelete = false;
+    let deferGet = false;
+    const storage = {
+      get: async (key) => {
+        const raw = await persistent.get(key);
+        if (deferGet) {
+          deferGet = false;
+          getStarted.resolve();
+          await releaseGet.promise;
+        }
+        return raw;
+      },
+      putIfNewer: (entry, isCurrent) => persistent.putIfNewer(entry, isCurrent),
+      delete: async (key, savedAt, isCurrent) => {
+        if (deferDelete) {
+          deferDelete = false;
+          deleteStarted.resolve();
+          await releaseDelete.promise;
+        }
+        return persistent.delete(key, savedAt, isCurrent);
+      },
+      getAll: () => persistent.getAll(),
+    };
+    const cache = new cacheLib.PublicDataCache({ storage, now: () => now });
+    const options = { key: KEY, policy: POLICY, decode };
+    await cache.refresh({ ...options, fetcher: async () => response(1) });
+
+    deferDelete = true;
+    const networkOnly = cache.refresh({ ...options, fetcher: async () => response(2, "no-store") });
+    await deleteStarted.promise;
+    deferGet = true;
+    const pendingRead = cache.read(KEY, POLICY, decode);
+    await getStarted.promise;
+    releaseDelete.resolve();
+    assert.equal((await networkOnly).value.id, 2);
+    releaseGet.resolve();
+    assert.equal(await pendingRead, null);
+    assert.equal(await cache.read(KEY, POLICY, decode), null);
+    assert.equal(await persistent.get(KEY), null);
+  });
+
+  it("does not let a read started during invalidation cleanup restore the old record", async () => {
+    const now = 100_000;
+    const persistent = new cacheLib.MemoryPublicCacheStorage();
+    const deleteStarted = deferred();
+    const releaseDelete = deferred();
+    const getStarted = deferred();
+    const releaseGet = deferred();
+    let deferDelete = false;
+    let deferGet = false;
+    const storage = {
+      get: async (key) => {
+        const raw = await persistent.get(key);
+        if (deferGet) {
+          deferGet = false;
+          getStarted.resolve();
+          await releaseGet.promise;
+        }
+        return raw;
+      },
+      putIfNewer: (entry, isCurrent) => persistent.putIfNewer(entry, isCurrent),
+      delete: async (key, savedAt, isCurrent) => {
+        if (deferDelete) {
+          deferDelete = false;
+          deleteStarted.resolve();
+          await releaseDelete.promise;
+        }
+        return persistent.delete(key, savedAt, isCurrent);
+      },
+      getAll: () => persistent.getAll(),
+    };
+    const cache = new cacheLib.PublicDataCache({ storage, now: () => now });
+    await cache.refresh({ key: KEY, policy: POLICY, decode, fetcher: async () => response(1) });
+
+    deferDelete = true;
+    const invalidation = cache.invalidate(KEY);
+    await deleteStarted.promise;
+    deferGet = true;
+    const pendingRead = cache.read(KEY, POLICY, decode);
+    await getStarted.promise;
+    releaseDelete.resolve();
+    await invalidation;
+    releaseGet.resolve();
+    assert.equal(await pendingRead, null);
+    assert.equal(await cache.read(KEY, POLICY, decode), null);
+    assert.equal(await persistent.get(KEY), null);
+  });
+
+  it("prevents an older invalidation delete from removing a newer result", async () => {
+    const now = 100_000;
+    const persistent = new cacheLib.MemoryPublicCacheStorage();
+    const deleteStarted = deferred();
+    const releaseDelete = deferred();
+    let deferDelete = false;
+    const storage = {
+      get: (key) => persistent.get(key),
+      putIfNewer: (entry, isCurrent) => persistent.putIfNewer(entry, isCurrent),
+      delete: async (key, savedAt, isCurrent) => {
+        if (deferDelete) {
+          deferDelete = false;
+          deleteStarted.resolve();
+          await releaseDelete.promise;
+        }
+        return persistent.delete(key, savedAt, isCurrent);
+      },
+      getAll: () => persistent.getAll(),
+    };
+    const cache = new cacheLib.PublicDataCache({ storage, now: () => now });
+    const options = { key: KEY, policy: POLICY, decode };
+    await cache.refresh({ ...options, fetcher: async () => response(1) });
+
+    const newerFetchStarted = deferred();
+    deferDelete = true;
+    const invalidation = cache.invalidate(KEY);
+    await deleteStarted.promise;
+    const newer = cache.refresh({
+      ...options,
+      fetcher: async () => {
+        newerFetchStarted.resolve();
+        return response(2);
+      },
+    });
+    await newerFetchStarted.promise;
+    releaseDelete.resolve();
+    await invalidation;
+    await newer;
+
+    assert.equal((await persistent.get(KEY)).value.id, 2);
+    assert.equal((await cache.read(KEY, POLICY, decode)).entry.value.id, 2);
+  });
+
+  it("prevents cleanup of an old snapshot from deleting a newer refresh", async () => {
+    let now = 100_000;
+    const persistent = new cacheLib.MemoryPublicCacheStorage();
+    const getAllStarted = deferred();
+    const releaseGetAll = deferred();
+    let deferGetAll = false;
+    const storage = {
+      get: (key) => persistent.get(key),
+      putIfNewer: (entry, isCurrent) => persistent.putIfNewer(entry, isCurrent),
+      delete: (key, savedAt, isCurrent) => persistent.delete(key, savedAt, isCurrent),
+      getAll: async () => {
+        const records = await persistent.getAll();
+        if (deferGetAll) {
+          deferGetAll = false;
+          getAllStarted.resolve();
+          await releaseGetAll.promise;
+        }
+        return records;
+      },
+    };
+    const cache = new cacheLib.PublicDataCache({ storage, now: () => now });
+    const options = { key: KEY, policy: POLICY, decode };
+    await cache.refresh({ ...options, fetcher: async () => response(1) });
+
+    now += POLICY.maxAgeMs + 1;
+    deferGetAll = true;
+    const cleaning = cache.cleanup([POLICY.schema]);
+    await getAllStarted.promise;
+    await cache.refresh({ ...options, fetcher: async () => response(2) });
+    releaseGetAll.resolve();
+    await cleaning;
+
+    assert.equal((await persistent.get(KEY)).value.id, 2);
+    assert.equal((await cache.read(KEY, POLICY, decode)).entry.value.id, 2);
   });
 
   it("deduplicates identical concurrent requests", async () => {
@@ -240,6 +569,50 @@ describe("public cache refresh safety and request coordination", () => {
     const current = await cache.read(KEY, POLICY, decode);
     assert.deepEqual(current.entry.value, { id: 2 });
     assert.equal(current.entry.savedAt, now);
+    assert.deepEqual((await storage.get(KEY)).value, { id: 2 });
+  });
+
+  it("blocks late stale writes after invalidation without deleting a same-time newer result", async () => {
+    for (const withNewer of [false, true]) {
+      const now = 100_000;
+      const persistent = new cacheLib.MemoryPublicCacheStorage();
+      const oldPutStarted = deferred();
+      const releaseOldPut = deferred();
+      let deferFirstPut = true;
+      const storage = {
+        get: (key) => persistent.get(key),
+        putIfNewer: async (entry, isCurrent) => {
+          if (deferFirstPut) {
+            deferFirstPut = false;
+            oldPutStarted.resolve();
+            await releaseOldPut.promise;
+          }
+          return persistent.putIfNewer(entry, isCurrent);
+        },
+        delete: (key, savedAt, isCurrent) => persistent.delete(key, savedAt, isCurrent),
+        getAll: () => persistent.getAll(),
+      };
+      const cache = new cacheLib.PublicDataCache({ storage, now: () => now });
+      const options = { key: KEY, policy: POLICY, decode };
+      const older = cache.refresh({ ...options, fetcher: async () => response(1) });
+      const olderRejected = assert.rejects(older, (error) => error?.code === "STALE_RESPONSE");
+      await oldPutStarted.promise;
+      await cache.invalidate(KEY);
+
+      if (withNewer) {
+        await cache.refresh({ ...options, fetcher: async () => response(2) });
+      }
+      releaseOldPut.resolve();
+      await olderRejected;
+
+      if (withNewer) {
+        assert.equal((await cache.read(KEY, POLICY, decode)).entry.value.id, 2);
+        assert.equal((await persistent.get(KEY)).value.id, 2);
+      } else {
+        assert.equal(await cache.read(KEY, POLICY, decode), null);
+        assert.equal(await persistent.get(KEY), null);
+      }
+    }
   });
 
   it("measures one avoided fetch across two fresh app-load cycles", async () => {
@@ -269,6 +642,46 @@ describe("public cache refresh safety and request coordination", () => {
     await load(new cacheLib.PublicDataCache({ storage, now: () => now }));
     assert.equal(fetches, 1, "two cached loads need one fetch; two uncached loads need two");
     assert.equal((2 - fetches) / 2, 0.5);
+  });
+});
+
+describe("provider request sequencing", () => {
+  it("keeps forced network and environment refreshes current across cache-only checks", () => {
+    const sequencer = new requestSequencing.MetadataRequestSequencer();
+    const manualCacheCheck = sequencer.beginCacheCheck();
+    const forcedNetwork = sequencer.beginNetworkRefresh();
+    const environment = sequencer.beginEnvironmentRefresh();
+
+    // A later automatic fresh/offline check returns without beginning a network
+    // refresh. It supersedes only the earlier cache-check UI state.
+    const automaticCacheCheck = sequencer.beginCacheCheck();
+    assert.equal(sequencer.isCacheCheckCurrent(manualCacheCheck), false);
+    assert.equal(sequencer.isCacheCheckCurrent(automaticCacheCheck), true);
+    assert.equal(sequencer.isNetworkRefreshCurrent(forcedNetwork), true);
+    assert.equal(sequencer.isEnvironmentRefreshCurrent(environment), true);
+
+    const apply = requestSequencing.shouldApplyMetadataNetworkResult;
+    assert.equal(apply({ requestCurrent: true, resultSavedAt: 200, visibleSavedAt: 100 }), true);
+    assert.equal(apply({ requestCurrent: true, resultSavedAt: 200, visibleSavedAt: 200 }), true);
+    assert.equal(apply({ requestCurrent: true, resultSavedAt: 100, visibleSavedAt: 200 }), false);
+    assert.equal(apply({ requestCurrent: false, resultSavedAt: 200, visibleSavedAt: 100 }), false);
+
+    const nextNetwork = sequencer.beginNetworkRefresh();
+    assert.equal(sequencer.isNetworkRefreshCurrent(forcedNetwork), false);
+    assert.equal(sequencer.isNetworkRefreshCurrent(nextNetwork), true);
+    sequencer.invalidate();
+    assert.equal(sequencer.isCacheCheckCurrent(automaticCacheCheck), false);
+    assert.equal(sequencer.isNetworkRefreshCurrent(nextNetwork), false);
+    assert.equal(sequencer.isEnvironmentRefreshCurrent(environment), false);
+
+    const store = source("apps/web/src/lib/store.tsx");
+    assert.ok(!store.includes("metaReqRef"));
+    assert.ok(store.includes("requestCurrent: isNetworkCurrent()"));
+    assert.ok(store.includes("visibleSavedAt: marketsUpdatedAtRef.current"));
+    const freshReturn = store.indexOf('if (decision === "use-fresh") return;');
+    const networkBegin = store.indexOf("networkRequest = sequencer.beginNetworkRefresh()");
+    assert.ok(freshReturn >= 0);
+    assert.ok(networkBegin > freshReturn);
   });
 });
 
@@ -339,6 +752,7 @@ describe("public cache retention, offline policy, and UI provenance", () => {
     assert.ok(fresh.includes("IndexedDB cache"));
     assert.ok(fresh.includes("Saved 1970-01-01T00:01:40.000Z"));
     assert.ok(fresh.includes("Not a live price or order book"));
+    assert.ok(fresh.includes("hide-xs"), "fresh status may remain compact on small screens");
 
     const stale = renderToStaticMarkup(React.createElement(PublicCacheStatus, {
       ...base,
@@ -347,6 +761,7 @@ describe("public cache retention, offline policy, and UI provenance", () => {
     }));
     assert.ok(stale.includes("Stale metadata"));
     assert.ok(stale.includes("refreshing"));
+    assert.ok(!stale.includes("hide-xs"), "stale status must remain visible on small screens");
 
     const failed = renderToStaticMarkup(React.createElement(PublicCacheStatus, {
       ...base,
@@ -355,5 +770,6 @@ describe("public cache retention, offline policy, and UI provenance", () => {
     }));
     assert.ok(failed.includes("Retry"));
     assert.ok(failed.includes("last valid cached copy is retained"));
+    assert.ok(!failed.includes("hide-xs"), "failure status must remain visible on small screens");
   });
 });

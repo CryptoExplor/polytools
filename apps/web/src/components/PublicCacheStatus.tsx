@@ -37,7 +37,7 @@ export function PublicCacheStatus({
   return (
     <span className="row-flex" style={{ gap: 6 }}>
       <span
-        className={`pill ${stale || error ? "warn" : "up"} hide-xs`}
+        className={`pill ${stale || error ? "warn" : "up"}${stale || error ? "" : " hide-xs"}`}
         title={`Public market metadata from the ${storeLabel} cache · Saved ${new Date(savedAt).toISOString()} · ${stateLabel} · Not a live price or order book`}
       >
         <span className="dot" />

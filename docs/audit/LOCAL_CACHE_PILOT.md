@@ -1,8 +1,10 @@
 # Local public-data cache pilot
 
 **Review date:** 2026-10-25
-**Status:** implemented locally, uncommitted; public `/api/markets` pilot only
+**Status:** implemented on the review branch; public `/api/markets` pilot only
 **Baseline:** current mixed working tree on `arena/2679a49c-polytools`; this document does not attribute unrelated pre-existing changes to the pilot.
+
+**2026-10-25 race-hardening follow-up:** see [PUBLIC_CACHE_RACE_FIXES.md](./PUBLIC_CACHE_RACE_FIXES.md) for the clean `22ebfed` pre-edit inventory, ordering/retention fixes, fresh exact-tree repository results, and remaining browser/release gates. The original pilot test totals below are historical and are not substituted for the follow-up's fresh 21/21 focused and 202/202 full-suite results.
 
 ## 1. Scope and decision
 
@@ -74,6 +76,7 @@ Only the first row is implemented. Later rows are proposals, not authorization t
 - `Cache-Control: no-store` and `private` responses are returned to the UI but not retained; previous cached copies are removed. `no-cache`/`max-age=0` require revalidation. `must-revalidate` removes stale offline reuse. Missing freshness headers produce a stale-while-revalidate copy rather than a fresh claim.
 - A fresh hit skips the fetch. A stale hit renders first and revalidates in the background. Explicit refresh forces revalidation. Only validated success replaces UI/cache state; errors retain the last valid copy.
 - Identical concurrent refreshes share one promise. Invalidated older responses cannot overwrite newer results. Persistent writes with older save times do not replace newer records.
+- The hardening follow-up adds per-key mutation revisions around asynchronous reads, writes, deletes, invalidation, and snapshot cleanup. A post-invalidation commit waits for the earlier persistent delete; equal timestamps otherwise retain the first valid persistent writer. See the follow-up report for the exact ordering rules and synthetic-only evidence boundary.
 - The app checks freshness every 60s while visible/online, on return to visibility, and on online/offline events. Offline intervals do no work. There is no service worker, periodic background sync, or claim of syncing while the browser is closed.
 - The Layout and Hub identify cached/stale metadata, save age, refresh state, and refresh failure. Cached metadata is not labeled “Live MCP.” No cached prices or order books were introduced.
 
@@ -86,6 +89,10 @@ Only the first row is implemented. Later rows are proposals, not authorization t
 - The pilot adds a visible/online stale revalidation that did not previously exist for market metadata. Long-lived sessions can therefore make more metadata requests than the old mount-only behavior even while fresh reloads avoid requests.
 
 ## 6. Verification and measured effect
+
+Current follow-up evidence is maintained in [PUBLIC_CACHE_RACE_FIXES.md](./PUBLIC_CACHE_RACE_FIXES.md); its 11/11 dependency-free harness result is not a browser or full-repository test result.
+
+### Original pilot results (historical)
 
 Synthetic tests in `tests/public-cache.test.mjs` cover cache hit/miss, fresh/stale/expired records, invalid and outdated schemas, the real public market wire-sample shape, refresh failure preservation, duplicate prevention, out-of-order invalidation, size/entry cleanup, Cache-Control, offline/reconnect decisions, and SSR cached/stale UI labels.
 

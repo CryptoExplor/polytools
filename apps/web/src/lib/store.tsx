@@ -30,6 +30,10 @@ import {
   type PublicSpotMarkets,
 } from "./marketMetadataCache";
 import { publicCacheLoadDecision, type PublicCacheHit } from "./publicCache";
+import {
+  MetadataRequestSequencer,
+  shouldApplyMetadataNetworkResult,
+} from "./metadataRequestSequencer";
 
 export type ThemeMode = "dark" | "light";
 export type ConnectionStatus = "connecting" | "connected" | "degraded";
@@ -131,18 +135,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => subscribeWireSampleUsage(() => setWireSampleUsed(true)), []);
 
-  const metaReqRef = useRef(0);
+  const requestSequencer = useRef(new MetadataRequestSequencer());
   const marketsUpdatedAtRef = useRef<number | null>(null);
 
   const fetchMeta = useCallback((options: { force?: boolean; includeEnv?: boolean } = {}) => {
-    const reqId = ++metaReqRef.current;
+    const sequencer = requestSequencer.current;
+    const cacheRequest = sequencer.beginCacheCheck();
     const force = options.force === true;
     const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-    const isCurrent = () => reqId === metaReqRef.current;
+    const isCurrent = () => sequencer.isCacheCheckCurrent(cacheRequest);
+    let networkRequest: number | null = null;
+    const isNetworkCurrent = () => networkRequest !== null &&
+      sequencer.isNetworkRefreshCurrent(networkRequest);
 
     if (options.includeEnv && !offline) {
+      const environmentRequest = sequencer.beginEnvironmentRefresh();
       void api.env().then((environment) => {
-        if (isCurrent() && environment) setEnvInfo(environment);
+        if (sequencer.isEnvironmentRefreshCurrent(environmentRequest) && environment) {
+          setEnvInfo(environment);
+        }
       });
     }
 
@@ -192,37 +203,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         if (marketsUpdatedAtRef.current === null) setMarketsLoading(true);
         setMarketsRefreshing(true);
+        // Only actual network refreshes supersede one another. A later fresh
+        // cache/offline check returns above without invalidating this request.
+        networkRequest = sequencer.beginNetworkRefresh();
         const result = await marketMetadataCache.refresh({
           key: MARKET_METADATA_CACHE_KEY,
           policy: MARKET_METADATA_POLICY,
           decode: decodePublicSpotMarkets,
           fetcher: () => api.marketsForCache(),
         });
-        if (!isCurrent()) return;
+        if (!shouldApplyMetadataNetworkResult({
+          requestCurrent: isNetworkCurrent(),
+          resultSavedAt: result.savedAt,
+          visibleSavedAt: marketsUpdatedAtRef.current,
+        })) return;
         marketsUpdatedAtRef.current = result.savedAt;
         setMarkets(result.value);
         setMarketsUpdatedAt(result.savedAt);
         setMarketsCacheStatus(null);
         setMarketsError(null);
       } catch (error) {
-        if (!isCurrent()) return;
+        // A later cache-only success may supersede an error, but not a successful
+        // network value. Another network request owns its own error/loading state.
+        const ownsError = networkRequest === null
+          ? isCurrent()
+          : isCurrent() && isNetworkCurrent();
+        if (!ownsError) return;
         setMarketsError(error instanceof Error ? error.message : "Failed to load market metadata");
       } finally {
-        if (isCurrent()) {
+        const ownsLoadingState = networkRequest === null ? isCurrent() : isNetworkCurrent();
+        if (ownsLoadingState) {
           setMarketsLoading(false);
           setMarketsRefreshing(false);
         }
       }
     })();
-
-    return () => {
-      if (isCurrent()) metaReqRef.current += 1;
-    };
   }, []);
 
   useEffect(() => {
     void marketMetadataCache.cleanup([MARKET_METADATA_SCHEMA]).catch(() => undefined);
-    return fetchMeta({ includeEnv: true });
+    fetchMeta({ includeEnv: true });
+    return () => requestSequencer.current.invalidate();
   }, [fetchMeta]);
 
   useEffect(() => {

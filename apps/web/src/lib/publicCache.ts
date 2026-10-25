@@ -57,8 +57,9 @@ export interface PublicNetworkResult<T> {
 
 export interface PublicCacheStorage {
   get(key: string): Promise<unknown>;
-  putIfNewer(entry: PublicCacheEntry): Promise<void>;
-  delete(key: string, savedAt?: number): Promise<void>;
+  /** The guard is checked again after asynchronous storage work, before writing. */
+  putIfNewer(entry: PublicCacheEntry, isCurrent?: () => boolean): Promise<void>;
+  delete(key: string, savedAt?: number, isCurrent?: () => boolean): Promise<void>;
   getAll(): Promise<unknown[]>;
 }
 
@@ -142,13 +143,15 @@ export class MemoryPublicCacheStorage implements PublicCacheStorage {
     return entry ? clone(entry) : null;
   }
 
-  async putIfNewer(entry: PublicCacheEntry): Promise<void> {
+  async putIfNewer(entry: PublicCacheEntry, isCurrent?: () => boolean): Promise<void> {
+    if (isCurrent && !isCurrent()) return;
     const existing = this.entries.get(entry.key);
     if (existing && existing.savedAt >= entry.savedAt) return;
     this.entries.set(entry.key, clone(entry));
   }
 
-  async delete(key: string, savedAt?: number): Promise<void> {
+  async delete(key: string, savedAt?: number, isCurrent?: () => boolean): Promise<void> {
+    if (isCurrent && !isCurrent()) return;
     const existing = this.entries.get(key);
     if (savedAt !== undefined && existing?.savedAt !== savedAt) return;
     this.entries.delete(key);
@@ -216,7 +219,8 @@ export class IndexedDbPublicCacheStorage implements PublicCacheStorage {
     )) ?? null;
   }
 
-  async putIfNewer(entry: PublicCacheEntry): Promise<void> {
+  async putIfNewer(entry: PublicCacheEntry, isCurrent?: () => boolean): Promise<void> {
+    if (isCurrent && !isCurrent()) return;
     const database = await this.open();
     const transaction = database.transaction(ENTRY_STORE, "readwrite");
     const done = transactionResult(transaction);
@@ -224,6 +228,13 @@ export class IndexedDbPublicCacheStorage implements PublicCacheStorage {
     const existing = await requestResult(
       store.get(entry.key) as IDBRequest<PublicCacheEntry | undefined>,
     );
+    // Invalidation may have happened while the read was pending. Checking the
+    // guard and issuing the write in the same synchronous turn prevents a late
+    // stale write; an invalidation delete started afterwards is ordered after it.
+    if (isCurrent && !isCurrent()) {
+      await done;
+      return;
+    }
     // Equal timestamps retain the first valid writer instead of replacing it
     // with a potentially older response from another tab.
     if (!existing || !validTime(existing.savedAt) || existing.savedAt < entry.savedAt) {
@@ -232,8 +243,10 @@ export class IndexedDbPublicCacheStorage implements PublicCacheStorage {
     await done;
   }
 
-  async delete(key: string, savedAt?: number): Promise<void> {
+  async delete(key: string, savedAt?: number, isCurrent?: () => boolean): Promise<void> {
+    if (isCurrent && !isCurrent()) return;
     const database = await this.open();
+    if (isCurrent && !isCurrent()) return;
     const transaction = database.transaction(ENTRY_STORE, "readwrite");
     const done = transactionResult(transaction);
     const store = transaction.objectStore(ENTRY_STORE);
@@ -243,6 +256,10 @@ export class IndexedDbPublicCacheStorage implements PublicCacheStorage {
       const existing = await requestResult(
         store.get(key) as IDBRequest<PublicCacheEntry | undefined>,
       );
+      if (isCurrent && !isCurrent()) {
+        await done;
+        return;
+      }
       if (existing?.savedAt === savedAt) store.delete(key);
     }
     await done;
@@ -261,6 +278,8 @@ export class PublicDataCache {
   private readonly memory = new Map<string, PublicCacheEntry>();
   private readonly flights = new Map<string, Promise<PublicNetworkResult<unknown>>>();
   private readonly generations = new Map<string, number>();
+  private readonly revisions = new Map<string, number>();
+  private readonly invalidations = new Map<string, Promise<void>>();
   private readonly storage: PublicCacheStorage | null;
   private readonly now: () => number;
   private readonly maxEntries: number;
@@ -279,10 +298,38 @@ export class PublicDataCache {
     return this.generations.get(key) ?? 0;
   }
 
-  private assertCurrent(key: string, generation: number): void {
-    if (this.generation(key) !== generation) {
+  private revision(key: string): number {
+    return this.revisions.get(key) ?? 0;
+  }
+
+  private isCurrent(key: string, generation: number, revision?: number): boolean {
+    return this.generation(key) === generation &&
+      (revision === undefined || this.revision(key) === revision);
+  }
+
+  private assertCurrent(key: string, generation: number, revision?: number): void {
+    if (!this.isCurrent(key, generation, revision)) {
       throw new PublicCacheError("STALE_RESPONSE", "A newer public-cache operation superseded this response.");
     }
+  }
+
+  private beginMutation(key: string): number {
+    const revision = this.revision(key) + 1;
+    this.revisions.set(key, revision);
+    return revision;
+  }
+
+  private finishMutation(
+    key: string,
+    generation: number,
+    revision: number,
+    clearMemory: boolean,
+  ): void {
+    if (!this.isCurrent(key, generation, revision)) return;
+    // Close the storage await window: reads that captured old persistent data
+    // during the write/delete cannot publish it after the mutation completes.
+    this.revisions.set(key, revision + 1);
+    if (clearMemory) this.memory.delete(key);
   }
 
   private decodeEntry<T>(
@@ -338,9 +385,13 @@ export class PublicDataCache {
     }
   }
 
-  private async deletePersistent(key: string, savedAt?: number): Promise<void> {
+  private async deletePersistent(
+    key: string,
+    savedAt?: number,
+    isCurrent?: () => boolean,
+  ): Promise<void> {
     try {
-      await this.storage?.delete(key, savedAt);
+      await this.storage?.delete(key, savedAt, isCurrent);
     } catch {
       // Storage failure must not block the network or in-memory fallback.
     }
@@ -356,24 +407,69 @@ export class PublicDataCache {
     if (memory) {
       const entry = this.decodeEntry(memory, key, policy, decode, now);
       if (entry) return { entry, origin: "memory", fresh: now < entry.freshUntil };
-      this.memory.delete(key);
+      if (this.memory.get(key) === memory) this.memory.delete(key);
       // A newer valid persistent copy may have been written by another tab.
     }
 
+    const readGeneration = this.generation(key);
+    const readRevision = this.revision(key);
     let raw: unknown = null;
     try {
       raw = await this.storage?.get(key);
     } catch {
       // IndexedDB can be denied or evicted; memory/network remain available.
     }
+    // A read that started before invalidation is no longer eligible to return
+    // or populate anything. The check and later memory write have no await
+    // between them, so invalidation cannot interleave at that final seam.
+    if (this.generation(key) !== readGeneration) return null;
     if (raw === null || raw === undefined) return null;
+
     // IndexedDB latency must not make an already-expired record look reusable.
     now = this.now();
     const entry = this.decodeEntry(raw, key, policy, decode, now);
-    if (!entry) {
-      await this.deletePersistent(key);
+    if (this.generation(key) !== readGeneration) return null;
+    if (this.revision(key) !== readRevision) {
+      // A refresh/invalidation committed while this read was awaiting storage.
+      // Only the current memory value may be returned; the old persistent
+      // record must not be deleted or republished by this superseded read.
+      const currentMemory = this.memory.get(key);
+      if (currentMemory) {
+        const current = this.decodeEntry(currentMemory, key, policy, decode, now);
+        if (this.generation(key) !== readGeneration) return null;
+        if (current) {
+          return { entry: current, origin: "memory", fresh: now < current.freshUntil };
+        }
+        if (this.memory.get(key) === currentMemory) this.memory.delete(key);
+      }
       return null;
     }
+    if (!entry) {
+      const savedAt = raw && typeof raw === "object" && !Array.isArray(raw) &&
+        validTime((raw as Partial<PublicCacheEntry>).savedAt)
+        ? (raw as PublicCacheEntry).savedAt
+        : undefined;
+      await this.deletePersistent(
+        key,
+        savedAt,
+        () => this.isCurrent(key, readGeneration, readRevision),
+      );
+      return null;
+    }
+
+    const currentMemory = this.memory.get(key);
+    if (currentMemory) {
+      const current = this.decodeEntry(currentMemory, key, policy, decode, now);
+      if (this.generation(key) !== readGeneration) return null;
+      if (current && current.savedAt >= entry.savedAt) {
+        // A newer in-memory refresh wins. Equal timestamps retain the current
+        // first writer, matching putIfNewer; invalid/missing times never decode.
+        return { entry: current, origin: "memory", fresh: now < current.freshUntil };
+      }
+      if (!current && this.memory.get(key) === currentMemory) this.memory.delete(key);
+    }
+
+    if (this.generation(key) !== readGeneration) return null;
     this.memory.set(key, clone(entry));
     this.pruneMemory();
     return { entry, origin: "persistent", fresh: now < entry.freshUntil };
@@ -407,6 +503,11 @@ export class PublicDataCache {
     generation: number,
   ): Promise<PublicNetworkResult<T>> {
     const response = await options.fetcher();
+    // A post-invalidation writer may fetch concurrently, but its commit waits
+    // for the older delete. Otherwise an equal savedAt would retain the old
+    // persistent first writer even though invalidation had superseded it.
+    const invalidation = this.invalidations.get(options.key);
+    if (invalidation) await invalidation;
     this.assertCurrent(options.key, generation);
     const value = options.decode(response.data);
     if (value === null) {
@@ -415,10 +516,20 @@ export class PublicDataCache {
 
     const savedAt = this.now();
     const policy = resolvePublicCachePolicy(options.policy, response.cacheControl);
-    if (!policy.persist) {
-      this.memory.delete(options.key);
-      await this.deletePersistent(options.key);
+    if (!policy.persist || policy.maxAgeMs <= 0) {
+      // A valid network-only response replaces the visible value, not an older
+      // reusable cache entry. This includes no-store/private and zero-retention
+      // must-revalidate responses. Errors still preserve the last valid copy.
       this.assertCurrent(options.key, generation);
+      const revision = this.beginMutation(options.key);
+      this.memory.delete(options.key);
+      await this.deletePersistent(
+        options.key,
+        undefined,
+        () => this.isCurrent(options.key, generation, revision),
+      );
+      this.assertCurrent(options.key, generation, revision);
+      this.finishMutation(options.key, generation, revision, true);
       return { value, savedAt, entry: null };
     }
 
@@ -432,37 +543,76 @@ export class PublicDataCache {
       value,
     };
     if (byteSize(entry) > options.policy.maxBytes) {
+      // Oversized success is network-only. Retaining the previous fresh entry
+      // would let the next load silently roll back to an older catalog.
+      this.assertCurrent(options.key, generation);
+      const revision = this.beginMutation(options.key);
+      this.memory.delete(options.key);
+      await this.deletePersistent(
+        options.key,
+        undefined,
+        () => this.isCurrent(options.key, generation, revision),
+      );
+      this.assertCurrent(options.key, generation, revision);
+      this.finishMutation(options.key, generation, revision, true);
       return { value, savedAt, entry: null };
     }
 
     this.assertCurrent(options.key, generation);
-    this.memory.set(options.key, clone(entry));
+    const revision = this.beginMutation(options.key);
+    const memoryEntry = clone(entry);
+    this.memory.set(options.key, memoryEntry);
     this.pruneMemory();
     try {
-      await this.storage?.putIfNewer(clone(entry));
+      await this.storage?.putIfNewer(
+        clone(entry),
+        () => this.isCurrent(options.key, generation, revision),
+      );
     } catch {
       // A valid in-memory copy is still useful when durable storage fails.
     }
 
-    if (this.generation(options.key) !== generation) {
-      if (this.memory.get(options.key)?.savedAt === savedAt) this.memory.delete(options.key);
-      await this.deletePersistent(options.key, savedAt);
+    if (!this.isCurrent(options.key, generation, revision)) {
+      // Reference identity, rather than savedAt, avoids deleting a newer entry
+      // written in the same millisecond. Invalidation owns persistent deletion;
+      // the guarded put above prevents this stale operation from writing late.
+      if (this.memory.get(options.key) === memoryEntry) this.memory.delete(options.key);
       throw new PublicCacheError("STALE_RESPONSE", "A newer public-cache operation superseded this response.");
     }
+    this.finishMutation(options.key, generation, revision, false);
     return { value, savedAt, entry };
   }
 
   /** Invalidate a key and prevent an older in-flight response from winning. */
-  async invalidate(key: string): Promise<void> {
-    this.generations.set(key, this.generation(key) + 1);
+  invalidate(key: string): Promise<void> {
+    const generation = this.generation(key) + 1;
+    this.generations.set(key, generation);
+    const revision = this.beginMutation(key);
     this.memory.delete(key);
     this.flights.delete(key);
-    await this.deletePersistent(key);
+    const operation = (async () => {
+      await this.deletePersistent(
+        key,
+        undefined,
+        () => this.isCurrent(key, generation, revision),
+      );
+      this.finishMutation(key, generation, revision, true);
+    })();
+    const tracked = operation.finally(() => {
+      if (this.invalidations.get(key) === tracked) this.invalidations.delete(key);
+    });
+    this.invalidations.set(key, tracked);
+    return tracked;
   }
 
   /** Remove expired/outdated records and bound retained entries by save time. */
   async cleanup(allowedSchemas: readonly string[]): Promise<void> {
     const now = this.now();
+    const generations = new Map(this.generations);
+    const revisions = new Map(this.revisions);
+    const unchanged = (key: string): boolean =>
+      this.generation(key) === (generations.get(key) ?? 0) &&
+      this.revision(key) === (revisions.get(key) ?? 0);
     const schemas = new Set(allowedSchemas);
     const reusable = (raw: unknown): raw is PublicCacheEntry => {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
@@ -496,9 +646,14 @@ export class PublicDataCache {
         const key = raw && typeof raw === "object" && typeof (raw as { key?: unknown }).key === "string"
           ? (raw as { key: string }).key
           : null;
-        if (key) await this.deletePersistent(key);
+        if (key) {
+          const savedAt = validTime((raw as Partial<PublicCacheEntry>).savedAt)
+            ? (raw as PublicCacheEntry).savedAt
+            : undefined;
+          await this.deletePersistent(key, savedAt, () => unchanged(key));
+        }
       } else if (!retain.has(raw.key)) {
-        await this.deletePersistent(raw.key);
+        await this.deletePersistent(raw.key, raw.savedAt, () => unchanged(raw.key));
       }
     }
   }
