@@ -350,7 +350,15 @@ Two things the pass must also look at, found while implementing item 8 and item 
 1. At ≤960 px the drawer is `position: fixed` with `height: 100vh` **and** `top: 0; bottom: 0`. On mobile browsers with a collapsing toolbar, `100vh` can exceed the visible viewport, so the last nav item may sit under browser chrome. Fixing it means choosing between `height: auto` and `100dvh`, which needs a real device/browser check.
 2. The drawer does not lock background scrolling the way `OrderDetailsDrawer` does. Harmless at 390 px, but a scroll behind the backdrop is possible.
 
-Still open from P0/P1 after this batch: P0-4 input validation and tick-size handling, P1-1 navigation restructuring, P1-6 account notice consolidation, P1-7 shared dialog focus management (`ConfirmDialog`, `GlossaryDrawer`), P1-8 unsaved-account-work warning, P1-11 glossary discoverability, P1-13 contrast tokens.
+### Batch 2 — P0-4 second half (done, see `BATCH2_SDK_ORDER_VALIDATION.md`)
+
+The SDK generator now validates the order draft against the selected pair before rendering a snippet: plain-decimal parsing, `stepSize`/`tickSize` precision and multiples, `minQtyBase`, and `minNotionalQuote`. An invalid draft produces a stated reason, no snippet, and a disabled copy control; an unknown pair produces nothing rather than a guess. The live-price shortcut snaps to the tick grid instead of hard-coding two decimals.
+
+- Automated: `tests/sdk-order-constraints.test.mjs` (19 assertions), full suite 241/241, all build and budget checks pass.
+- **Not browser-tested** — the five checks are listed in that document.
+- Bundle: initial JS 599,795 B / 178,583 B gzip against a 185,000 B ceiling, so ~6.4 kB of gzip headroom remains. Code splitting (P2) should be reconsidered before the next module-scale addition.
+
+Still open from P0/P1 after these batches: P1-1 navigation restructuring, P1-6 account notice consolidation, P1-7 shared dialog focus management (`ConfirmDialog`, `GlossaryDrawer`), P1-8 unsaved-account-work warning, P1-11 glossary discoverability, P1-13 contrast tokens.
 
 ---
 

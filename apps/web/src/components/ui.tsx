@@ -362,11 +362,13 @@ export function CopyButton({
   label = "Copy",
   copiedLabel = "Copied",
   size = "sm",
+  disabled = false,
 }: {
   text: string;
   label?: string;
   copiedLabel?: string;
   size?: "sm" | "md";
+  disabled?: boolean;
 }) {
   const [status, setStatus] = useState<CopyStatus>("idle");
 
@@ -386,8 +388,9 @@ export function CopyButton({
       type="button"
       className={`btn ${size === "sm" ? "sm" : ""} ${status === "copied" ? "primary" : "ghost"}`}
       onClick={(e) => void handleCopy(e)}
-      aria-label={presentation.accessibleLabel}
-      title={presentation.title}
+      disabled={disabled}
+      aria-label={disabled ? `${label}: nothing to copy yet` : presentation.accessibleLabel}
+      title={disabled ? `${label}: nothing to copy yet` : presentation.title}
     >
       {status === "copied" ? <IconCheck size={12} /> : status === "failed" ? <IconAlert size={12} /> : <IconCopy size={12} />}
       <span aria-live="polite">{presentation.visibleLabel}</span>

@@ -19,6 +19,7 @@ import {
 import { api } from "../lib/api";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
+import { roundToTick, validateOrderDraft } from "../lib/orderConstraints";
 import {
   Card,
   CopyButton,
@@ -97,13 +98,22 @@ export default function SdkGuide() {
   }, [httpMethod, reqBody]);
 
   const syncLivePriceToOrder = () => {
-    if (isFinite(livePx) && livePx > 0) {
-      // Default to ~2% below live price for a safe post-only buy limit order
-      const safePx =
-        orderSide === "buy" ? (livePx * 0.98).toFixed(2) : (livePx * 1.02).toFixed(2);
-      setOrderPrice(safePx);
-    }
+    if (!isFinite(livePx) || livePx <= 0) return;
+    // Post-only requires a resting price: sit ~2% away from the live price and
+    // then snap to a legal tick so the snippet never shows sub-tick decimals.
+    const target = orderSide === "buy" ? livePx * 0.98 : livePx * 1.02;
+    const snapped = roundToTick(target, pair?.tickSize ?? "0.01", orderSide === "buy" ? "down" : "up");
+    if (snapped) setOrderPrice(snapped);
   };
+
+  // The trade snippet is generated code the user will run against testnet, so
+  // it is only offered once qty and price are provably legal for this pair.
+  const orderDraft = useMemo(
+    () => validateOrderDraft({ qty: orderQty, price: orderPrice, pair, base, quote }),
+    [orderQty, orderPrice, pair, base, quote],
+  );
+  const orderBlocked = step === "trade" && !orderDraft.ok;
+  const orderIssueText = orderDraft.issues.map((issue) => issue.message);
 
   const canonicalPreview = useMemo(() => {
     if (bodyHashError) {
@@ -683,7 +693,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Rust
               </button>
             </div>
-            <CopyButton text={generatedCode} label="Copy Snippet" size="md" />
+            <CopyButton
+              text={orderBlocked ? "" : generatedCode}
+              label={orderBlocked ? "Fix inputs to copy" : "Copy Snippet"}
+              size="md"
+              disabled={orderBlocked}
+            />
           </div>
         }
         footer={
@@ -774,6 +789,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 value={orderQty}
                 onChange={(e) => setOrderQty(e.target.value)}
                 aria-label="Order quantity"
+                aria-invalid={orderDraft.issues.some((i) => i.field === "qty") || undefined}
+                aria-describedby={step === "trade" && orderBlocked ? "sdk-order-issues" : undefined}
+                inputMode="decimal"
                 placeholder="Qty"
               />
               <span className="faint mono">{base} @</span>
@@ -784,6 +802,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 value={orderPrice}
                 onChange={(e) => setOrderPrice(e.target.value)}
                 aria-label="Order limit price"
+                aria-invalid={orderDraft.issues.some((i) => i.field === "price") || undefined}
+                aria-describedby={step === "trade" && orderBlocked ? "sdk-order-issues" : undefined}
+                inputMode="decimal"
                 placeholder="Price"
               />
               <span className="faint mono">{quote}</span>
@@ -809,22 +830,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           )}
         </div>
 
-        <pre
-          className="mono"
-          style={{
-            margin: 0,
-            padding: 16,
-            background: "var(--bg-shell)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-sm)",
-            overflowX: "auto",
-            fontSize: 12.5,
-            lineHeight: 1.58,
-            color: "var(--text-primary)",
-          }}
-        >
-          {generatedCode}
-        </pre>
+        {orderBlocked ? (
+          <div className="notice warn" role="alert" id="sdk-order-issues" aria-live="polite">
+            <div>
+              <strong>No snippet until this order is valid.</strong> A snippet is runnable code
+              against testnet, so it is withheld while the order breaks this pair&apos;s rules
+              ({symbol}). Nothing has been sent anywhere.
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {orderIssueText.map((message) => (
+                  <li key={message}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <pre
+            className="mono"
+            style={{
+              margin: 0,
+              padding: 16,
+              background: "var(--bg-shell)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: "var(--radius-sm)",
+              overflowX: "auto",
+              fontSize: 12.5,
+              lineHeight: 1.58,
+              color: "var(--text-primary)",
+            }}
+          >
+            {generatedCode}
+          </pre>
+        )}
       </Card>
 
       {/* Interactive Ed25519 5-Field Canonical String & Query Normalizer */}

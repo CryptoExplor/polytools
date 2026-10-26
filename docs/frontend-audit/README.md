@@ -27,6 +27,7 @@ The goal is the one the owner asked for: make existing functionality easier to *
 | [FRONTEND_ROADMAP.md](./FRONTEND_ROADMAP.md) | P0–P3 plan with evidence, effort, risk, acceptance criteria, tests |
 | [REVIEW_BRIEF.md](./REVIEW_BRIEF.md) | Short independent-review brief for a second AI/human reviewer |
 | [BATCH1_IMPLEMENTATION.md](./BATCH1_IMPLEMENTATION.md) | What the approved batch 1 changed, what the automated checks prove, and the browser pass still required |
+| [BATCH2_SDK_ORDER_VALIDATION.md](./BATCH2_SDK_ORDER_VALIDATION.md) | Batch 2: order-draft validation and tick-size handling for the SDK snippets, plus the checks still owed to a browser |
 
 ## Why a new package instead of editing `docs/audit/`
 
