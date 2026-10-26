@@ -6,9 +6,10 @@
  * source/SSR tests pin the page contract: no sub-tick formatting, no snippet
  * and no copy action while the draft is invalid, and a stated reason.
  *
- * Not covered here — and only provable in a browser: that the notice is visible
- * without scrolling at 390 px, that the disabled copy button reads correctly to
- * a screen reader, and that a copied snippet matches the pair constraints.
+ * Not covered here — and only provable in a browser (checks 20-23 in
+ * docs/frontend-audit/REMAINING_WORK.md): that the notice is visible without
+ * scrolling at 390 px, that the disabled copy button reads correctly to a
+ * screen reader, and that a copied snippet matches the pair constraints.
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
