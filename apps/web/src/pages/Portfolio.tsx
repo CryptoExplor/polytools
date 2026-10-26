@@ -258,6 +258,9 @@ export default function Portfolio() {
       setSession(accountVault.getSessionInfo());
       if (event.type !== "UNLOCK") {
         setSignedOutput(null);
+        setPrivateKeyInput("");
+        setPassphrase("");
+        setConfirmPassphrase("");
         setUnlockPassphrase("");
         setUpdatePassphrase("");
       }
@@ -320,6 +323,13 @@ export default function Portfolio() {
     setConfirmPassphrase("");
     setPrivateKeyInput("");
   };
+
+  useEffect(() => {
+    if (section === "api") return;
+    setPrivateKeyInput("");
+    setPassphrase("");
+    setConfirmPassphrase("");
+  }, [section]);
 
   const createKey = () =>
     run(async () => {

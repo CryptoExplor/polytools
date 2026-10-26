@@ -8,6 +8,7 @@
 import { useMemo, useState } from "react";
 import { fmtNum } from "@poly/core";
 import { api } from "../lib/api";
+import { zipperCompareForRequest } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -98,6 +99,11 @@ export default function Zipper() {
     60_000,
     [asset, compareBy, chainFilter],
   );
+  const currentCmp = zipperCompareForRequest(cmp, asset, compareBy, chainFilter);
+  const comparisonIdentityError = cmp && !currentCmp
+    ? "Bridge comparison response did not match the selected asset or filters; it was not displayed."
+    : null;
+  const displayCmpError = comparisonIdentityError ?? cmpError;
 
   const cfgAssets = useMemo(() => cfg?.assets ?? [], [cfg]);
 
@@ -120,7 +126,7 @@ export default function Zipper() {
 
   // Preserve the backend/MCP route ranking order while computing explicit ranking rationale
   const rankedRoutes = useMemo(() => {
-    const rawRoutes = cmp?.routes ?? [];
+    const rawRoutes = currentCmp?.routes ?? [];
     if (!rawRoutes.length) return [];
 
     const cheapestFeeVal = Math.min(...rawRoutes.map((r) => Number(r.networkFee)));
@@ -171,7 +177,7 @@ export default function Zipper() {
         estNetAfterFee,
       };
     });
-  }, [cmp, compareBy, chainById, estAmount]);
+  }, [currentCmp, compareBy, chainById, estAmount]);
 
   const filteredChains = useMemo(() => {
     const list = cfg?.chains ?? [];
@@ -228,33 +234,33 @@ export default function Zipper() {
           label="Cheapest Network Fee"
           trend="up"
           value={
-            cmp?.cheapestByNetworkFee
-              ? `${fmtNum(Number(cmp.cheapestByNetworkFee.networkFee))} ${asset}`
+            currentCmp?.cheapestByNetworkFee
+              ? `${fmtNum(Number(currentCmp.cheapestByNetworkFee.networkFee))} ${asset}`
               : "—"
           }
           sub={
-            cmp?.cheapestByNetworkFee
-              ? `via ${cmp.cheapestByNetworkFee.chain}`
+            currentCmp?.cheapestByNetworkFee
+              ? `via ${currentCmp.cheapestByNetworkFee.chain}`
               : "Select an asset"
           }
         />
         <MetricCell
           label="Lowest Deposit Minimum"
           value={
-            cmp?.cheapestByDepositMin
-              ? `${fmtNum(Number(cmp.cheapestByDepositMin.depositMinAmount))} ${asset}`
+            currentCmp?.cheapestByDepositMin
+              ? `${fmtNum(Number(currentCmp.cheapestByDepositMin.depositMinAmount))} ${asset}`
               : "—"
           }
           sub={
-            cmp?.cheapestByDepositMin
-              ? `via ${cmp.cheapestByDepositMin.chain}`
+            currentCmp?.cheapestByDepositMin
+              ? `via ${currentCmp.cheapestByDepositMin.chain}`
               : "Select an asset"
           }
         />
       </MetricStrip>
 
       <ErrorBox error={cfgError} onRetry={refreshCfg} hasStaleData={Boolean(cfg)} />
-      <ErrorBox error={cmpError} onRetry={refreshCmp} hasStaleData={Boolean(cmp)} />
+      <ErrorBox error={displayCmpError} onRetry={refreshCmp} hasStaleData={Boolean(currentCmp)} />
 
       {/* Route Comparator & Fee Estimator */}
       <Card
@@ -348,7 +354,7 @@ export default function Zipper() {
           </>
         }
       >
-        {cmpLoading && !cmp ? (
+        {cmpLoading && !currentCmp ? (
           <div style={{ padding: 16 }}>
             <Loading lines={5} />
           </div>

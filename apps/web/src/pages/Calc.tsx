@@ -12,6 +12,7 @@ import {
   converterPriceReducer,
   INITIAL_CONVERTER_PRICE_STATE,
 } from "../lib/converter";
+import { marketForSymbol } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -114,8 +115,9 @@ function OutputRow({
 export default function Calc() {
   const { symbol, setSymbol, pairBySymbol, assetByCode } = useApp();
   const { data: ov } = usePollData(() => api.overview([symbol]), 5000, [symbol]);
-  const live = ov?.markets?.[0] ? price(ov.markets[0].lastPrice) : NaN;
-  const indexLive = ov?.markets?.[0] ? price(ov.markets[0].indexPrice) : NaN;
+  const selectedMarket = marketForSymbol(ov?.markets, symbol);
+  const live = selectedMarket ? price(selectedMarket.lastPrice) : NaN;
+  const indexLive = selectedMarket ? price(selectedMarket.indexPrice) : NaN;
 
   const [base, quote] = splitSymbol(symbol);
   const pair = pairBySymbol.get(symbol);

@@ -187,6 +187,45 @@ describe("2. @poly/core McpClient (DEF-01 isError throws & DEF-04 session-only r
     assert.equal(initCalls, 2, "re-initialized session once after 404");
     assert.equal(toolCalls, 2, "retried tool call once after 404");
   });
+
+  it("keeps the MCP timeout active while response bodies are parsed", async () => {
+    let toolCalls = 0;
+    const fakeFetch = async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.method === "initialize") {
+        return new Response(
+          JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18" } }),
+          { status: 200, headers: { "mcp-session-id": "sess-timeout" } },
+        );
+      }
+      if (body.method === "notifications/initialized") return new Response("", { status: 202 });
+      if (body.method === "tools/call") {
+        toolCalls += 1;
+        return {
+          status: 200,
+          headers: new Headers(),
+          text: () => new Promise(() => undefined),
+        };
+      }
+      return new Response("{}", { status: 200 });
+    };
+    const client = new core.McpClient({
+      url: "https://example.com/mcp",
+      timeoutMs: 25,
+      fetchImpl: fakeFetch,
+    });
+    const startedAt = Date.now();
+    await assert.rejects(
+      () => client.callTool("stalling_tool"),
+      (error) => {
+        assert.ok(error instanceof core.McpError);
+        assert.match(error.message, /timed out after 25ms/);
+        return true;
+      },
+    );
+    assert.equal(toolCalls, 1, "a body timeout must not retry the tool call");
+    assert.ok(Date.now() - startedAt < 1000, "the body-stage deadline should be bounded");
+  });
 });
 
 describe("3. Backend handler allowlists, Node adapter path fix, and bounded TTL cache", () => {

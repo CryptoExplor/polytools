@@ -17,6 +17,7 @@ import {
   type CandleTimeframe,
 } from "@poly/core";
 import { api } from "../lib/api";
+import { marketForSymbol } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import { roundToTick, validateOrderDraft } from "../lib/orderConstraints";
@@ -54,7 +55,8 @@ const DOC_URLS = {
 export default function SdkGuide() {
   const { symbol, setSymbol, pairBySymbol } = useApp();
   const { data: ov } = usePollData(() => api.overview([symbol]), 6000, [symbol]);
-  const livePx = ov?.markets?.[0] ? price(ov.markets[0].lastPrice) : NaN;
+  const selectedMarket = marketForSymbol(ov?.markets, symbol);
+  const livePx = selectedMarket ? price(selectedMarket.lastPrice) : NaN;
 
   const [lang, setLang] = useState<SdkLang>("typescript");
   const [step, setStep] = useState<GuideStep>("install");

@@ -61,6 +61,7 @@ function errorText(error?: account.SafeAccountError): string {
     case "CONTRACT_CONFLICT": return "The request could not be made safely because the account API formats disagree. The read was stopped.";
     case "ACCOUNT_STALE": return "Your account connection changed. Late private data was discarded; unlock and load again.";
     case "ABORTED": return "This account read was cancelled before it finished.";
+    case "TIMEOUT": return "The account service took too long to respond. Try again; no private response was retained.";
     case "RATE_LIMITED": return "The account service asked us to slow down. You can retry after a short wait.";
     case "SERVER": return "The account service is temporarily unavailable. Try again later; no public data was substituted.";
     default: return "The account read failed safely. No private response was retained and no public data was substituted.";
@@ -929,6 +930,13 @@ export function AccountAnalytics({
           <div className="kv"><span className="k">CORS / permissions</span><span className="v">{snapshot ? "Per-operation result below" : "Not live-verified"}</span></div>
         </div>
       </details>
+
+      <div className="notice info account-load-scope" role="note" style={{ marginBottom: 14 }}>
+        <div>
+          <strong>Before loading account data:</strong>{" "}
+          Activation requests the official spot-market catalog and starts read-only requests for balances, equity history, order history, fills, transfers, fee rates, balance history, and open orders—not just the dataset shown in this section. After activation, if this section remains mounted, the same broad bundle may be requested again when the document becomes visible. No trade, order, or transaction actions are submitted.
+        </div>
+      </div>
 
       <div className="row-flex" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         {view !== "transfers" && <label className="field" style={{ minWidth: 180 }}>

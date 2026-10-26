@@ -25,18 +25,56 @@ export interface Polled<T> {
   refresh: () => void;
 }
 
+export interface PollSnapshot<T> {
+  data: T;
+  dependencies: readonly unknown[];
+  updatedAt: number;
+}
+
+export interface PollErrorSnapshot {
+  error: string;
+  dependencies: readonly unknown[];
+  lastErrorAt: number;
+}
+
+function dependenciesMatch(
+  snapshot: { dependencies: readonly unknown[] },
+  dependencies: readonly unknown[],
+): boolean {
+  return snapshot.dependencies.length === dependencies.length &&
+    snapshot.dependencies.every((value, index) => Object.is(value, dependencies[index]));
+}
+
+/** Return a cached value only when its request dependencies still match. */
+export function selectPollSnapshot<T>(
+  snapshot: PollSnapshot<T> | null,
+  dependencies: readonly unknown[],
+): PollSnapshot<T> | null {
+  return snapshot && dependenciesMatch(snapshot, dependencies) ? snapshot : null;
+}
+
+/** Return an error/failure timestamp only for the request that produced it. */
+export function selectPollErrorSnapshot(
+  snapshot: PollErrorSnapshot | null,
+  dependencies: readonly unknown[],
+): PollErrorSnapshot | null {
+  return snapshot && dependenciesMatch(snapshot, dependencies) ? snapshot : null;
+}
+
 export function usePollData<T>(
   fn: () => Promise<T>,
   intervalMs: number,
   deps: unknown[] = [],
 ): Polled<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<PollSnapshot<T> | null>(null);
+  const [errorSnapshot, setErrorSnapshot] = useState<PollErrorSnapshot | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
-  const [lastErrorAt, setLastErrorAt] = useState<number | null>(null);
   const [paused, setPaused] = useState<boolean>(false);
+  const currentSnapshot = selectPollSnapshot(snapshot, deps);
+  const currentErrorSnapshot = selectPollErrorSnapshot(errorSnapshot, deps);
+  const dependenciesChanged = (snapshot !== null && currentSnapshot === null) ||
+    (errorSnapshot !== null && currentErrorSnapshot === null);
 
   const handleRef = useRef<PollHandle | null>(null);
   const fnRef = useRef(fn);
@@ -53,8 +91,9 @@ export function usePollData<T>(
   useEffect(() => {
     const myGen = ++genRef.current;
     let mounted = true;
+    setSnapshot((current) => selectPollSnapshot(current, deps));
+    setErrorSnapshot((current) => selectPollErrorSnapshot(current, deps));
     setLoading(true);
-    setError(null);
 
     const h = startPoll(
       async () => {
@@ -66,14 +105,20 @@ export function usePollData<T>(
         try {
           const result = await fnRef.current();
           if (!mounted || myGen !== genRef.current || myReq !== reqIdRef.current) return;
-          setData(result);
-          setError(null);
-          setUpdatedAt(Date.now());
+          setSnapshot({
+            data: result,
+            dependencies: deps.slice(),
+            updatedAt: Date.now(),
+          });
+          setErrorSnapshot(null);
         } catch (e) {
           if (!mounted || myGen !== genRef.current || myReq !== reqIdRef.current) return;
           const msg = e instanceof Error ? e.message : "Request failed";
-          setError(msg);
-          setLastErrorAt(Date.now());
+          setErrorSnapshot({
+            error: msg,
+            dependencies: deps.slice(),
+            lastErrorAt: Date.now(),
+          });
         } finally {
           if (mounted && myGen === genRef.current && myReq === reqIdRef.current) {
             setLoading(false);
@@ -110,12 +155,12 @@ export function usePollData<T>(
   }, []);
 
   return {
-    data,
-    error,
-    loading,
-    refreshing,
-    updatedAt,
-    lastErrorAt,
+    data: currentSnapshot?.data ?? null,
+    error: currentErrorSnapshot?.error ?? null,
+    loading: loading || dependenciesChanged,
+    refreshing: dependenciesChanged ? false : refreshing,
+    updatedAt: currentSnapshot?.updatedAt ?? null,
+    lastErrorAt: currentErrorSnapshot?.lastErrorAt ?? null,
     paused,
     setPaused: setPausedWithResume,
     refresh,

@@ -60,22 +60,53 @@ export class McpClient {
     return h;
   }
 
-  private async post(body: unknown, captureSid = false): Promise<Response> {
+  private async post<T>(
+    body: unknown,
+    consume: (response: Response) => Promise<T>,
+    captureSid = false,
+  ): Promise<{ response: Response; value: T }> {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), this.timeoutMs);
     const fetchFn = this.fetchImpl;
+    const withTimeout = <R>(operation: () => Promise<R>): Promise<R> => new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        ctrl.signal.removeEventListener("abort", onAbort);
+        callback();
+      };
+      const onAbort = () => finish(() => reject(new DOMException("MCP request timed out", "AbortError")));
+      if (ctrl.signal.aborted) {
+        onAbort();
+        return;
+      }
+      ctrl.signal.addEventListener("abort", onAbort, { once: true });
+      void Promise.resolve()
+        .then(() => settled ? undefined : operation())
+        .then(
+          (value) => finish(() => resolve(value as R)),
+          (error) => finish(() => reject(error)),
+        );
+    });
     try {
-      const res = await fetchFn(this.url, {
+      const res = await withTimeout(() => fetchFn(this.url, {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify(body),
         signal: ctrl.signal,
-      });
+      }));
+      const value = await withTimeout(() => consume(res));
       if (captureSid) {
         const sid = res.headers.get("mcp-session-id");
         if (sid) this.sessionId = sid;
       }
-      return res;
+      return { response: res, value };
+    } catch (error) {
+      if (ctrl.signal.aborted) {
+        throw new McpError(`MCP request timed out after ${this.timeoutMs}ms`);
+      }
+      throw error;
     } finally {
       clearTimeout(t);
     }
@@ -132,7 +163,7 @@ export class McpClient {
     if (this.sessionId) return Promise.resolve();
     if (this.initPromise) return this.initPromise;
     this.initPromise = (async () => {
-      const res = await this.post(
+      await this.post(
         {
           jsonrpc: "2.0",
           id: 1,
@@ -143,14 +174,20 @@ export class McpClient {
             clientInfo: { name: this.clientName, version: "1.0.0" },
           },
         },
+        async (response) => {
+          const msg = await this.parse(response);
+          this.assertOk(msg, response.status);
+          return msg;
+        },
         true,
       );
-      const msg = await this.parse(res);
-      this.assertOk(msg, res.status);
-      await this.post({
-        jsonrpc: "2.0",
-        method: "notifications/initialized",
-      });
+      await this.post(
+        {
+          jsonrpc: "2.0",
+          method: "notifications/initialized",
+        },
+        async () => undefined,
+      );
     })().finally(() => {
       this.initPromise = null;
     });
@@ -170,31 +207,38 @@ export class McpClient {
   ): Promise<T> {
     await this.ensureSession();
     const usedSessionId = this.sessionId;
-    const res = await this.post({
-      jsonrpc: "2.0",
-      id: Date.now(),
-      method: "tools/call",
-      params: { name, arguments: args },
-    });
-    let msg: any;
+    let parsedResponse: { response: Response; value: any };
     try {
-      if (res.status === 404) {
-        const text = (await res.text()).trim();
-        throw new McpError(text || "Session not found", -32000, 404);
-      }
-      msg = await this.parse(res);
-      this.assertOk(msg, res.status);
-    } catch (e) {
+      parsedResponse = await this.post(
+        {
+          jsonrpc: "2.0",
+          id: Date.now(),
+          method: "tools/call",
+          params: { name, arguments: args },
+        },
+        async (response) => {
+          if (response.status === 404) {
+            const text = (await response.text()).trim();
+            throw new McpError(text || "Session not found", -32000, 404);
+          }
+          const msg = await this.parse(response);
+          this.assertOk(msg, response.status);
+          return msg;
+        },
+      );
+    } catch (error) {
       // Rebuild session and retry once ONLY when the session expired / was not found.
-      if (!_retried && this.isSessionError(e, res.status)) {
+      const httpStatus = error instanceof McpError ? error.httpStatus : undefined;
+      if (!_retried && this.isSessionError(error, httpStatus)) {
         if (this.sessionId === usedSessionId) {
           this.sessionId = null;
         }
         return this.callTool<T>(name, args, true);
       }
-      throw e;
+      throw error;
     }
 
+    const { response: res, value: msg } = parsedResponse;
     const result = msg?.result ?? {};
     if (result.isError === true) {
       const content: Array<{ type?: string; text?: string }> = Array.isArray(

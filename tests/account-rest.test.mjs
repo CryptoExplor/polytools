@@ -186,6 +186,70 @@ describe("Signed fake-fetch account client", () => {
     assert.equal(result.contractVersion, account.ACCOUNT_CONTRACT_VERSION);
   });
 
+  it("times out stalled fetches and response bodies with a safe, non-retryable error", async () => {
+    const vault = await connected();
+    let fetchCalls = 0;
+    const stalledFetch = new account.AccountRestClient({
+      vault,
+      maxRetries: 2,
+      requestTimeoutMs: 500,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        return new Promise(() => undefined);
+      },
+    });
+    await assert.rejects(
+      () => stalledFetch.request("balances", {}, (value) => value),
+      (error) => {
+        assert.equal(error.code, "TIMEOUT");
+        assert.equal(error.message, "The account request exceeded its time limit.");
+        assert.equal(error.toSafeError().code, "TIMEOUT");
+        return true;
+      },
+    );
+    assert.equal(fetchCalls, 1, "timeouts must not retry stalled private reads");
+
+    let bodyCalls = 0;
+    const stalledBody = new account.AccountRestClient({
+      vault,
+      maxRetries: 2,
+      requestTimeoutMs: 500,
+      fetchImpl: async () => {
+        bodyCalls += 1;
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          text: async () => new Promise(() => undefined),
+        };
+      },
+    });
+    await assert.rejects(
+      () => stalledBody.request("balances", {}, (value) => value),
+      (error) => error?.code === "TIMEOUT",
+    );
+    assert.equal(bodyCalls, 1, "the body-stage timeout must occur after response headers arrive");
+  });
+
+  it("preserves caller cancellation as ABORTED rather than a request timeout", async () => {
+    const vault = await connected();
+    const controller = new AbortController();
+    let called;
+    const calledPromise = new Promise((resolve) => { called = resolve; });
+    const client = new account.AccountRestClient({
+      vault,
+      requestTimeoutMs: 2000,
+      fetchImpl: async () => {
+        called();
+        return new Promise(() => undefined);
+      },
+    });
+    const pending = client.request("balances", {}, (value) => value, { signal: controller.signal });
+    await calledPromise;
+    controller.abort();
+    await assert.rejects(pending, (error) => error?.code === "ABORTED");
+  });
+
   it("maps HTTP/structured errors without echoing response bodies or retrying permission failures", async () => {
     const vault = await connected();
     let calls = 0;
