@@ -218,7 +218,7 @@ const client = new PolyesterClient({
 await client.catalog.ensureReady();
 const symbolId = client.catalog.market.requireSymbolIdByPairSymbol("${symbol}");
 
-// Place a safe post-only limit ${orderSide} order on ${symbol}
+// Place a post-only limit ${orderSide} order on ${symbol} (mutates testnet state)
 const created = await client.orders.create({
   symbolId,
   side: "${orderSide}",

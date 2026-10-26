@@ -33,10 +33,10 @@ The audit findings, copy inventory, navigation proposal, journey maps, and the p
 
 | Check | Result |
 |---|---|
-| `npm test` | 253/253, 57 suites |
+| `npm test` | 254/254, 57 suites |
 | `npm run typecheck` | pass (web + backend) |
-| `npm run build` | 599.67 kB JS / 179.19 kB gzip |
-| `npm run check:performance` | 4/4 budgets — gzip headroom ~6.3 kB of 185,000 B |
+| `npm run build` | 599.69 kB JS / 179.22 kB gzip |
+| `npm run check:performance` | 4/4 budgets — gzip headroom ~6.1 kB of 185,000 B |
 | `npm run check:whitespace` | 179/179 files, 0 violations |
 | `npm run check:runtime` / `check:dependencies` / `check:external` | pass / 0 licence or version gaps / 0 SDK pin mismatches |
 

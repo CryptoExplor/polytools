@@ -46,6 +46,23 @@ Confidence labels and detailed evidence are in the linked audit documents. Fresh
 
 ## P1 — High-value reliability, safety, and accessibility work
 
+**Implementation status (2026-10-26).** The underlying findings in `UX_AUDIT.md` are left as
+written; what has since shipped is recorded in
+[../frontend-audit/README.md](../frontend-audit/README.md) and
+[../frontend-audit/REMAINING_WORK.md](../frontend-audit/REMAINING_WORK.md).
+
+- **P1-1** — unchanged.
+- **P1-2** — the copy half is done: one action label, and the description states that one click
+  loads every dataset for the view. Narrowing which private reads run, and decoupling the catalog,
+  are **still open**.
+- **P1-3** — the focus half is done: one shared `useDialogFocus` utility now backs both dialogs and
+  the order drawer, and the mobile sidebar is inert only when narrow *and* closed. Contrast-token
+  migration (A11Y-2) is **still open**.
+- **P1-4** — done for validation, tick/step/minimums, the always-visible mutation warning, and the
+  removal of "safe"/"ready-to-run" wording. Compiling pinned examples in isolated tests is **not**
+  done; `npm run check:external` only pins versions.
+- **P1-5 and beyond** — unchanged.
+
 ### P1-1 — Add bounded account request/import deadlines
 
 **Evidence:** `SECURITY_AND_ACCOUNTING_AUDIT.md` SEC-02.

@@ -77,4 +77,4 @@ Explicitly out of scope for all of the above: changing which private requests ru
 1. **`Book` and `Tape` hide their Notional column at ≤680 px** (`hide-xs`). A data column disappearing on mobile is the same class of problem as the hidden cache badge. Fixing it needs a layout decision (stacked row vs. narrower column), not a class swap.
 2. **Drawer height and scroll.** See checks 9 and 10 above; both need a real viewport.
 3. **The SDK page's canonical-string inspector has no input validation.** It hashes user-supplied text and never mutates exchange state, so it was deliberately left out of the order-validation work.
-4. **Bundle headroom is thin.** 178,836 B gzip against a 185,000 B ceiling — about 6.3 kB. Code splitting should be considered before the next module-scale addition, not after the budget check fails.
+4. **Bundle headroom is thin.** 178,861 B gzip against a 185,000 B ceiling — about 6.1 kB. Code splitting should be considered before the next module-scale addition, not after the budget check fails.

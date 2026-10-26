@@ -29,6 +29,8 @@ fresh verification are recorded separately rather than rewriting that evidence:
 - [DEPLOYMENT_HARDENING.md](./DEPLOYMENT_HARDENING.md) — P2-9 security headers and operational review.
 - [COMPARE_BEHAVIOR.md](./COMPARE_BEHAVIOR.md) — P2-10 zero-match and feed-provenance behavior.
 - [PHASE3_MAINTENANCE.md](./PHASE3_MAINTENANCE.md) — P3-1–P3-7 maintenance, measurements, and remaining findings.
+- [../frontend-audit/README.md](../frontend-audit/README.md) — frontend simplification: what shipped, how it is verified, and the browser pass still owed.
+- [../frontend-audit/REMAINING_WORK.md](../frontend-audit/REMAINING_WORK.md) — the findings above that are still open, plus the manual checks that automated tests cannot replace.
 
 These follow-ups were local and uncommitted when written. Consult the latest combined review and the actual Git/PR record for publication state.
 Do not attribute their working-tree results to the historical audit HEAD or to PR checks for a different head.

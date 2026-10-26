@@ -29,15 +29,15 @@ remains a public market-data route.
 | Profit and Loss | `/#/account/pnl` | Experimental, user-assisted exact FIFO or moving-weighted-average cost-basis estimates after complete fills, opening basis, resolved flows, and method provenance; realized output is independently gated, while unrealized/total also require fresh marks. Not verified tax output |
 | Money Movements | `/#/account/transactions` | Authenticated transfers, with a clearly separate credential-free public transaction lookup |
 | Markets | `/#/` | Market overview, prices, 24-hour stats, sparklines, watchlist, and CSV export |
-| Recent Trades | `/#/tape` | Live public tape and configurable whale alerts; no account key is used |
-| Public Order Book | `/#/book` | Public resting liquidity and depth; no account key or order action |
+| Trades | `/#/tape` | Live public tape and configurable whale alerts; no account key is used |
+| Order book | `/#/book` | Public resting liquidity and depth; no account key or order action |
 | Price chart | `/#/charts` | Candle timeframes, volume, crosshair, and live refresh |
-| Liquidity heatmap | `/#/heatmap` | Order-book depth density and imbalance over time |
-| Venue compare | `/#/compare` | Polyester index versus CoinGecko, with premium/discount in basis points |
-| Zipper routes | `/#/zipper` | Chains, fees, minimums, and route comparison |
+| Depth heatmap | `/#/heatmap` | Order-book depth density and imbalance over time |
+| Compare prices | `/#/compare` | Polyester index versus CoinGecko, with premium/discount in basis points |
+| Bridge routes | `/#/zipper` | Chains, fees, minimums, and route comparison |
 | Calculators | `/#/calc` | Position sizing, margin sketches, PnL/fee examples, and conversion |
-| Testnet hub | `/#/hub` | Faucet links, onboarding checklist, and daily claim countdown |
-| SDK quickstart | `/#/sdk` | TypeScript, Python, and Rust SDK code generator |
+| Start on testnet | `/#/hub` | Faucet links, onboarding checklist, and daily claim countdown |
+| Developers: SDK | `/#/sdk` | TypeScript, Python, and Rust SDK snippets, with order inputs validated against the selected pair |
 | Brand kit | `/#/brand-kit` | PolyTools brand assets and usage guidance |
 
 ## Architecture — modular and reusable
@@ -106,6 +106,9 @@ External freshness checks are separate opt-in public-network commands, never par
 read-only HEAD/GET requests and do not execute generated SDK/trading examples. `npm audit` is a
 separate registry review; do not run `npm audit fix` as an opportunistic maintenance step.
 See `docs/audit/PHASE3_MAINTENANCE.md` for current measurements, findings, and unverified limits.
+For the frontend specifically, `docs/frontend-audit/README.md` records what shipped and how it is
+verified, and `docs/frontend-audit/REMAINING_WORK.md` lists the browser checks that automated tests
+cannot replace and the interface items still awaiting a decision.
 
 ## Deploy (pick one)
 

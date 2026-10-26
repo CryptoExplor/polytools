@@ -223,6 +223,14 @@ describe("SDK page contract", () => {
     assert.ok(page.includes('role="alert"'), "the blocked state is announced");
   });
 
+  it("does not call generated order code safe", () => {
+    assert.ok(!/\bsafe post/i.test(page), "the snippet must not describe itself as safe");
+    assert.ok(
+      page.includes("mutates testnet state"),
+      "the snippet comment states the consequence instead",
+    );
+  });
+
   it("keeps the mutation warning above the generator", () => {
     const warning = page.indexOf("PolyTools does not run this code.");
     const generator = page.indexOf("Interactive SDK Code Generator");
