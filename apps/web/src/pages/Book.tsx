@@ -357,7 +357,7 @@ export default function Book() {
             <div className="ladder-head">
               <span>Bid Price ({quote})</span>
               <span className="right">Size ({base})</span>
-              <span className="right hide-xs">Notional</span>
+              <span className="right">Notional</span>
               <span className="right">Cumulative ({base})</span>
             </div>
             {loading && !book && (
@@ -382,7 +382,7 @@ export default function Book() {
                     {isWall && <span className="wall-tag">WALL</span>}
                   </span>
                   <span className="right">{fmtNum(l.qty, qtyDecimals)}</span>
-                  <span className="right muted hide-xs">
+                  <span className="right muted">
                     {formatCompactQuoteNotional(l.price * l.qty, quote)}
                   </span>
                   <span className="right muted">{fmtNum(book.bidsCum[i], qtyDecimals)}</span>
@@ -407,7 +407,7 @@ export default function Book() {
             <div className="ladder-head">
               <span>Ask Price ({quote})</span>
               <span className="right">Size ({base})</span>
-              <span className="right hide-xs">Notional</span>
+              <span className="right">Notional</span>
               <span className="right">Cumulative ({base})</span>
             </div>
             {loading && !book && (
@@ -432,7 +432,7 @@ export default function Book() {
                     {isWall && <span className="wall-tag">WALL</span>}
                   </span>
                   <span className="right">{fmtNum(l.qty, qtyDecimals)}</span>
-                  <span className="right muted hide-xs">
+                  <span className="right muted">
                     {formatCompactQuoteNotional(l.price * l.qty, quote)}
                   </span>
                   <span className="right muted">{fmtNum(book.asksCum[i], qtyDecimals)}</span>

@@ -20,6 +20,7 @@ import { api } from "../lib/api";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import { roundToTick, validateOrderDraft } from "../lib/orderConstraints";
+import { validateCanonicalRequest } from "../lib/canonicalRequest";
 import {
   Card,
   CopyButton,
@@ -137,6 +138,17 @@ export default function SdkGuide() {
       return { query: "", text: "", error: vault.vaultErrorMessage(caught) };
     }
   }, [sampleTs, httpMethod, reqPath, reqQuery, bodyHash, bodyHashError]);
+  const canonicalValidation = useMemo(
+    () =>
+      validateCanonicalRequest({
+        timestamp: sampleTs,
+        path: reqPath,
+        query: reqQuery,
+        body: reqBody,
+        method: httpMethod,
+      }),
+    [sampleTs, reqPath, reqQuery, reqBody, httpMethod],
+  );
   const canonicalQuery = canonicalPreview.query;
   const canonicalString5Line = canonicalPreview.text;
   const canonicalError = canonicalPreview.error;
@@ -887,6 +899,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           </span>
         }
       >
+        {!canonicalValidation.ok && (
+          <div className="notice warn mb-3" role="status" id="canon-issues">
+            <div>
+              <strong>These fields cannot be signed as entered.</strong> Nothing is sent from this
+              page; the panel shows what a signature would cover.
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {canonicalValidation.issues.map((issue) => (
+                  <li key={issue.field}>{issue.message}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
         <div className="grid cols-2">
           <div>
             <div className="grid cols-2">
@@ -923,6 +949,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   className="input mono"
                   value={sampleTs}
                   onChange={(e) => setSampleTs(e.target.value)}
+                  aria-invalid={
+                    canonicalValidation.issues.some((issue) => issue.field === "timestamp") || undefined
+                  }
+                  aria-describedby={canonicalValidation.ok ? undefined : "canon-issues"}
+                  inputMode="numeric"
                 />
               </div>
             </div>
@@ -935,6 +966,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 className="input mono"
                 value={reqPath}
                 onChange={(e) => setReqPath(e.target.value)}
+                aria-invalid={
+                  canonicalValidation.issues.some((issue) => issue.field === "path") || undefined
+                }
+                aria-describedby={canonicalValidation.ok ? undefined : "canon-issues"}
               />
             </div>
 
@@ -952,6 +987,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 value={reqQuery}
                 onChange={(e) => setReqQuery(e.target.value)}
                 placeholder="e.g. tag=z&q=hello+world&tag=a"
+                aria-invalid={
+                  canonicalValidation.issues.some((issue) => issue.field === "query") || undefined
+                }
+                aria-describedby={canonicalValidation.ok ? undefined : "canon-issues"}
               />
             </div>
 
@@ -964,6 +1003,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   className="input mono"
                   value={reqBody}
                   onChange={(e) => setReqBody(e.target.value)}
+                  aria-invalid={
+                    canonicalValidation.issues.some((issue) => issue.field === "body") || undefined
+                  }
+                  aria-describedby={canonicalValidation.ok ? undefined : "canon-issues"}
                 />
               </div>
             )}

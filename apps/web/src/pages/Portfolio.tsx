@@ -138,25 +138,31 @@ function AccountTransactions({
   };
   return (
     <>
+      {/* One decision, one control. The description beside the choice says what
+          the current view does, so a second notice would only repeat it. */}
       <Card
-        title="Choose a money-movement view"
-        subtitle="Your account view uses signed private reads. Public lookup is separate and never requires your account key."
+        title="Money movements"
+        subtitle={
+          scope === "mine"
+            ? "Signed private reads. Nothing loads until you choose Load account data, and missing data is never shown as an empty history."
+            : "Lookup by transaction hash or flow ID. It is not a feed of every transaction and never requires your account key."
+        }
+        actions={
+          <div className="seg-group" role="group" aria-label="Money movement view">
+            <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} aria-pressed={scope === "mine"} onClick={() => selectScope("mine")}>
+              My account
+            </button>
+            <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} aria-pressed={scope === "all"} onClick={() => selectScope("all")}>
+              Public transaction lookup
+            </button>
+          </div>
+        }
       >
-        <div className="seg-group" role="group" aria-label="Money movement view">
-          <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} aria-pressed={scope === "mine"} onClick={() => selectScope("mine")}>
-            My account
-          </button>
-          <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} aria-pressed={scope === "all"} onClick={() => selectScope("all")}>
-            Public transaction lookup
-          </button>
-        </div>
-        <div className={`notice ${scope === "mine" ? "info" : "warn"} mt-3`} role="note">
-          {scope === "mine" ? (
-            <span>Private transfers are shown only after you unlock an account and explicitly load them. Missing or incomplete data is never shown as an empty history.</span>
-          ) : (
-            <span>Public lookup finds a transaction or flow by the ID you enter. It is not a feed of every transaction and does not show your private account history.</span>
-          )}
-        </div>
+        <p className="faint mb-0">
+          {scope === "mine"
+            ? "Your transfers come from signed reads on this device. Public lookup is a separate, credential-free search."
+            : "Nothing about your account is read in this view."}
+        </p>
       </Card>
       {scope === "mine" ? (
         session && accountVault ? (

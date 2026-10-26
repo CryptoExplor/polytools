@@ -96,6 +96,7 @@ npm run check:whitespace
 npm run check:external       # inventory only; no network
 npm run check:dependencies   # lock/license metadata; no install
 npm run check:performance    # after npm run build
+npm run check:contrast       # text tokens >= 4.5:1 in both themes
 ```
 
 The account tests use synthetic keys and fake transports only. They are not evidence of live

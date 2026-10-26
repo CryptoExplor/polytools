@@ -351,3 +351,76 @@ describe("Batch 1 mobile drawer contract", () => {
     assert.ok(layout.includes('querySelector<HTMLElement>(".nav-item")'), "focus enters the drawer");
   });
 });
+
+describe("Batch 1 mobile data visibility", () => {
+  const css = source("apps/web/src/styles.css");
+  const layout = source("apps/web/src/components/Layout.tsx");
+  const tape = source("apps/web/src/pages/Tape.tsx");
+  const book = source("apps/web/src/pages/Book.tsx");
+
+  it("hides no data cell or status badge behind a width class", () => {
+    for (const [name, text] of [["Layout", layout], ["Tape", tape], ["Book", book]]) {
+      assert.ok(!/className="[^"]*\bhide-(xs|sm)\b/.test(text), `${name} must not hide content by width`);
+    }
+    assert.ok(!css.includes(".hide-xs"), "the hiding utility is gone");
+    assert.ok(!css.includes(".hide-sm"), "the hiding utility is gone");
+  });
+
+  it("keeps the environment badge at every width", () => {
+    assert.ok(layout.includes("<span className=\"topbar-eyebrow\">"), "the badge carries no width class");
+    assert.ok(layout.includes("Read-only · {apiEnv}"), "it still names the network");
+  });
+
+  it("restacks the tape row instead of dropping the match column", () => {
+    const mobile = css.slice(css.indexOf("@media (max-width: 960px)"));
+    assert.ok(mobile.includes(".tape-row .tape-mid"), "the match id moves rather than disappears");
+    assert.ok(mobile.includes("grid-column: 1 / -1"), "it takes its own line");
+    assert.ok(!mobile.includes(".tape-notional {\n    display: none"), "notional stays visible");
+  });
+
+  it("keeps four ladder columns and a visible notional on phones", () => {
+    const small = css.slice(css.indexOf("@media (max-width: 600px)"));
+    assert.ok(small.includes(".ladder-head,\n  .ladder .row"), "the ladder is retuned, not trimmed");
+    assert.ok(small.includes("minmax(0, 1.05fr)"), "the notional column keeps a share of the width");
+    const baseRule = css.slice(css.indexOf(".ladder-head {"), css.indexOf("}", css.indexOf(".ladder-head {")));
+    const tracks = baseRule.match(/grid-template-columns:\s*([^;]+);/)[1].trim().split(/\s+/);
+    assert.equal(tracks.length, 4, "price, size, total, and notional");
+  });
+});
+
+describe("Batch 1 route code splitting", () => {
+  const app = source("apps/web/src/App.tsx");
+
+  it("keeps only the landing route in the initial bundle", () => {
+    assert.ok(app.includes('import Dashboard from "./pages/Dashboard";'), "the landing page ships up front");
+    assert.equal(
+      (app.match(/^import .* from "\.\/pages\//gm) ?? []).length,
+      1,
+      "no other page may be imported eagerly",
+    );
+  });
+
+  it("lazy-loads every other page and wraps the routes in one fallback", () => {
+    for (const page of ["Book", "Charts", "Compare", "Zipper", "Calc", "Hub", "SdkGuide", "Portfolio"]) {
+      assert.ok(
+        app.includes(`const ${page} = lazy(() => import("./pages/${page}"));`),
+        `${page} is lazily imported`,
+      );
+    }
+    assert.ok(app.includes('import("./pages/Heatmap").then((module) => ({ default: module.HeatmapPage }))'));
+    assert.ok(app.includes('import("./pages/BrandKit").then((module) => ({ default: module.BrandKitPage }))'));
+    assert.ok(app.includes("const Tape = lazy(() => import(\"./pages/Tape\"));"));
+    assert.ok(app.includes("<Suspense fallback={<RoutePending />}>"), "one fallback wraps every route");
+    assert.ok(app.includes('role="status"'), "the fallback announces itself instead of showing a blank screen");
+  });
+
+  it("keeps every route path and the redirects unchanged", () => {
+    for (const path of ["book", "tape", "charts", "heatmap", "compare", "zipper", "calc", "hub", "sdk", "brand-kit"]) {
+      assert.ok(app.includes(`path="${path}"`), `route ${path} still exists`);
+    }
+    assert.ok(app.includes('path="account/*" element={<Portfolio />}'));
+    assert.ok(app.includes('path="flow" element={<AccountRedirect to="/account/transactions" scope="public" />}'));
+    assert.ok(app.includes('path="portfolio" element={<AccountRedirect to="/account" />}'));
+    assert.ok(app.includes('<Route index element={<Dashboard />} />'));
+  });
+});

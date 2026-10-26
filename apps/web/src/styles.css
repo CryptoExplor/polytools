@@ -24,7 +24,12 @@
   /* Text Hierarchy (#F7F7F7 Polyester White) */
   --text-primary: #f7f7f7;
   --text-secondary: #a1a1aa;
-  --text-muted: #71717a;
+  /* Meaningful text roles. Measured against every surface in both themes by
+     `npm run check:contrast`; keep both at or above 4.5:1. */
+  --text-muted: #8b8b95;
+  --text-caption: #9a9aa4;
+  /* Decorative only (breadcrumb separators, hairline marks). Never for text
+     that carries meaning. */
   --text-faint: #52525b;
   --text-inverse: #0a0a0a;
 
@@ -87,31 +92,32 @@
 
   --text-primary: #0a0a0a;
   --text-secondary: #52525b;
-  --text-muted: #71717a;
+  --text-muted: #63636b;
+  --text-caption: #5d5d65;
   --text-faint: #a1a1aa;
   --text-inverse: #ffffff;
 
   --accent: #fa2f6f;
   --accent-hover: #d81b58;
-  --accent-text: #d81b58;
+  --accent-text: #c2185b;
   --accent-soft: rgba(250, 47, 111, 0.1);
   --accent-border: rgba(250, 47, 111, 0.32);
 
-  --up: #059669;
-  --up-bright: #047857;
+  --up: #047857;
+  --up-bright: #065f46;
   --up-soft: rgba(5, 150, 105, 0.11);
   --up-border: rgba(5, 150, 105, 0.3);
 
-  --down: #e11d48;
-  --down-bright: #be123c;
+  --down: #be123c;
+  --down-bright: #9f1239;
   --down-soft: rgba(225, 29, 72, 0.1);
   --down-border: rgba(225, 29, 72, 0.28);
 
-  --warn: #d97706;
+  --warn: #a34d05;
   --warn-soft: rgba(217, 119, 6, 0.11);
   --warn-border: rgba(217, 119, 6, 0.32);
 
-  --info: #0284c7;
+  --info: #0369a1;
   --info-soft: rgba(2, 132, 199, 0.1);
   --info-border: rgba(2, 132, 199, 0.28);
 
@@ -143,6 +149,12 @@
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+/* Collapsed panels are marked with the `hidden` attribute; keep it authoritative
+   so a later component rule cannot leave them visible. */
+[hidden] {
+  display: none !important;
 }
 
 html,
@@ -1905,7 +1917,7 @@ table.data tbody tr:last-child td {
 
 /* ---------- Utility Classes ---------- */
 .muted { color: var(--text-secondary); }
-.faint { color: var(--text-muted); font-size: 12px; }
+.faint { color: var(--text-caption); font-size: 12px; }
 .up { color: var(--up); }
 .down { color: var(--down); }
 .warn { color: var(--warn); }
@@ -1932,6 +1944,33 @@ table.data tbody tr:last-child td {
   justify-content: center;
 }
 
+/* ---------- Disclosure ---------- */
+.disclosure {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-shell);
+  padding: 8px 12px;
+}
+
+.disclosure > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.disclosure > summary:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.disclosure p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-caption);
+  line-height: 1.55;
+}
+
 /* ---------- Responsive Layout ---------- */
 @media (max-width: 960px) {
   .sidebar {
@@ -1939,9 +1978,15 @@ table.data tbody tr:last-child td {
     left: 0;
     top: 0;
     bottom: 0;
+    /* `top: 0; bottom: 0` already sizes the drawer to the visible viewport.
+       Keeping `height: 100vh` here would overshoot on phones whose browser
+       toolbar collapses, pushing the last nav item off screen. */
+    height: auto;
+    max-height: 100%;
     transform: translateX(-100%);
     transition: transform 0.2s ease;
     box-shadow: var(--shadow-lg);
+    overscroll-behavior: contain;
   }
   .sidebar.open {
     transform: translateX(0);
@@ -1959,15 +2004,41 @@ table.data tbody tr:last-child td {
   .topbar {
     padding: 8px 14px;
   }
+  /* Let the breadcrumb and the environment badge wrap instead of hiding the
+     badge: which network this is matters more than a single-line topbar. */
+  .topbar-breadcrumb {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .topbar-eyebrow {
+    margin-left: 0;
+    font-size: 10px;
+    padding: 1px 6px;
+  }
   .content {
     padding: 14px 14px 24px;
   }
+  /* Every column stays on screen. Time is the only flexible one; the Match ID
+     and age move to their own line instead of disappearing. */
   .tape-head,
   .tape-row {
-    grid-template-columns: 72px 74px 92px 86px 1fr;
+    grid-template-columns: minmax(0, 1fr) 46px 76px 64px 62px;
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
   }
-  .hide-sm {
-    display: none !important;
+  .tape-head {
+    font-size: 9.5px;
+    letter-spacing: 0.2px;
+  }
+  .tape-head .tape-mid {
+    display: none;
+  }
+  .tape-row .tape-mid {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    font-size: 10.5px;
+    margin-top: 2px;
   }
 }
 
@@ -1978,20 +2049,32 @@ table.data tbody tr:last-child td {
   .metric-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  /* Four columns, tighter, rather than dropping a column: notional value is
+     part of the depth picture and stays on screen. */
   .ladder-head,
   .ladder .row {
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.05fr);
+    padding-left: 6px;
+    padding-right: 6px;
+    font-size: 11px;
   }
-  .ladder-head .hide-xs,
-  .ladder .row .hide-xs {
-    display: none;
+  .ladder-head {
+    font-size: 9.5px;
+    letter-spacing: 0.1px;
   }
   .tape-head,
   .tape-row {
-    grid-template-columns: 68px 68px 86px 1fr;
+    grid-template-columns: minmax(0, 1fr) 40px 68px 56px 54px;
+    gap: 4px;
+    padding: 6px 6px;
+    font-size: 10.5px;
   }
-  .hide-xs {
-    display: none !important;
+  .tape-head {
+    font-size: 9px;
+  }
+  .topbar-eyebrow {
+    font-size: 9.5px;
+    padding: 1px 5px;
   }
 }
 

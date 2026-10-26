@@ -931,26 +931,31 @@ export function AccountAnalytics({
       subtitle={copy.subtitle}
       actions={<Pill kind={hasViewResponse && !hasIncomplete && visibleSuccessful > 0 ? "up" : "warn"}>{connectionLabel}</Pill>}
     >
-      <div className="notice warn" role="note" style={{ marginBottom: 14 }}>
-        <div>
+      {/* One status line before the primary action, with the full caveats one
+          click away and quoted word for word. Nothing here is weakened. */}
+      <div className="row-flex" style={{ gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <span className={`pill ${secureContext && session?.registeredKeyId ? "info" : "warn"}`}>
+          {secureContext ? (session?.registeredKeyId ? "Key ID saved" : "Key ID required") : "HTTPS required"}
+        </span>
+        <span className="pill">{catalogReady ? "Pair catalog loaded" : "Pair catalog required before fills"}</span>
+        <span className="faint">Reads are not verified on this device until one succeeds.</span>
+      </div>
+
+      <details className="disclosure" style={{ marginBottom: 14 }}>
+        <summary>What this means</summary>
+        <p>
           <strong>Live compatibility remains unverified.</strong>{" "}
           Authenticated GET reads are enabled, but each operation still succeeds or fails independently. Browser CORS, origin, and owner-controlled read-policy checks determine whether a real response is available; a response is not evidence of another permission.
-        </div>
-      </div>
-
-      <div className="notice info" role="note" style={{ marginBottom: 14 }}>
-        <div>
+        </p>
+        <p>
           <strong>Section-scoped memory.</strong> Changing account sections intentionally discards this section&apos;s in-memory snapshots, cursor imports, and manual P&amp;L inputs. Reload or re-enter them when you return; no private data is persisted to retain them.
+        </p>
+        <div className="grid cols-3" style={{ marginTop: 8 }}>
+          <div className="kv"><span className="k">Secure browser context</span><span className="v">{secureContext ? "Yes" : "No"}</span></div>
+          <div className="kv"><span className="k">Authenticated GET reads</span><span className="v">Enabled</span></div>
+          <div className="kv"><span className="k">CORS / permissions</span><span className="v">{snapshot ? "Per-operation result below" : "Not live-verified"}</span></div>
         </div>
-      </div>
-
-      <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <div className="kv"><span className="k">Registered key ID</span><span className="v">{session?.registeredKeyId ? "Saved" : "Required"}</span></div>
-        <div className="kv"><span className="k">Secure browser context</span><span className="v">{secureContext ? "Yes" : "No"}</span></div>
-        <div className="kv"><span className="k">Authenticated GET reads</span><span className="v">Enabled</span></div>
-        <div className="kv"><span className="k">Official pair catalog</span><span className="v">{catalogReady ? "SpotConfig validated" : "Required before fills"}</span></div>
-        <div className="kv"><span className="k">CORS / permissions</span><span className="v">{snapshot ? "Per-operation result below" : "Not live-verified"}</span></div>
-      </div>
+      </details>
 
       <div className="row-flex" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         {view !== "transfers" && <label className="field" style={{ minWidth: 180 }}>

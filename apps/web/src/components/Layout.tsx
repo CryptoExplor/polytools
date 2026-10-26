@@ -212,10 +212,13 @@ export function Layout() {
     return () => query.removeListener(sync);
   }, []);
 
-  // Hide the closed mobile drawer from focus and assistive technology.
+  // Hide the closed mobile drawer from focus and assistive technology, and keep
+  // the page behind an open drawer from scrolling away underneath it.
   useEffect(() => {
     const sidebar = sidebarRef.current;
     if (!sidebar) return;
+    const previousOverflow = document.body.style.overflow;
+    if (mobileNav && navOpen) document.body.style.overflow = "hidden";
     const hidden = mobileNav && !navOpen;
     if (hidden) {
       // Resizing into the mobile layout must not strand focus in a subtree that
@@ -227,6 +230,9 @@ export function Layout() {
       sidebar.removeAttribute("inert");
       sidebar.removeAttribute("aria-hidden");
     }
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
   }, [mobileNav, navOpen]);
 
   // Move focus into the opened drawer, then hand it somewhere sensible on
@@ -454,7 +460,9 @@ export function Layout() {
             <span className="topbar-crumb-group">{meta.group}</span>
             <span className="topbar-crumb-sep">/</span>
             <span className="topbar-crumb-current">{meta.title}</span>
-            <span className="topbar-eyebrow hide-sm">
+            {/* The environment stays on screen at every width: a reader on a
+                phone must still be able to tell testnet from mainnet. */}
+            <span className="topbar-eyebrow">
               Read-only · {apiEnv}
             </span>
           </div>
@@ -483,7 +491,7 @@ export function Layout() {
               />
             ) : connectionStatus === "connected" ? (
               <span
-                className={`pill ${dataSource === "wire-samples" ? "warn" : "up"} hide-xs`}
+                className={`pill ${dataSource === "wire-samples" ? "warn" : "up"}`}
                 title={
                   dataSource === "wire-samples"
                     ? "Serving captured testnet wire samples (sandbox offline fallback)"
@@ -496,7 +504,7 @@ export function Layout() {
                 {dataSource === "wire-samples" ? "Sample data" : "Live"}
               </span>
             ) : connectionStatus === "connecting" ? (
-              <span className="pill hide-xs">
+              <span className="pill">
                 <span className="dot" />
                 Loading…
               </span>
