@@ -139,10 +139,10 @@ describe("P3-1/P3-2 public Flow scope and Worker wording", () => {
     const publicHtml = renderPortfolio("/account/transactions?scope=public&mode=explain");
     assert.ok(publicHtml.includes("Lifecycle Trace Query"));
     assert.ok(publicHtml.includes("Public transaction lookup"));
-    assert.ok(!publicHtml.includes("Unlock an account to view your transfers"));
+    assert.ok(!publicHtml.includes("Unlock to view your transfers"));
 
     const privateHtml = renderPortfolio("/account/transactions");
-    assert.ok(privateHtml.includes("Unlock an account to view your transfers"));
+    assert.ok(privateHtml.includes("Unlock to view your transfers"));
     assert.ok(!privateHtml.includes("Lifecycle Trace Query"));
   });
 

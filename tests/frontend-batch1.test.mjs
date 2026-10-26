@@ -86,23 +86,37 @@ describe("Batch 1 headings and de-duplicated titles", () => {
       assert.ok(!page.includes("<h1"), `${pageFile} must not hand-roll its own h1`);
     }
     const appShell = source("apps/web/src/components/Layout.tsx");
-    assert.ok(appShell.includes("topbar-crumb-current"), "the breadcrumb carries the page name");
+    const topbar = appShell.slice(appShell.indexOf('<header className="topbar">'), appShell.indexOf("</header>"));
+    assert.ok(topbar.includes("topbar-crumb-group"), "the topbar keeps section context");
+    assert.ok(!topbar.includes("meta.title"), "the current page title is not repeated in the topbar");
   });
 });
 
 describe("Batch 1 one name per destination", () => {
-  it("gives each route the same short name in the sidebar and the topbar", () => {
+  it("keeps section context in the topbar without repeating the page heading", () => {
     const layout = source("apps/web/src/components/Layout.tsx");
-    const navPairs = [...layout.matchAll(/\{ to: "([^"]+)", label: "([^"]+)"/g)]
-      .map((m) => [m[1], m[2]]);
-    const metaPairs = [...layout.matchAll(/^  "([^"]+)": \{ title: "([^"]+)"/gm)]
-      .map((m) => [m[1], m[2]]);
-    const meta = new Map(metaPairs);
-    assert.ok(navPairs.length >= 17, "every nav item is parsed");
-    const mismatches = navPairs
-      .filter(([to, label]) => meta.has(to) && meta.get(to) !== label)
-      .map(([to, label]) => `${to}: nav "${label}" vs topbar "${meta.get(to)}"`);
-    assert.deepEqual(mismatches, []);
+    const navRoutes = [...layout.matchAll(/\{ to: "([^"]+)", label: "([^"]+)"/g)].map((m) => m[1]);
+    const metaRoutes = [...layout.matchAll(/^  "([^"]+)": \{ title: "[^"]+", group:/gm)].map((m) => m[1]);
+    assert.ok(navRoutes.length >= 17, "every nav item is parsed");
+    const meta = new Set(metaRoutes);
+    assert.ok(navRoutes.every((route) => meta.has(route)), "every navigation route has section metadata");
+    const topbar = layout.slice(layout.indexOf('<header className="topbar">'), layout.indexOf("</header>"));
+    assert.ok(topbar.includes("{meta.group}"));
+    assert.ok(!topbar.includes("meta.title"));
+  });
+
+  it("places account status and the lock action in the global header", () => {
+    const layout = source("apps/web/src/components/Layout.tsx");
+    const portfolio = source("apps/web/src/pages/Portfolio.tsx");
+    assert.ok(layout.includes("accountHeaderStatus"));
+    assert.ok(layout.includes('aria-label="Lock account"'));
+    assert.ok(layout.includes("disabled={accountLockDisabled}"));
+    assert.ok(layout.includes("context={registerAccountHeader}"));
+    assert.ok(portfolio.includes("useOutletContext<AccountHeaderRegistration"));
+    assert.ok(portfolio.includes('!supported ? "unavailable" : session ? "unlocked" : "locked"'));
+    assert.ok(portfolio.includes("session && accountVault ? lock : null"));
+    assert.ok(portfolio.includes("await accountVault.lock()"));
+    assert.ok(!portfolio.includes("Lock now"));
   });
 
   it("keeps the page heading consistent with that short name", () => {
@@ -175,17 +189,23 @@ describe("Batch 1 shortened copy keeps its meaning", () => {
     assert.ok(sdk.includes('role="note"'), "the warning is announced as a note");
   });
 
-  it("uses one load label because one click still runs every read for the view", () => {
+  it("uses one shared load label and one observable single-flight owner", () => {
     const analytics = source("apps/web/src/components/AccountAnalytics.tsx");
+    const owner = source("apps/web/src/lib/accountSessionOwner.ts");
+    const portfolio = source("apps/web/src/pages/Portfolio.tsx");
     assert.ok(analytics.includes('const loadLabel = "Load account data"'));
     assert.ok(analytics.includes('const refreshLabel = "Refresh account data"'));
     for (const stale of ["Load your trades", "Load your orders", "Load money movements", "Load P&L inputs"]) {
       assert.ok(!analytics.includes(stale), `${stale} implies per-section loading`);
     }
-    // The reads themselves are unchanged: this batch only renamed the action,
-    // so one click still performs the whole view load.
-    assert.ok(analytics.includes("account.fetchOfficialSpotCatalog("), "the same read path is still used");
-    assert.ok(analytics.includes("const load = useCallback(async (explicit = false)"), "one load entry point");
+    assert.ok(owner.includes("export class AccountSessionOwner"));
+    assert.ok(owner.includes("subscribe = (listener: () => void)"), "the owner is observable");
+    assert.ok(owner.includes("this.inFlight?.key === key"), "concurrent triggers single-flight");
+    assert.ok(owner.includes("this.coordinator.loadAll(options)"), "the consented read bundle remains centralized");
+    assert.ok(owner.includes("this.coordinator.loadBalanceHistory(options)"));
+    assert.ok(owner.includes("this.coordinator.loadOpenOrders(options)"));
+    assert.ok(!analytics.includes("Choose Load account data."), "per-dataset cards refer back to the shared action");
+    assert.ok(portfolio.includes("new AccountSessionOwner({ vault: accountVault })"));
   });
 });
 
@@ -363,9 +383,10 @@ describe("Batch 1 mobile data visibility", () => {
     assert.ok(!css.includes(".hide-sm"), "the hiding utility is gone");
   });
 
-  it("keeps the environment badge at every width", () => {
+  it("keeps one global environment label at every width", () => {
     assert.ok(layout.includes("<span className=\"topbar-eyebrow\">"), "the badge carries no width class");
-    assert.ok(layout.includes("Read-only · {apiEnv}"), "it still names the network");
+    assert.ok(layout.includes("Read-only · {apiEnv}"), "the topbar names the network");
+    assert.equal([...layout.matchAll(/\{apiEnv\}/g)].length, 1, "environment identity is not repeated in the sidebar or footer");
   });
 
   it("restacks the tape row instead of dropping the match column", () => {

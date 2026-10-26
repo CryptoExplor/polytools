@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink, useLocation, useSearchParams } from "react-router-dom";
+import { Link, NavLink, useLocation, useOutletContext, useSearchParams } from "react-router-dom";
 import { NETWORKS, vault } from "@poly/core";
 import {
   Card,
@@ -29,6 +29,8 @@ import {
   IconVault,
 } from "../components/icons";
 import { AccountAnalytics } from "../components/AccountAnalytics";
+import type { AccountHeaderRegistration } from "../components/Layout";
+import { AccountSessionOwner } from "../lib/accountSessionOwner";
 import Flow from "./Flow";
 import {
   moneyMovementScope,
@@ -47,6 +49,7 @@ type SignedOutput = vault.SignedRequestResult & {
 };
 
 type AccountSection = "overview" | "api" | "trade" | "orders" | "pnl" | "transactions";
+const NOOP_ACCOUNT_HEADER_REGISTRATION: AccountHeaderRegistration = () => {};
 
 // Short labels so all six tabs fit a phone width; the page headings keep the
 // full names. Routes are unchanged.
@@ -62,26 +65,25 @@ const ACCOUNT_TABS: Array<{ to: string; section: AccountSection; label: string }
 const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle?: string }> = {
   overview: {
     title: "Account overview",
-    subtitle: "Balances, orders, trades, flows, and fee rates. Each section has its own status.",
   },
   api: {
     title: "API setup",
   },
   trade: {
     title: "Your Trades",
-    subtitle: "Only executions belonging to your connected account. Public trades live under Market Data → Trades.",
+    subtitle: "Your fills. Public trades: Market Data → Trades.",
   },
   orders: {
     title: "Your Orders",
-    subtitle: "Open and completed orders from your connected account, not the public book.",
+    subtitle: "Your open and completed orders, not the public book.",
   },
   pnl: {
     title: "Profit and Loss",
-    subtitle: "Cost-basis estimates need complete inputs. Realized P&L needs no current mark.",
+    subtitle: "Complete inputs required. Realized P&L needs no current mark.",
   },
   transactions: {
     title: "Money Movements",
-    subtitle: "Your deposits, withdrawals, and transfers, or a public lookup by ID.",
+    subtitle: "Private transfers or a single public lookup.",
   },
 };
 
@@ -126,60 +128,45 @@ function AccountTabs() {
 function AccountTransactions({
   accountVault,
   session,
+  scope,
+  onSelectScope,
 }: {
   accountVault: vault.AccountVault | null;
   session: vault.VaultSessionInfo | null;
+  scope: MoneyMovementScope;
+  onSelectScope: (scope: MoneyMovementScope) => void;
 }) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const scope = moneyMovementScope(searchParams);
-  const selectScope = (next: MoneyMovementScope) => {
-    setSearchParams(withMoneyMovementScope(searchParams, next), { replace: true });
-  };
   return (
     <>
       {/* One decision, one control. The description beside the choice says what
           the current view does, so a second notice would only repeat it. */}
       <Card
-        title="Money movements"
-        subtitle={
-          scope === "mine"
-            ? "Signed private reads. Nothing loads until you choose Load account data, and missing data is never shown as an empty history."
-            : "Lookup by transaction hash or flow ID. It is not a feed of every transaction and never requires your account key."
-        }
         actions={
           <div className="seg-group" role="group" aria-label="Money movement view">
-            <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} aria-pressed={scope === "mine"} onClick={() => selectScope("mine")}>
+            <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} aria-pressed={scope === "mine"} onClick={() => onSelectScope("mine")}>
               My account
             </button>
-            <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} aria-pressed={scope === "all"} onClick={() => selectScope("all")}>
+            <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} aria-pressed={scope === "all"} onClick={() => onSelectScope("all")}>
               Public transaction lookup
             </button>
           </div>
         }
       >
-        <p className="faint mb-0">
-          {scope === "mine"
-            ? "Your transfers come from signed reads on this device. Public lookup is a separate, credential-free search."
-            : "Nothing about your account is read in this view."}
-        </p>
+        {scope === "all" && <p className="faint mb-0">Single lookup, not a feed. No account key.</p>}
       </Card>
-      {scope === "mine" ? (
-        session && accountVault ? (
-          <AccountAnalytics accountVault={accountVault} session={session} view="transfers" />
-        ) : (
-          <Card title="Your money movements" actions={<Pill kind="info">Account locked</Pill>}>
-            <EmptyState
-              icon={<IconFlow size={22} />}
-              title="Unlock an account to view your transfers"
-              description="No private request is made while locked. Unlock a key in API setup, or use public lookup."
-            />
-            <div className="row-flex mt-3" style={{ gap: 8 }}>
-              <Link to="/account/api" className="btn sm primary">Open API setup</Link>
-              <button type="button" className="btn sm" onClick={() => selectScope("all")}>Use public lookup</button>
-            </div>
-          </Card>
-        )
-      ) : <Flow embedded />}
+      {scope === "all" ? <Flow embedded /> : !(session && accountVault) ? (
+        <Card>
+          <EmptyState
+            icon={<IconFlow size={22} />}
+            title="Unlock to view your transfers"
+            description="No private request while locked. Set up a key or use public lookup."
+          />
+          <div className="row-flex mt-3" style={{ gap: 8 }}>
+            <Link to="/account/api" className="btn sm primary">Open API setup</Link>
+            <button type="button" className="btn sm" onClick={() => onSelectScope("all")}>Use public lookup</button>
+          </div>
+        </Card>
+      ) : null}
     </>
   );
 }
@@ -189,6 +176,7 @@ const PASSPHRASE_HELP =
 
 export default function Portfolio() {
   const [accountVault, setAccountVault] = useState<vault.AccountVault | null>(null);
+  const [sessionOwner, setSessionOwner] = useState<{ vault: vault.AccountVault; owner: AccountSessionOwner } | null>(null);
   const [entries, setEntries] = useState<vault.VaultEntrySummary[]>([]);
   const [legacy, setLegacy] = useState<vault.LegacyVaultStatus>({
     present: false,
@@ -220,8 +208,30 @@ export default function Portfolio() {
 
   const supported = vault.ed25519Supported();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const section = accountSection(location.pathname);
   const header = ACCOUNT_HEADERS[section];
+  const movementScope = moneyMovementScope(searchParams);
+  const selectMovementScope = useCallback((scope: MoneyMovementScope) => {
+    setSearchParams(withMoneyMovementScope(searchParams, scope), { replace: true });
+  }, [searchParams, setSearchParams]);
+  const accountDataOwner = sessionOwner?.vault === accountVault ? sessionOwner.owner : null;
+  const analyticsView = section === "trade"
+    ? "trades"
+    : section === "orders"
+      ? "orders"
+      : section === "pnl"
+        ? "pnl"
+        : section === "transactions"
+          ? "transfers"
+          : "overview";
+  const privateAnalyticsActive =
+    section === "overview" || section === "trade" || section === "orders" || section === "pnl" ||
+    (section === "transactions" && movementScope === "mine" && Boolean(session && accountVault));
+  const privateAnalyticsActiveRef = useRef(privateAnalyticsActive);
+  privateAnalyticsActiveRef.current = privateAnalyticsActive;
+  const registerAccountHeader =
+    useOutletContext<AccountHeaderRegistration | null>() ?? NOOP_ACCOUNT_HEADER_REGISTRATION;
 
   // Construct in an effect so React StrictMode's development setup/cleanup
   // cycle cannot reuse a disposed BroadcastChannel or vault session.
@@ -230,6 +240,29 @@ export default function Portfolio() {
     setAccountVault(instance);
     return () => instance.dispose();
   }, []);
+
+  useEffect(() => {
+    if (!accountVault) return;
+    const owner = new AccountSessionOwner({ vault: accountVault });
+    setSessionOwner({ vault: accountVault, owner });
+    return () => owner.dispose();
+  }, [accountVault]);
+
+  useEffect(() => {
+    if (!accountDataOwner) return;
+    accountDataOwner.setActive(privateAnalyticsActive);
+    if (!privateAnalyticsActive) return () => accountDataOwner.setActive(false);
+    const onVisibility = () => {
+      if (privateAnalyticsActiveRef.current && document.visibilityState === "visible") {
+        void accountDataOwner.refreshIfActivated(typeof window !== "undefined" && window.isSecureContext);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      accountDataOwner.setActive(false);
+    };
+  }, [accountDataOwner, privateAnalyticsActive]);
 
   const refresh = useCallback(async () => {
     if (!accountVault) return;
@@ -305,7 +338,7 @@ export default function Portfolio() {
     [operation],
   );
 
-  const run = async (action: () => Promise<void>) => {
+  const run = useCallback(async (action: () => Promise<void>) => {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -316,7 +349,7 @@ export default function Portfolio() {
     } finally {
       setBusy(false);
     }
-  };
+  }, []);
 
   const clearCreationSecrets = () => {
     setPassphrase("");
@@ -381,13 +414,28 @@ export default function Portfolio() {
       }
     });
 
-  const lock = () =>
+  const lock = useCallback(() =>
     run(async () => {
       if (!accountVault) return;
       await accountVault.lock();
       setSignedOutput(null);
       setNotice("Locked. Signing stopped and the in-memory session was discarded.");
-    });
+    }),
+    [accountVault, run],
+  );
+
+  useEffect(() => {
+    registerAccountHeader(
+      !supported ? "unavailable" : session ? "unlocked" : "locked",
+      session && accountVault ? lock : null,
+      busy,
+    );
+  }, [accountVault, busy, lock, registerAccountHeader, session, supported]);
+
+  useEffect(
+    () => () => registerAccountHeader("locked", null, false),
+    [registerAccountHeader],
+  );
 
   const saveRegisteredId = () =>
     run(async () => {
@@ -435,25 +483,9 @@ export default function Portfolio() {
       <AccountTabs />
       <PageHeader
         title={header.title}
-        badge={
-          <Pill kind={section === "transactions" ? "accent" : session ? "up" : supported ? "warn" : "down"}>
-            {section === "transactions"
-              ? "Scoped · Read-only"
-              : session
-                ? "Unlocked · Memory Only"
-                : supported
-                  ? "Locked"
-                  : "WebCrypto Unavailable"}
-          </Pill>
-        }
         subtitle={header.subtitle}
-        actions={
+        actions={section === "api" ? (
           <div className="row-flex" style={{ gap: 8 }}>
-            {session && (
-              <button type="button" className="btn sm" onClick={() => void lock()} disabled={busy}>
-                Lock now
-              </button>
-            )}
             <a
               href={vault.POLYESTER_API_KEYS_URL}
               target="_blank"
@@ -468,7 +500,7 @@ export default function Portfolio() {
               <span>SDK Quickstart</span>
             </Link>
           </div>
-        }
+        ) : undefined}
       />
 
       {section === "api" && (
@@ -488,12 +520,6 @@ export default function Portfolio() {
           tooltip="An encrypted local entry, not a live connection."
         />
         <MetricCell
-          label="Connection"
-          value={session ? "Unlocked" : "Locked"}
-          sub={session ? "This tab's memory only" : "New tabs start locked"}
-          tooltip="Locking clears the session and private account snapshots."
-        />
-        <MetricCell
           label="Key storage"
           value="Encrypted browser storage"
           sub="Passphrase unlocks"
@@ -509,11 +535,8 @@ export default function Portfolio() {
         </>
       )}
 
-      {section === "overview" && <AccountAnalytics accountVault={accountVault} session={session} view="overview" />}
-      {section === "trade" && <AccountAnalytics accountVault={accountVault} session={session} view="trades" />}
-      {section === "orders" && <AccountAnalytics accountVault={accountVault} session={session} view="orders" />}
-      {section === "pnl" && <AccountAnalytics accountVault={accountVault} session={session} view="pnl" />}
-      {section === "transactions" && <AccountTransactions accountVault={accountVault} session={session} />}
+      {section === "transactions" && <AccountTransactions accountVault={accountVault} session={session} scope={movementScope} onSelectScope={selectMovementScope} />}
+      <AccountAnalytics owner={accountDataOwner} session={session} view={analyticsView} active={privateAnalyticsActive} />
 
       {section === "api" && (
         <>
@@ -981,9 +1004,6 @@ export default function Portfolio() {
             </ol>
           </details>
           <div className="row-flex mt-2" style={{ gap: 8 }}>
-            <a href={vault.POLYESTER_API_KEYS_URL} target="_blank" rel="noreferrer" className="btn sm primary">
-              Official Key UI <IconExternal size={11} />
-            </a>
             <a
               href={`${NETWORKS.testnet.docsUrl}/developer-docs/authentication-security/ed25519-api-keys`}
               target="_blank"

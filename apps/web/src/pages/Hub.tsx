@@ -160,7 +160,6 @@ function nextReset(nowMs = Date.now()): number {
 export default function Hub() {
   const now = useNow(1000);
   const {
-    apiEnv,
     dataSource,
     envInfo,
     marketsError,
@@ -204,14 +203,6 @@ export default function Hub() {
   const pct = Math.round((done.size / CHECKLIST.length) * 100);
   const metadataAvailable = marketsUpdatedAt !== null;
   const metadataPending = !metadataAvailable && marketsLoading;
-  const environmentLabel = metadataAvailable
-    ? apiEnv.toUpperCase()
-    : metadataPending
-      ? "PENDING"
-      : "UNKNOWN";
-  const environmentTelemetry = metadataAvailable
-    ? apiEnv
-    : telemetryFallback(metadataPending);
   const metadataStale = marketsCacheStatus ? now >= marketsCacheStatus.freshUntil : false;
   const dataSourceLabel = metadataAvailable
     ? marketsCacheStatus
@@ -226,8 +217,6 @@ export default function Hub() {
     <div className="page-stack">
       <PageHeader
         title="Start on testnet"
-        badge={<Pill kind="warn">ENV: {environmentLabel}</Pill>}
-        subtitle="Testnet checklist, daily reset, and official links."
         actions={
           <div className="row-flex">
             <Link to="/sdk" className="btn sm primary">
@@ -243,20 +232,6 @@ export default function Hub() {
 
       <MetricStrip>
         <MetricCell
-          label="Active Environment"
-          trend="warn"
-          value={environmentLabel}
-          sub={
-            metadataAvailable
-              ? marketsCacheStatus
-                ? "Validated cached public catalog"
-                : "Read-only MCP data source"
-              : metadataPending
-                ? "Waiting for market metadata"
-                : "Market metadata unavailable"
-          }
-        />
-        <MetricCell
           label="Daily Claim Reset"
           value="00:00 UTC"
           sub={`Current time: ${fmtTimeUTC(now)} UTC`}
@@ -268,7 +243,7 @@ export default function Hub() {
           sub="Saved locally in this browser"
         />
         <MetricCell
-          label="Listed Testnet Markets"
+          label="Listed markets"
           value={
             metadataAvailable
               ? `${pairs.length} pairs`
@@ -438,10 +413,6 @@ export default function Hub() {
                   {connectionStatus.toUpperCase()}
                 </Pill>
               </span>
-            </div>
-            <div className="kv">
-              <span className="k">Serving Environment (apiEnv)</span>
-              <span className="v mono">{environmentTelemetry}</span>
             </div>
             <div className="kv">
               <span className="k">Data Source</span>

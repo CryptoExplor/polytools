@@ -414,11 +414,6 @@ a:hover {
   color: var(--text-faint);
 }
 
-.topbar-crumb-current {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
 .topbar-eyebrow {
   margin-left: 6px;
   font-family: var(--mono);
@@ -517,6 +512,60 @@ a:hover {
   background: var(--bg-elevated);
   border-color: var(--border-default);
   box-shadow: var(--shadow-sm);
+}
+
+.account-session-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-shell);
+}
+
+.account-session-status__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.account-session-status__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.account-session-status__refresh {
+  margin-left: auto;
+  min-height: 40px;
+}
+
+.account-read-help {
+  margin-bottom: 12px;
+}
+
+.account-load-scope {
+  margin-top: 12px;
+}
+
+@media (max-width: 680px) {
+  .account-session-status {
+    align-items: stretch;
+  }
+  .account-session-status__meta {
+    width: 100%;
+  }
+  .account-session-status__refresh {
+    width: 100%;
+    margin-left: 0;
+    justify-content: center;
+  }
 }
 
 .page-header {

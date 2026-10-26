@@ -309,7 +309,7 @@ describe("Account data coordinator (synthetic authenticated transport)", () => {
 
     const source = await readFile(new URL("../apps/web/src/components/AccountAnalytics.tsx", import.meta.url), "utf8");
     const disclosureStart = source.indexOf("<strong>Before loading account data:</strong>");
-    assert.notEqual(disclosureStart, -1, "the read scope is visibly disclosed before the activation controls");
+    assert.notEqual(disclosureStart, -1, "the read scope remains disclosed before the activation controls");
     const disclosureEnd = source.indexOf("</div>", disclosureStart);
     const disclosure = source.slice(disclosureStart, disclosureEnd);
     for (const label of [
@@ -327,15 +327,18 @@ describe("Account data coordinator (synthetic authenticated transport)", () => {
       assert.ok(disclosure.includes(label), `disclosure should name ${label}`);
     }
 
-    const loadStart = source.indexOf("const load = useCallback");
-    const loadEnd = source.indexOf("const importHistory", loadStart);
-    const activation = source.slice(loadStart, loadEnd);
-    assert.match(activation, /fetchOfficialSpotCatalog/);
-    assert.match(activation, /coordinator\.loadAll\(options\)/);
-    assert.match(activation, /coordinator\.loadBalanceHistory\(options\)/);
-    assert.match(activation, /coordinator\.loadOpenOrders\(options\)/);
-    assert.match(activation, /if \(!explicit && !activatedRef\.current\) return/);
-    assert.match(source, /document\.visibilityState === "visible"\) void load\(false\)/);
+    const owner = await readFile(new URL("../apps/web/src/lib/accountSessionOwner.ts", import.meta.url), "utf8");
+    assert.match(owner, /this\.fetchCatalog\(\{ signal: request\.controller\.signal \}\)/);
+    assert.match(owner, /this\.coordinator\.loadAll\(options\)/);
+    assert.match(owner, /this\.coordinator\.loadBalanceHistory\(options\)/);
+    assert.match(owner, /this\.coordinator\.loadOpenOrders\(options\)/);
+    assert.match(owner, /if \(!options\.explicit && !this\.state\.activated\) return Promise\.resolve\(\)/);
+    assert.match(owner, /this\.inFlight\?\.key === key/);
+
+    const portfolio = await readFile(new URL("../apps/web/src/pages/Portfolio.tsx", import.meta.url), "utf8");
+    assert.match(portfolio, /document\.addEventListener\("visibilitychange", onVisibility\)/);
+    assert.match(portfolio, /refreshIfActivated/);
+    assert.match(portfolio, /privateAnalyticsActive/);
   });
 
   it("loads typed open orders independently, including an omitted exhausted cursor", async () => {

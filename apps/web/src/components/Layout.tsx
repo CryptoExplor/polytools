@@ -8,7 +8,7 @@ import {
   POLYESTER_FULL_LOGO_DARK_SVG,
   POLYESTER_LOGOMARK_SVG,
 } from "../brand";
-import { SymbolSelect } from "./ui";
+import { Pill, SymbolSelect } from "./ui";
 import { GlossaryDrawer } from "./Glossary";
 import { PublicCacheStatus } from "./PublicCacheStatus";
 import { WireSampleNotice } from "./WireSampleNotice";
@@ -35,6 +35,13 @@ import {
   IconX,
   IconZipper,
 } from "./icons";
+
+export type AccountHeaderStatus = "locked" | "unlocked" | "unavailable";
+export type AccountHeaderRegistration = (
+  status: AccountHeaderStatus,
+  lockAction: (() => Promise<void>) | null,
+  lockDisabled: boolean,
+) => void;
 
 interface NavItem {
   to: string;
@@ -132,6 +139,17 @@ export function Layout() {
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [brandMenuOpen, setBrandMenuOpen] = useState(false);
   const [brandCopiedNote, setBrandCopiedNote] = useState<string | null>(null);
+  const [accountHeaderStatus, setAccountHeaderStatus] = useState<AccountHeaderStatus>("locked");
+  const [accountLockDisabled, setAccountLockDisabled] = useState(false);
+  const accountLockActionRef = useRef<(() => Promise<void>) | null>(null);
+  const registerAccountHeader = useCallback<AccountHeaderRegistration>(
+    (status, lockAction, lockDisabled) => {
+      accountLockActionRef.current = lockAction;
+      setAccountHeaderStatus(status);
+      setAccountLockDisabled(lockDisabled);
+    },
+    [],
+  );
   const [introDismissed, setIntroDismissed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(INTRO_STORAGE_KEY) === "dismissed";
@@ -160,6 +178,25 @@ export function Layout() {
     group: "Workspace",
     showSymbolSelector: false,
   };
+  const isAccountRoute =
+    loc.pathname === "/account" ||
+    loc.pathname.startsWith("/account/") ||
+    loc.pathname === "/portfolio";
+  const accountHeaderKind = accountHeaderStatus === "unlocked"
+    ? "up"
+    : accountHeaderStatus === "unavailable"
+      ? "down"
+      : "warn";
+  const accountHeaderLabel = accountHeaderStatus === "unlocked"
+    ? "Unlocked"
+    : accountHeaderStatus === "unavailable"
+      ? "Unavailable"
+      : "Locked";
+  const accountHeaderTitle = accountHeaderStatus === "unavailable"
+    ? "WebCrypto is unavailable in this browser"
+    : accountHeaderStatus === "unlocked"
+      ? "This tab's in-memory account session"
+      : "No unlocked account session";
 
   const dismissIntro = useCallback(() => {
     setIntroDismissed(true);
@@ -336,7 +373,7 @@ export function Layout() {
             <span className="brand-meta">
               <span>PolyTools</span>
               <span className="brand-sub">
-                {brandCopiedNote ? `✓ ${brandCopiedNote}` : `Read-only · ${apiEnv}`}
+                {brandCopiedNote ? `✓ ${brandCopiedNote}` : "Read-only"}
               </span>
             </span>
           </NavLink>
@@ -430,7 +467,6 @@ export function Layout() {
         <div className="sidebar-footer">
           <div className="sidebar-meta-line">
             <span>{pairs.length ? `${pairs.length} pairs · ${assets.length} assets` : "MCP read-only"}</span>
-            <span className="mono">{apiEnv}</span>
           </div>
           <div className="sidebar-disclaimer">
             Public analytics for{" "}
@@ -458,13 +494,9 @@ export function Layout() {
 
           <div className="topbar-breadcrumb">
             <span className="topbar-crumb-group">{meta.group}</span>
-            <span className="topbar-crumb-sep">/</span>
-            <span className="topbar-crumb-current">{meta.title}</span>
-            {/* The environment stays on screen at every width: a reader on a
-                phone must still be able to tell testnet from mainnet. */}
-            <span className="topbar-eyebrow">
-              Read-only · {apiEnv}
-            </span>
+            <span className="topbar-crumb-sep" aria-hidden="true">·</span>
+            {/* Keep the network identity visible at every width. */}
+            <span className="topbar-eyebrow">Read-only · {apiEnv}</span>
           </div>
 
           <div className="spacer" />
@@ -518,6 +550,27 @@ export function Layout() {
                 <IconRefresh size={12} />
                 <span>Try again</span>
               </button>
+            )}
+
+            {isAccountRoute && (
+              <>
+                <Pill kind={accountHeaderKind} title={accountHeaderTitle}>
+                  {accountHeaderLabel}
+                </Pill>
+                {accountHeaderStatus === "unlocked" && (
+                  <button
+                    type="button"
+                    className="btn sm ghost"
+                    onClick={() => void accountLockActionRef.current?.()}
+                    aria-label="Lock account"
+                    disabled={accountLockDisabled}
+                    title="Lock account; clears the session and private account data"
+                  >
+                    <IconVault size={13} />
+                    <span>Lock</span>
+                  </button>
+                )}
+              </>
             )}
 
             <button
@@ -581,12 +634,12 @@ export function Layout() {
             </section>
           )}
 
-          <Outlet />
+          <Outlet context={registerAccountHeader} />
         </main>
 
         <footer className="foot">
           <span>
-            PolyTools · Read-only companion for Polyester ({apiEnv}) ·{" "}
+            PolyTools · Read-only companion for Polyester ·{" "}
             {meta.group === "Account" ? (
               "Account amounts retain exact API decimal strings"
             ) : (

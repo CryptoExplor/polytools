@@ -104,9 +104,10 @@ describe("Account UX source and cache isolation", () => {
 
     assert.ok(!portfolio.includes("<Tape"));
     assert.ok(!portfolio.includes("<Book"));
-    assert.ok(portfolio.includes('view="trades"'));
-    assert.ok(portfolio.includes('view="orders"'));
-    assert.ok(portfolio.includes('view="transfers"'));
+    assert.ok(portfolio.includes('section === "trade"\n    ? "trades"'));
+    assert.ok(portfolio.includes('section === "orders"\n      ? "orders"'));
+    assert.ok(portfolio.includes('section === "transactions"\n          ? "transfers"'));
+    assert.ok(portfolio.includes('<AccountAnalytics owner={accountDataOwner} session={session} view={analyticsView} active={privateAnalyticsActive} />'));
     assert.ok(!analytics.includes("api.trades"));
     assert.ok(!analytics.includes("/api/trades"));
     assert.ok(!analytics.includes("../lib/api"));
@@ -167,13 +168,25 @@ describe("Account UX source and cache isolation", () => {
     assert.ok(rest.includes('redirect: "error"'));
   });
 
-  it("wires private transfers separately from the explicit public Flow lookup", () => {
+  it("wires private transfers to the shared owner and keeps public Flow lookup credential-free", () => {
     const portfolio = source("apps/web/src/pages/Portfolio.tsx");
     assert.ok(portfolio.includes('scope === "mine"'));
-    assert.ok(portfolio.includes('<AccountAnalytics accountVault={accountVault} session={session} view="transfers" />'));
-    assert.ok(portfolio.includes(") : <Flow embedded />}"));
+    assert.ok(portfolio.includes('scope === "all" ? <Flow embedded />'));
+    assert.ok(portfolio.includes('section === "transactions" && movementScope === "mine"'));
+    assert.ok(portfolio.includes("accountDataOwner.setActive(privateAnalyticsActive)"));
+    assert.ok(portfolio.includes('<AccountAnalytics owner={accountDataOwner} session={session} view={analyticsView} active={privateAnalyticsActive} />'));
     assert.ok(portfolio.includes("Public transaction lookup"));
-    assert.ok(portfolio.includes("not a feed of every transaction"));
+    assert.ok(portfolio.includes("Single lookup, not a feed."));
+  });
+
+  it("gates refresh and private rendering to active private Account views", () => {
+    const portfolio = source("apps/web/src/pages/Portfolio.tsx");
+    const analytics = source("apps/web/src/components/AccountAnalytics.tsx");
+    assert.ok(portfolio.includes("if (!privateAnalyticsActive) return"));
+    assert.ok(portfolio.includes("privateAnalyticsActiveRef.current && document.visibilityState === \"visible\""));
+    assert.ok(analytics.includes("if (!active) return null;"));
+    assert.ok(analytics.includes("return owner.load({ explicit, secureContext })"));
+    assert.equal(render(React.createElement(AccountAnalytics, { session: null, active: false })), "");
   });
 });
 
@@ -247,10 +260,10 @@ describe("Account per-view rendering and empty states", () => {
         React.createElement(Portfolio),
       ),
     );
-    assert.ok(html.includes("Unlock an account to view your transfers"));
-    assert.ok(html.includes("No private request is made while locked"));
+    assert.ok(html.includes("Unlock to view your transfers"));
+    assert.ok(html.includes("No private request while locked"));
     assert.ok(html.includes("Public transaction lookup"));
-    assert.ok(html.includes("use public lookup"));
+    assert.ok(html.includes("Set up a key or use public lookup"));
     assert.ok(!html.includes("Public flow lookup results"));
   });
 

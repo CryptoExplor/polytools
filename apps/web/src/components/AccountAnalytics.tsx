@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { account, fmtAgo } from "@poly/core";
 import { Card, ConfirmDialog, EmptyState, MetricCell, MetricStrip, Pill } from "./ui";
 import { IconActivity, IconAlert, IconClock, IconRefresh } from "./icons";
 import { downloadAccountExport } from "../lib/download";
+import type { AccountSessionOwner, AccountSessionOwnerState } from "../lib/accountSessionOwner";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { AccountCostBasis } from "./AccountCostBasis";
 
@@ -350,7 +351,7 @@ function BalanceHistoryCard({ dataset, loading, range }: {
       ) : dataset ? (
         <><NoDataset dataset={dataset} /><DatasetMessages dataset={dataset} fixedRange /></>
       ) : !loading ? (
-        <EmptyState title="Balance history is not loaded" description="Choose Load account data." />
+        <EmptyState title="Balance history is not loaded" description="Use the shared account action above to retry." />
       ) : null}
     </Card>
   );
@@ -384,7 +385,7 @@ function OpenOrdersCard({ dataset, loading, onDetails }: {
       ) : dataset ? (
         <><NoDataset dataset={dataset} /><DatasetMessages dataset={dataset} /></>
       ) : !loading ? (
-        <EmptyState title="Open orders are not loaded" description="Choose Load account data." />
+        <EmptyState title="Open orders are not loaded" description="Use the shared account action above to retry." />
       ) : null}
     </Card>
   );
@@ -485,28 +486,52 @@ function OrderDetailsDrawer({ selection, dataset, loading, onClose, onRetry }: {
   );
 }
 
+const EMPTY_OWNER_STATE: AccountSessionOwnerState = {
+  sessionGeneration: null,
+  range: "30d",
+  activated: false,
+  snapshot: null,
+  balanceHistory: null,
+  openOrders: null,
+  loading: false,
+  balanceHistoryLoading: false,
+  openOrdersLoading: false,
+  catalogReady: false,
+  markets: {},
+  error: null,
+};
+const NOOP_SUBSCRIBE = () => () => {};
+const EMPTY_OWNER_SNAPSHOT = () => EMPTY_OWNER_STATE;
+
 export function AccountAnalytics({
-  accountVault,
+  owner = null,
   session,
   view = "overview",
+  active = true,
 }: {
-  accountVault: account.AccountVault | null;
+  owner?: AccountSessionOwner | null;
   session: account.VaultSessionInfo | null;
   view?: AccountAnalyticsView;
+  active?: boolean;
 }) {
-  const [coordinator, setCoordinator] = useState<account.AccountDataCoordinator | null>(null);
-  const [snapshot, setSnapshot] = useState<account.AccountDataSnapshot | null>(null);
-  const [balanceHistory, setBalanceHistory] = useState<BalanceHistoryDataset | null>(null);
-  const [openOrders, setOpenOrders] = useState<OpenOrdersDataset | null>(null);
+  const ownerState = useSyncExternalStore(
+    owner?.subscribe ?? NOOP_SUBSCRIBE,
+    owner?.getSnapshot ?? EMPTY_OWNER_SNAPSHOT,
+    owner?.getSnapshot ?? EMPTY_OWNER_SNAPSHOT,
+  );
+  const coordinator = owner?.coordinator ?? null;
+  const snapshot = ownerState.snapshot;
+  const balanceHistory = ownerState.balanceHistory;
+  const openOrders = ownerState.openOrders;
+  const loading = ownerState.loading;
+  const balanceHistoryLoading = ownerState.balanceHistoryLoading;
+  const openOrdersLoading = ownerState.openOrdersLoading;
+  const catalogReady = ownerState.catalogReady;
+  const range = ownerState.range;
   const [orderDetails, setOrderDetails] = useState<OrderDetailsDataset | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<OrderSelection | null>(null);
-  const [range, setRange] = useState<account.AccountHistoryRange>("30d");
-  const [loading, setLoading] = useState(false);
-  const [balanceHistoryLoading, setBalanceHistoryLoading] = useState(false);
-  const [openOrdersLoading, setOpenOrdersLoading] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const [catalogReady, setCatalogReady] = useState(false);
   const [pendingExport, setPendingExport] = useState<{
     dataset: account.AccountExportDataset;
     format: account.AccountExportFormat;
@@ -518,78 +543,63 @@ export function AccountAnalytics({
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [importPageCap, setImportPageCap] = useState(500);
   const [importProgress, setImportProgress] = useState<Partial<Record<account.AccountCursorImportOperation, account.AccountCursorProgress>>>({});
-  const requestRef = useRef<AbortController | null>(null);
   const importRequestRef = useRef<AbortController | null>(null);
-  const requestContextRef = useRef<string | null>(null);
-  const activatedRef = useRef(false);
   const selectedOrderRef = useRef<OrderSelection | null>(null);
   const detailsRequestRef = useRef<AbortController | null>(null);
   const detailsGenerationRef = useRef(0);
-  const marketsRef = useRef<Readonly<Record<string, account.FillMarket>>>({});
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   useEffect(() => {
-    if (!accountVault) return;
-    const instance = new account.AccountDataCoordinator({ vault: accountVault });
-    setCoordinator(instance);
-    return () => {
-      requestRef.current?.abort();
-      detailsRequestRef.current?.abort();
-      importRequestRef.current?.abort();
-      requestRef.current = null;
-      detailsRequestRef.current = null;
-      importRequestRef.current = null;
-      selectedOrderRef.current = null;
-      instance.dispose();
-      setCoordinator(null);
-    };
-  }, [accountVault]);
-
-  useEffect(() => {
-    requestRef.current?.abort();
     detailsRequestRef.current?.abort();
     importRequestRef.current?.abort();
-    requestRef.current = null;
     detailsRequestRef.current = null;
     importRequestRef.current = null;
-    requestContextRef.current = null;
-    activatedRef.current = false;
     selectedOrderRef.current = null;
-    marketsRef.current = {};
     detailsGenerationRef.current += 1;
-    setSnapshot(null);
-    setBalanceHistory(null);
-    setOpenOrders(null);
     setOrderDetails(null);
     setSelectedOrder(null);
-    setLocalError(null);
-    setCatalogReady(false);
-    setLoading(false);
+    setDetailsLoading(false);
     setImporting(false);
     setImportNotice(null);
     setImportProgress({});
-    setBalanceHistoryLoading(false);
-    setOpenOrdersLoading(false);
-    setDetailsLoading(false);
+    setLocalError(null);
     setPendingExport(null);
     setTransferAssetFilter("ALL");
     setTransferDirectionFilter("ALL");
     setTransferReasonFilter("ALL");
-  }, [session?.generation]);
+  }, [ownerState.sessionGeneration, session?.generation]);
 
   useEffect(() => () => {
-    requestRef.current?.abort();
     detailsRequestRef.current?.abort();
     importRequestRef.current?.abort();
     selectedOrderRef.current = null;
   }, []);
 
+  useEffect(() => {
+    if (active) return;
+    detailsRequestRef.current?.abort();
+    importRequestRef.current?.abort();
+    detailsRequestRef.current = null;
+    importRequestRef.current = null;
+    detailsGenerationRef.current += 1;
+    selectedOrderRef.current = null;
+    setSelectedOrder(null);
+    setOrderDetails(null);
+    setDetailsLoading(false);
+    setImporting(false);
+    setImportNotice(null);
+    setImportProgress({});
+    setPendingExport(null);
+  }, [active]);
+
   const secureContext = typeof window !== "undefined" && window.isSecureContext;
   const canAttempt = Boolean(
-    secureContext && coordinator && session?.registeredKeyId && !loading && !importing,
+    active && secureContext && owner && session?.registeredKeyId && !loading && !importing,
   );
 
   const loadDetails = useCallback(async (selection: OrderSelection, preserve = false) => {
-    if (!coordinator || !session || !accountVault || !secureContext || !session.registeredKeyId) return;
+    if (!active || !coordinator || !session || !secureContext || !session.registeredKeyId) return;
     detailsRequestRef.current?.abort();
     const controller = new AbortController();
     const generation = ++detailsGenerationRef.current;
@@ -598,6 +608,7 @@ export function AccountAnalytics({
     if (!preserve) setOrderDetails(null);
     setDetailsLoading(true);
     const isCurrent = () => (
+      activeRef.current &&
       detailsRequestRef.current === controller &&
       detailsGenerationRef.current === generation &&
       !controller.signal.aborted &&
@@ -608,7 +619,7 @@ export function AccountAnalytics({
       const next = await coordinator.loadOrderDetails({
         orderId: selection.orderId,
         ...(selection.subaccountId === undefined ? {} : { subaccountId: selection.subaccountId }),
-        markets: marketsRef.current,
+        markets: owner?.getSnapshot().markets ?? {},
         signal: controller.signal,
       });
       if (isCurrent()) setOrderDetails(next);
@@ -623,7 +634,7 @@ export function AccountAnalytics({
         detailsRequestRef.current = null;
       }
     }
-  }, [accountVault, coordinator, secureContext, session]);
+  }, [active, coordinator, owner, secureContext, session]);
 
   const openDetails = useCallback((order: account.NormalizedOrder) => {
     const selection: OrderSelection = { orderId: order.orderId };
@@ -643,95 +654,29 @@ export function AccountAnalytics({
     setDetailsLoading(false);
   }, []);
 
-  const load = useCallback(async (explicit = false) => {
-    if (!coordinator || !session || !accountVault || importRequestRef.current) return;
-    // The first private read always requires the explicit button. Visibility
-    // may refresh only a connection that the user already chose to verify.
-    if (!explicit && !activatedRef.current) return;
+  const load = useCallback((explicit = false) => {
+    if (!active || !owner || !session || importRequestRef.current) return Promise.resolve();
     if (!secureContext) {
       if (explicit) setLocalError("A secure HTTPS browser context is required before an authenticated read can be attempted.");
-      return;
+      return Promise.resolve();
     }
     if (!session.registeredKeyId) {
       if (explicit) setLocalError("Save the server-issued ak_... key ID before attempting an authenticated read.");
-      return;
+      return Promise.resolve();
     }
-    if (explicit) activatedRef.current = true;
-    const contextKey = `${session.generation}:${range}`;
-    if (requestRef.current && requestContextRef.current === contextKey) return;
-    requestRef.current?.abort();
-    const controller = new AbortController();
-    requestRef.current = controller;
-    requestContextRef.current = contextKey;
-    const isCurrent = () => requestRef.current === controller && !controller.signal.aborted;
-    setLoading(true);
-    setBalanceHistoryLoading(true);
-    setOpenOrdersLoading(true);
     setPendingExport(null);
     setLocalError(null);
     setImportNotice(null);
     setImportProgress({});
-    try {
-      const catalog = await account.fetchOfficialSpotCatalog({ signal: controller.signal });
-      if (!isCurrent()) return;
-      // The unsigned official catalog also supplies a server reference clock.
-      // Apply only the server-minus-local offset to future signing timestamps.
-      const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
-      const skewMs = BigInt(catalog.tsSec) * 1_000n - BigInt(catalog.retrievedAtMs);
-      if (skewMs > maxSafe || skewMs < -maxSafe) {
-        throw new Error("The official catalog clock offset is outside the supported range.");
-      }
-      accountVault.setClockSkew(Number(skewMs));
-      marketsRef.current = catalog.markets;
-      setCatalogReady(true);
-      const options = { range, markets: catalog.markets, signal: controller.signal };
-      const tasks: Promise<void>[] = [
-        coordinator.loadAll(options).then((next) => {
-          if (isCurrent()) setSnapshot(next);
-        }),
-        coordinator.loadBalanceHistory(options).then((next) => {
-          if (isCurrent()) setBalanceHistory(next);
-        }).finally(() => {
-          if (isCurrent()) setBalanceHistoryLoading(false);
-        }),
-        coordinator.loadOpenOrders(options).then((next) => {
-          if (isCurrent()) setOpenOrders(next);
-        }).finally(() => {
-          if (isCurrent()) setOpenOrdersLoading(false);
-        }),
-      ];
-      const selected = selectedOrderRef.current;
-      if (selected) void loadDetails(selected, true);
-      const results = await Promise.allSettled(tasks);
-      if (isCurrent()) {
-        const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-        if (rejected) {
-          const safe = account.safeAccountError(rejected.reason);
-          setLocalError(`${safe.code}: ${errorText(safe)}`);
-        }
-      }
-    } catch (error) {
-      if (isCurrent()) {
-        const safe = account.safeAccountError(error);
-        setLocalError(`${safe.code}: ${errorText(safe)}`);
-      }
-    } finally {
-      if (isCurrent()) {
-        setLoading(false);
-        setBalanceHistoryLoading(false);
-        setOpenOrdersLoading(false);
-        requestRef.current = null;
-        requestContextRef.current = null;
-      }
-    }
-  }, [accountVault, coordinator, loadDetails, secureContext, session, range]);
+    return owner.load({ explicit, secureContext });
+  }, [active, owner, secureContext, session]);
 
   const importHistory = useCallback(async () => {
-    if (!coordinator || !session || !accountVault || !secureContext || !session.registeredKeyId || !snapshot || !catalogReady || loading || importRequestRef.current) return;
+    if (!active || !coordinator || !owner || !session || !secureContext || !session.registeredKeyId || !snapshot || !catalogReady || loading || importRequestRef.current) return;
     const controller = new AbortController();
     importRequestRef.current = controller;
     const period = { ...snapshot.period };
-    const isCurrent = () => importRequestRef.current === controller && !controller.signal.aborted;
+    const isCurrent = () => activeRef.current && importRequestRef.current === controller && !controller.signal.aborted;
     setImporting(true);
     setImportProgress({});
     setPendingExport(null);
@@ -742,7 +687,7 @@ export function AccountAnalytics({
         period,
         maxPages: importPageCap,
         operations: CURSOR_IMPORT_OPERATIONS[view],
-        markets: marketsRef.current,
+        markets: ownerState.markets,
         signal: controller.signal,
         onProgress: (progress) => {
           if (isCurrent()) {
@@ -758,15 +703,7 @@ export function AccountAnalytics({
         setLocalError(`${failed.code}: Cursor import did not finish. The previous snapshot remains visible; ${errorText(failed)}`);
         return;
       }
-      setSnapshot((current) => {
-        if (!current || current.period.startTime !== period.startTime || current.period.endTime !== period.endTime) return current;
-        return {
-          ...current,
-          ...(result.orders ? { orders: result.orders } : {}),
-          ...(result.fills ? { fills: result.fills } : {}),
-          ...(result.transfers ? { transfers: result.transfers } : {}),
-        };
-      });
+      owner.mergeImportedHistory(period, result);
     } catch (error) {
       if (isCurrent()) {
         const safe = account.safeAccountError(error);
@@ -778,21 +715,13 @@ export function AccountAnalytics({
         setImporting(false);
       }
     }
-  }, [accountVault, catalogReady, coordinator, importPageCap, loading, secureContext, session, snapshot, view]);
+  }, [active, catalogReady, coordinator, importPageCap, loading, owner, ownerState.markets, secureContext, session, snapshot, view]);
 
   const cancelImport = useCallback(() => {
     if (!importRequestRef.current) return;
     importRequestRef.current.abort();
     setImportNotice("Import cancelled; previous snapshot retained. The cancelled prefix was not merged.");
   }, []);
-
-  useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") void load(false);
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [load]);
 
   const visibleDatasets: AnyDataset[] = view === "overview"
     ? [...(snapshot ? [snapshot.balances, snapshot.equity, snapshot.feeRates] : []), ...(balanceHistory ? [balanceHistory] : [])]
@@ -860,22 +789,23 @@ export function AccountAnalytics({
     }
   }, [snapshot, pendingExport, filteredTransfers, transferAssetFilter, transferDirectionFilter, transferReasonFilter]);
   const connectionLabel = loading
-    ? "Checking your account…"
+    ? "Refreshing account data…"
     : !session
       ? "Account locked"
       : !session.registeredKeyId
         ? "Account key ID needed"
-        : hasViewResponse
-          ? visibleSuccessful === 0
-            ? "No account data is available"
-            : hasIncomplete
-              ? "Some account data is incomplete"
-              : "Account data loaded"
-          : "Ready to check your account";
+        : ownerState.error && !hasViewResponse
+          ? "Account read needs attention"
+          : hasViewResponse
+            ? visibleSuccessful === 0
+              ? "No account data is available"
+              : hasIncomplete
+                ? "Some account data is incomplete"
+                : "Account data loaded"
+            : "Ready to check your account";
   const copy = VIEW_COPY[view];
   const costBasisAccountScope = snapshot?.fills.data?.summary.calculations[0]?.fill.accountScope
     ?? (session ? JSON.stringify([session.entryId, "root"]) : "");
-  // One action covers every read this view makes, so the label stays generic.
   const loadLabel = "Load account data";
   const refreshLabel = "Refresh account data";
   const periodLabel = view === "trades" ? "Trade time period" : view === "orders" ? "Completed-order time period" : view === "pnl" ? "P&L analysis time period" : "Balance and equity time period";
@@ -901,24 +831,39 @@ export function AccountAnalytics({
     setPendingExport(null);
   }, [view]);
 
+  if (!active) return null;
+
   return (
     <Card>
-      <div className="row-flex" style={{ gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-        {session && <Pill kind={hasViewResponse && !hasIncomplete && visibleSuccessful > 0 ? "up" : "warn"}>{connectionLabel}</Pill>}
-        <span className={`pill ${secureContext && session?.registeredKeyId ? "info" : "warn"}`}>
-          {secureContext ? (session?.registeredKeyId ? "Key ID saved" : "Key ID required") : "HTTPS required"}
-        </span>
+      <div className="account-session-status" role="group" aria-label="Shared account status and refresh">
+        <div className="account-session-status__meta">
+          <Pill kind={hasViewResponse && !hasIncomplete && visibleSuccessful > 0 ? "up" : "warn"}>{connectionLabel}</Pill>
+          <span className={`pill ${secureContext && session?.registeredKeyId ? "info" : "warn"}`}>
+            {secureContext ? (session?.registeredKeyId ? "Key ID saved" : "Key ID required") : "HTTPS required"}
+          </span>
+          {hasViewResponse && <span className="faint account-session-status__time"><IconClock size={12} /> {latest ? `Latest update ${fmtAgo(latest)}` : "No successful response time"}</span>}
+        </div>
+        <button type="button" className="btn primary account-session-status__refresh" disabled={!canAttempt} onClick={() => void load(true)}>
+          {loading ? <IconRefresh size={14} /> : <IconActivity size={14} />}
+          {loading ? "Refreshing…" : ownerState.activated ? refreshLabel : loadLabel}
+        </button>
       </div>
 
-      <details className="disclosure" style={{ marginBottom: 14 }}>
-        <summary>What this means</summary>
+      <details className="disclosure account-read-help">
+        <summary>Read scope, session memory, and limitations</summary>
         <p>
           <strong>Live compatibility remains unverified.</strong>{" "}
           Authenticated GET reads are enabled, but each operation still succeeds or fails independently. Browser CORS, origin, and owner-controlled read-policy checks determine whether a real response is available; a response is not evidence of another permission.
         </p>
         <p>
-          <strong>Section-scoped memory.</strong> Changing account sections intentionally discards this section&apos;s in-memory snapshots, cursor imports, and manual P&amp;L inputs. Reload or re-enter them when you return; no private data is persisted to retain them.
+          <strong>Unlocked-session memory.</strong> After the first explicit activation, validated private responses are shared across Account views in memory only. Locking, changing, importing, or wiping the vault clears them. No private response is persisted; manual P&amp;L inputs remain view-local and are discarded when leaving P&amp;L.
         </p>
+        <div className="notice info account-load-scope" role="note">
+          <div>
+            <strong>Before loading account data:</strong>{" "}
+            Activation requests the official spot-market catalog and starts read-only requests for balances, equity history, order history, fills, transfers, fee rates, balance history, and open orders—not just the dataset shown in this section. After activation, while a private Account view is active, the same broad bundle may be requested again when the document becomes visible. No trade, order, or transaction actions are submitted.
+          </div>
+        </div>
         <p>
           <strong>Empty is not zero.</strong> Each read keeps its own status, and public market data is never
           substituted for it. A denied, partial, or unavailable read is never shown as an empty account or a
@@ -931,48 +876,31 @@ export function AccountAnalytics({
         </div>
       </details>
 
-      <div className="notice info account-load-scope" role="note" style={{ marginBottom: 14 }}>
-        <div>
-          <strong>Before loading account data:</strong>{" "}
-          Activation requests the official spot-market catalog and starts read-only requests for balances, equity history, order history, fills, transfers, fee rates, balance history, and open orders—not just the dataset shown in this section. After activation, if this section remains mounted, the same broad bundle may be requested again when the document becomes visible. No trade, order, or transaction actions are submitted.
-        </div>
-      </div>
+      {ownerState.error && <div className="notice error" role="alert" title={`Technical error code: ${ownerState.error.code}`}><IconAlert size={15} /><span>{errorText(ownerState.error)}</span></div>}
+      {localError && <div className="notice error" role="alert" style={{ marginBottom: 14 }}><IconAlert size={15} /><span>{localError}</span></div>}
 
-      <div className="row-flex" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+      <div className="account-view-controls row-flex" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         {view !== "transfers" && <label className="field" style={{ minWidth: 180 }}>
           <span className="faint">{periodLabel}</span>
           <select className="select" value={range} onChange={(event) => {
-            requestRef.current?.abort();
             detailsRequestRef.current?.abort();
             importRequestRef.current?.abort();
-            requestRef.current = null;
             detailsRequestRef.current = null;
             importRequestRef.current = null;
-            requestContextRef.current = null;
             detailsGenerationRef.current += 1;
-            setSnapshot(null);
-            setBalanceHistory(null);
-            setOpenOrders(null);
             setOrderDetails(null);
             setSelectedOrder(null);
             selectedOrderRef.current = null;
-            setLoading(false);
             setImporting(false);
             setImportNotice(null);
             setImportProgress({});
-            setBalanceHistoryLoading(false);
-            setOpenOrdersLoading(false);
             setDetailsLoading(false);
             setPendingExport(null);
-            setRange(event.target.value as account.AccountHistoryRange);
+            owner?.setRange(event.target.value as account.AccountHistoryRange);
           }} aria-label="Account reporting period">
             {RANGES.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
         </label>}
-        <button type="button" className="btn primary" disabled={!canAttempt} onClick={() => void load(true)}>
-          <IconActivity size={14} /> {loading ? "Loading…" : hasViewResponse ? refreshLabel : loadLabel}
-        </button>
-        {hasViewResponse && <span className="faint"><IconClock size={12} /> {latest ? `Latest update ${fmtAgo(latest)}` : "No successful response time"}</span>}
       </div>
       {snapshot && CURSOR_IMPORT_OPERATIONS[view].length > 0 && (
         <div className="notice info" role="note" style={{ marginBottom: 14 }}>
@@ -1007,7 +935,6 @@ export function AccountAnalytics({
         </div>
       )}
       {importNotice && <div className="notice info" role="status" style={{ marginBottom: 14 }}>{importNotice}</div>}
-      {localError && <div className="notice error" role="alert" style={{ marginBottom: 14 }}><IconAlert size={15} /><span>{localError}</span></div>}
       <p className="faint">Exact API decimal strings; display rounding never changes the arithmetic.</p>
 
       {view === "overview" && (snapshot || balanceHistory || balanceHistoryLoading) && <BalanceHistoryCard dataset={balanceHistory} loading={balanceHistoryLoading} range={range} />}
@@ -1171,7 +1098,7 @@ export function AccountAnalytics({
         />
       )}
       {loading && <div className="notice info" role="status"><IconRefresh size={15} /><span>Reading independent datasets. A spinner is not a value.</span></div>}
-      {view === "orders" && selectedOrder && <OrderDetailsDrawer selection={selectedOrder} dataset={orderDetails} loading={detailsLoading} onClose={closeDetails} onRetry={() => void loadDetails(selectedOrder, true)} />}
+      {view === "orders" && selectedOrder && session && ownerState.sessionGeneration === session.generation && <OrderDetailsDrawer selection={selectedOrder} dataset={orderDetails} loading={detailsLoading} onClose={closeDetails} onRetry={() => void loadDetails(selectedOrder, true)} />}
       <ConfirmDialog
         open={pendingExport !== null}
         title="Download private financial activity?"

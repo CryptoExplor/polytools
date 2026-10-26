@@ -295,11 +295,6 @@ export default function Dashboard() {
     <div className="page-stack">
       <PageHeader
         title="Markets"
-        badge={
-          data?.apiEnv ? (
-            <Pill kind={data.apiEnv === "testnet" ? "warn" : "up"}>{data.apiEnv}</Pill>
-          ) : null
-        }
         subtitle="Spot markets with 24h stats. Refreshes every 3s."
         actions={
           <DataFreshness

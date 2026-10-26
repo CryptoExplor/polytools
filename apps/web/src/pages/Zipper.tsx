@@ -195,17 +195,12 @@ export default function Zipper() {
     <div className="page-stack">
       <PageHeader
         title="Bridge routes"
-        badge={
-          cfg?.apiEnv ? (
-            <Pill kind={cfg.apiEnv === "testnet" ? "warn" : "up"}>{cfg.apiEnv}</Pill>
-          ) : null
-        }
         subtitle="Compare routes per token: fee, minimum, and confirmation time. No address is created here."
         actions={
           <DataFreshness
-            updatedAt={cmpAt ?? cfgAt}
+            updatedAt={(currentCmp ? cmpAt : null) ?? cfgAt}
             refreshing={cmpRefreshing || cfgRefreshing}
-            error={cmpError ?? cfgError}
+            error={displayCmpError ?? cfgError}
             intervalSec={60}
             onRefresh={() => {
               refreshCfg();

@@ -176,12 +176,7 @@ export default function Compare() {
     <div className="page-stack">
       <PageHeader
         title="Compare prices"
-        badge={
-          ov?.apiEnv ? (
-            <Pill kind={ov.apiEnv === "testnet" ? "warn" : "up"}>{ov.apiEnv}</Pill>
-          ) : null
-        }
-        subtitle="Polyester vs CoinGecko USD. Reference only — not tradable."
+        subtitle="CoinGecko USD vs Polyester USDT/USDC. Reference only—not tradable or an arbitrage signal."
         actions={
           <div className="row-flex">
             <DataFreshness
@@ -200,14 +195,6 @@ export default function Compare() {
         }
       />
 
-      {/* Non-executable informational banner (UX-T5-01) */}
-      <div className="notice warn" role="note">
-        <div>
-          <strong>Reference comparison only:</strong> CoinGecko USD vs Polyester USDT/USDC
-          testnet prices. Differences are not executable trades or arbitrage opportunities.
-        </div>
-      </div>
-
       {/* Explicit Dual-Source Telemetry Strip */}
       <MetricStrip>
         <MetricCell
@@ -216,7 +203,7 @@ export default function Compare() {
           value={ovError ? "Unavailable" : polyesterSample ? "Sample data" : ovAt ? `Updated ${fmtAgo(ovAt, now)}` : "Loading…"}
           sub={
             ovAt
-              ? `${polyesterSample ? "Development wire sample · not live" : "Polled every 5s"} · ${fmtTimeUTC(ovAt)} UTC`
+              ? `${polyesterSample ? "Development wire sample · not live" : "Backend MCP"} · ${fmtTimeUTC(ovAt)} UTC`
               : "Via backend MCP facade"
           }
         />
@@ -226,14 +213,13 @@ export default function Compare() {
           value={cgError ? "Rate-Limited / Error" : cgAt ? `Updated ${fmtAgo(cgAt, now)}` : "Loading…"}
           sub={
             cgAt
-              ? `Polled every 35s · ${fmtTimeUTC(cgAt)} UTC`
+              ? `Public REST API · ${fmtTimeUTC(cgAt)} UTC`
               : "Free public REST API"
           }
         />
         <MetricCell
           label="Timestamp Skew"
           value={timeSkewSec !== null ? `${timeSkewSec}s offset` : "Unsynchronized"}
-          sub="Feeds poll on independent intervals"
         />
         <MetricCell
           label="Matched Pairs"
@@ -272,12 +258,9 @@ export default function Compare() {
 
       <div className="notice info">
         <div>
-          <strong>Asynchronous Reference Notice:</strong> Polyester prices poll every{" "}
-          <strong>5s</strong> while CoinGecko USD reference prices poll every{" "}
-          <strong>35s</strong> to respect public rate limits. Unavailable reference prices
-          are explicitly marked as <code className="mono">Unavailable</code> and are never
-          represented as zero. On testnet, Polyester prices are matching-engine simulated,
-          so divergence from external spot markets is expected.
+          <strong>Cadence:</strong> Polyester 5s; CoinGecko 35s to respect public rate
+          limits. Missing stays unavailable, never zero. Testnet prices are simulated;
+          divergence is expected.
         </div>
         <button type="button" className="btn sm ghost" onClick={refreshCg} disabled={cgRefreshing}>
           <IconRefresh size={12} /> Refresh reference prices
@@ -296,7 +279,6 @@ export default function Compare() {
       <Card
         flush
         title="Venue Price & Basis-Point Divergence"
-        subtitle={`Comparing Polyester ${priceBasis === "index" ? "Index Price" : "Last Trade Price"} vs CoinGecko USD`}
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <div className="seg-group" role="group" aria-label="Polyester price basis">
