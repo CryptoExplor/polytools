@@ -46,19 +46,19 @@ const MODE_LABELS: Record<
     label: "Explain",
     endpoint: "/api/flow/explain",
     placeholder: "Paste 0x… transaction hash (66 chars)",
-    hint: "Calls explain_transaction — returns a plain-English lifecycle summary and matched flows.",
+    hint: "explain_transaction — plain-English summary and matched flows.",
   },
   "by-tx": {
     label: "Find by tx hash",
     endpoint: "/api/flow/by-tx",
     placeholder: "Paste 0x… transaction hash (66 chars)",
-    hint: "Calls get_lifecycle_flow_by_tx — looks up raw lifecycle flow records by transaction hash.",
+    hint: "get_lifecycle_flow_by_tx — raw flow records by transaction hash.",
   },
   flow: {
     label: "Find by flow id",
     endpoint: "/api/flow",
     placeholder: "Paste UUID or exact flow identifier",
-    hint: "Calls get_lifecycle_flow — looks up lifecycle state by exact flowId (case-sensitive).",
+    hint: "get_lifecycle_flow — state by exact flowId (case-sensitive).",
   },
 };
 
@@ -247,7 +247,7 @@ export default function Flow({ embedded = false }: { embedded?: boolean } = {}) 
         <PageHeader
         title="Track a transfer"
         badge={<Pill kind="accent">Read-Only Trace</Pill>}
-        subtitle="Paste a transaction hash or flow ID to see where a deposit or withdrawal is."
+        subtitle="Paste a transaction hash or flow ID to trace it."
         />
       )}
 
@@ -451,7 +451,7 @@ export default function Flow({ embedded = false }: { embedded?: boolean } = {}) 
           <EmptyState
             icon={<IconFlow size={18} />}
             title="Enter an ID to track a transfer"
-            description="Paste a deposit or withdrawal hash from a supported Zipper chain, or a Polyester flow ID above."
+            description="Paste a Zipper chain hash, or a Polyester flow ID above."
           />
         </Card>
       )}
@@ -483,7 +483,7 @@ export default function Flow({ embedded = false }: { embedded?: boolean } = {}) 
           <EmptyState
             icon={<IconFlow size={18} />}
             title="No public flow indexed for this identifier"
-            description="Polyester has no public flow for this id. That is not the same as a failed transfer."
+            description="No public flow for this ID — not the same as a failed transfer."
           />
           {extractedSummary.summary && (
             <div className="notice mt-2">

@@ -439,7 +439,7 @@ export function HeatmapPage() {
 
           <Card
             title={`Resting Liquidity Density (${symbol} · ${interval})`}
-            subtitle="Green = resting bid depth · Red = resting ask depth · Lines trace best bid & best ask"
+            subtitle="Green = bid depth · Red = ask depth · Lines trace best bid/ask"
             actions={
               hoverCell ? (
                 <span className="mono" style={{ fontSize: 12 }}>
@@ -471,7 +471,7 @@ export function HeatmapPage() {
           <div className="mt-3">
             <Card
               title="Most Persistent Liquidity Price Bands"
-              subtitle="Price bands holding the largest cumulative resting order book volume across the window"
+              subtitle="Price bands with the most cumulative resting volume in the window"
               flush
             >
               <div className="table-wrap">
@@ -515,7 +515,7 @@ export function HeatmapPage() {
         <Card>
           <EmptyState
             title="No resting orders in this window"
-            description="The response had no levels, or every level had zero size. Try a longer window or another market."
+            description="No levels, or every level had zero size. Try a longer window or another market."
           />
         </Card>
       )}

@@ -139,7 +139,7 @@ export default function Book() {
             </Pill>
           ) : null
         }
-        subtitle="Bids (buy orders) and asks (sell orders) waiting to be matched. No account key is used; these orders are not yours."
+        subtitle="Resting bids and asks waiting to match. Public data — not your orders."
         actions={
           <div className="row-flex">
             <div className="seg-group" role="group" aria-label="Order book depth levels">

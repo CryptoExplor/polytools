@@ -116,7 +116,7 @@ export function BrandKitPage() {
       <PageHeader
         title="Polyester brand kit"
         badge={<Pill kind="accent">#FA2F6F · Brand Guidelines</Pill>}
-        subtitle="Logos, token images, 3D loops, avatars, colours, and type for Polyester and PolyTools."
+        subtitle="Logos, token art, loops, avatars, colours, and type."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <CopyButton text={POLYESTER_LOGOMARK_SVG} label="Copy Symbol SVG" />
@@ -206,7 +206,7 @@ export function BrandKitPage() {
       {showLogos && (
         <Card
           title="App Favicon, Symbol & Logo Lockups"
-          subtitle="Use the symbol for app icons and favicons, the wordmark on its own, or the full lockup when the symbol sits with the Polyester name. Right-click the top-left sidebar logo at any time for quick copy/download."
+          subtitle="Symbol for icons, wordmark alone, or the full lockup. Right-click the sidebar logo for a quick copy."
           actions={
             <div className="row-flex" style={{ gap: 6 }}>
               <a
@@ -310,7 +310,7 @@ export function BrandKitPage() {
       {showTokens && (
         <Card
           title="Token Packshots & Market Icons"
-          subtitle="Use token packshots when a market or asset should be recognizable in product UI, pair art, and campaign stills. Each token is available in Front, Side, and Low-angle views."
+          subtitle="Token packshots for product UI, pair art, and campaign stills. Front, side, and low-angle views."
           actions={
             <div className="row-flex" style={{ gap: 8 }}>
               <div className="input-group" style={{ width: 200 }}>
@@ -441,7 +441,7 @@ export function BrandKitPage() {
 
           <Card
             title="Typography — Inter Variable"
-            subtitle="Primary UI and editorial typeface used across Polyester product, analytics, and documentation."
+            subtitle="UI and editorial typeface across product, analytics, and docs."
           >
             <div className="brand-type-specimen">
               <div className="brand-type-aa">Aa</div>
@@ -468,7 +468,7 @@ export function BrandKitPage() {
       {showImagery && (
         <Card
           title="Imagery Stills & 3D Motion Loops"
-          subtitle="Use imagery when a surface needs more than the logo: campaigns, social, and hero art. Includes Symbol lineup, Circuit, Infinite Power Loop, Farandole, Synchronism, and studio loops."
+          subtitle="Campaign, social, and hero art: Symbol lineup, Circuit, Infinite Power Loop, Farandole, Synchronism, and studio loops."
         >
           <div className="brand-logo-grid">
             {BRAND_IMAGERY_ASSETS.map((item) => (
@@ -530,7 +530,7 @@ export function BrandKitPage() {
       {showAvatars && (
         <Card
           title="Polybot Avatars"
-          subtitle="Use Polybot avatars for profiles, social, and campaigns. Pick one character and keep that face consistent everywhere."
+          subtitle="Polybot avatars for profiles and campaigns. Keep one character consistent."
           actions={
             <div className="input-group" style={{ width: 210 }}>
               <span className="input-icon">
@@ -593,7 +593,7 @@ export function BrandKitPage() {
       {showPartners && (
         <Card
           title="Partnerships (Zipper) & Polyester Scan Explorer"
-          subtitle="When Polyester sits next to a partner logo like Zipper, keep clear space so both marks stay readable and balanced: partner first, then Polyester, on one line."
+          subtitle="Beside a partner mark, keep clear space: partner first, then Polyester, on one line."
           actions={
             <a
               href={SCAN_BRAND_KIT_ZIP_URL}

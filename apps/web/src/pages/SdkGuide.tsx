@@ -433,7 +433,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       <PageHeader
         title="Developers: SDK quickstart"
         badge={<Pill kind="accent">TypeScript · Python · Rust</Pill>}
-        subtitle="Copy-paste code for the TypeScript, Python, and Rust SDKs, starting with public data and then authenticated requests."
+        subtitle="Copy-paste code for TypeScript, Python, and Rust — public data, then authenticated requests."
         actions={
           <div className="row-flex">
             <a
@@ -490,7 +490,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
       {/* Beginner 4-Step Orientation */}
       <Card
-        title="New to Polyester Development? Start Here (4 Beginner Rules)"
+        title="New to Polyester? Start here (4 rules)"
         subtitle="Understand how Polyester's APIs, prices, and keys work before writing your first line of code."
         actions={<Pill kind="up">Beginner Friendly</Pill>}
       >
@@ -569,7 +569,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       <div className="grid cols-3">
         <Card
           title="TypeScript SDK (@polyester/sdk)"
-          subtitle="Best for Node.js, Bun, Cloudflare Workers, and Browser apps"
+          subtitle="Node.js, Bun, Workers, and browser apps"
           actions={<Pill kind="up">Full-Stack + Browser</Pill>}
           footer={
             <div className="between" style={{ width: "100%" }}>
@@ -605,7 +605,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         <Card
           title="Python SDK (polyester-sdk)"
-          subtitle="Best for trading bots, research scripts, and async automation"
+          subtitle="Trading bots, research scripts, async automation"
           actions={<Pill kind="accent">Async & Sync</Pill>}
           footer={
             <div className="between" style={{ width: "100%" }}>
@@ -641,7 +641,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         <Card
           title="Rust SDK (polyester-sdk)"
-          subtitle="Best for low-latency bots and high-reliability Tokio services"
+          subtitle="Low-latency bots, high-reliability Tokio services"
           actions={<Pill kind="warn">Tokio Async</Pill>}
           footer={
             <div className="between" style={{ width: "100%" }}>
@@ -878,7 +878,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       {/* Interactive Ed25519 5-Field Canonical String & Query Normalizer */}
       <Card
         title="Interactive Ed25519 Canonical String & Query Normalizer"
-        subtitle="See exactly how Polyester constructs the 5-line UTF-8 canonical signing payload for private REST/ConnectRPC requests."
+        subtitle="Exactly how Polyester builds the 5-line UTF-8 signing payload for private requests."
         actions={
           <a
             className="btn sm ghost"
@@ -1076,7 +1076,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         <Card
           flush
           title="Official SDK Capability Matrix"
-          subtitle="Feature coverage across TypeScript, Python, Go, and Rust SDKs"
+          subtitle="TypeScript, Python, Go, and Rust feature coverage"
           actions={
             <a
               className="btn sm ghost"
@@ -1127,7 +1127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         <Card
           flush
           title="Polyester Connectivity & Transport Matrix"
-          subtitle="Choose the right protocol for your workload and latency requirements"
+          subtitle="Pick a protocol by workload and latency"
           actions={
             <a
               className="btn sm ghost"

@@ -194,7 +194,7 @@ export default function Zipper() {
             <Pill kind={cfg.apiEnv === "testnet" ? "warn" : "up"}>{cfg.apiEnv}</Pill>
           ) : null
         }
-        subtitle="Compare deposit routes for each token: network fee, minimum amount, and confirmation time. No deposit address is created here."
+        subtitle="Compare routes per token: fee, minimum, and confirmation time. No address is created here."
         actions={
           <DataFreshness
             updatedAt={cmpAt ?? cfgAt}
@@ -260,7 +260,7 @@ export default function Zipper() {
       <Card
         flush
         title={`Asset Route Comparison · ${asset}`}
-        subtitle="Ranked by the column you chose. Inventory, time, and testnet resets are not included."
+        subtitle="Ranked by the chosen column. Inventory and testnet resets are excluded."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <div className="row-flex" style={{ gap: 6 }}>
@@ -355,7 +355,7 @@ export default function Zipper() {
         ) : rankedRoutes.length === 0 ? (
           <EmptyState
             title={`No routes returned for ${asset}`}
-            description="This asset has no active Zipper deposit/withdrawal routes configured right now. Try USDT, USDC, ETH, BTC, or tETH."
+            description="No active Zipper routes for this asset. Try USDT, USDC, ETH, BTC, or tETH."
             action={
               <div className="row-flex">
                 {["USDT", "ETH", "BTC", "tETH"].map((a) => (
@@ -495,7 +495,7 @@ export default function Zipper() {
         ) : filteredChains.length === 0 ? (
           <EmptyState
             title="No networks match your filter"
-            description="Clear the search filter to view all supported Zipper networks."
+            description="Clear the filter to see every supported network."
           />
         ) : (
           <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
@@ -549,7 +549,7 @@ export default function Zipper() {
         <Card
           flush
           title={`Zipper Protocol Smart Contracts (${cfgContracts.length})`}
-          subtitle="Addresses returned by the loaded public get_deposit_withdraw_config response; not independently verified by PolyTools"
+          subtitle="From the loaded public config; not independently verified by PolyTools"
         >
           <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
             <table className="data">

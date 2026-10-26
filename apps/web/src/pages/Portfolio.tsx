@@ -59,30 +59,29 @@ const ACCOUNT_TABS: Array<{ to: string; section: AccountSection; label: string }
   { to: "/account/transactions", section: "transactions", label: "Deposits" },
 ];
 
-const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle: string }> = {
+const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle?: string }> = {
   overview: {
     title: "Account overview",
-    subtitle: "Your balances, orders, trades, money movements, and current fee rates. Each section reports its own loading, permission, and data-coverage status.",
+    subtitle: "Balances, orders, trades, flows, and fee rates. Each section has its own status.",
   },
   api: {
     title: "API setup",
-    subtitle: "Connect a registered read-only account key. Your key is encrypted in this browser and can sign only approved read requests.",
   },
   trade: {
     title: "Your Trades",
-    subtitle: "Only executions belonging to your connected account. Public market trades are available under Market Data → Trades.",
+    subtitle: "Only executions belonging to your connected account. Public trades live under Market Data → Trades.",
   },
   orders: {
     title: "Your Orders",
-    subtitle: "Open and completed orders from your connected account. This is not the public order book.",
+    subtitle: "Open and completed orders from your connected account, not the public book.",
   },
   pnl: {
     title: "Profit and Loss",
-    subtitle: "User-assisted cost-basis estimates require complete fills, opening basis, resolved flows, and method provenance. Realized P&L does not require a current mark; unrealized and total P&L also require a fresh labeled valuation.",
+    subtitle: "Cost-basis estimates need complete inputs. Realized P&L needs no current mark.",
   },
   transactions: {
     title: "Money Movements",
-    subtitle: "Review deposits, withdrawals, and transfers from your account, or look up a public transaction by its exact ID.",
+    subtitle: "Your deposits, withdrawals, and transfers, or a public lookup by ID.",
   },
 };
 
@@ -172,7 +171,7 @@ function AccountTransactions({
             <EmptyState
               icon={<IconFlow size={22} />}
               title="Unlock an account to view your transfers"
-              description="No private request is made while locked. Set up or unlock an encrypted read-only key in API setup, or choose Public transaction lookup for a credential-free search."
+              description="No private request is made while locked. Unlock a key in API setup, or use public lookup."
             />
             <div className="row-flex mt-3" style={{ gap: 8 }}>
               <Link to="/account/api" className="btn sm primary">Open API setup</Link>
@@ -467,10 +466,7 @@ export default function Portfolio() {
       <div className="notice warn" role="note">
         <div>
           <strong>Use real account keys only in a deployment you control.</strong>{" "}
-          Do not enter a real key in a development server or shared preview. Account reads
-          happen only after an explicit click. Browser security settings, service access,
-          and the key's read permissions still determine whether a request succeeds. The
-          signature inspector below never sends a request.
+          Reads start only on click; the inspector sends none.
         </div>
       </div>
 
@@ -478,26 +474,26 @@ export default function Portfolio() {
         <MetricCell
           label="Saved account keys"
           value={entries.length}
-          sub="Encrypted in this browser · labels are private"
-          tooltip="A saved key is an encrypted local entry. It is not a live account balance or a connection to another user."
+          sub="Encrypted · labels private"
+          tooltip="An encrypted local entry, not a live connection."
         />
         <MetricCell
           label="Connection"
           value={session ? "Unlocked" : "Locked"}
-          sub={session ? "Key available only in this tab's memory" : "New tabs start locked"}
-          tooltip="Unlocking allows approved read requests. Locking removes the session and clears private account snapshots."
+          sub={session ? "This tab's memory only" : "New tabs start locked"}
+          tooltip="Locking clears the session and private account snapshots."
         />
         <MetricCell
           label="Key storage"
           value="Encrypted browser storage"
-          sub="Your passphrase is required to unlock"
-          tooltip="The app uses AES-GCM encryption and PBKDF2 passphrase stretching. These protect stored keys; they do not grant account permissions."
+          sub="Passphrase unlocks"
+          tooltip="AES-GCM and PBKDF2 protect stored keys, not account permissions."
         />
         <MetricCell
           label="Request permissions"
           value="Read-only requests"
-          sub="No trading, cancellation, or money movement"
-          tooltip="Only approved GET requests can be signed. Each request uses a fresh timestamp and cannot place or change orders."
+          sub="Approved GETs only"
+          tooltip="Fresh timestamps; no order or money-moving actions."
         />
       </MetricStrip>
         </>
@@ -577,7 +573,7 @@ export default function Portfolio() {
 
       <Card
         title="Create an Encrypted Key Entry"
-        subtitle="Generate a new Ed25519 pair or import a raw 32-byte seed with its matching public key. Private material is exported only transiently for authenticated encryption, then imported as nonextractable."
+        subtitle="Generate an Ed25519 pair or import a 32-byte seed and matching public key. Private bytes are exported only to encrypt, then re-imported as nonextractable."
         actions={
           <div className="seg-group" role="group" aria-label="Key creation mode">
             <button
@@ -707,7 +703,7 @@ export default function Portfolio() {
 
       <Card
         title="Encrypted Vault Entries"
-        subtitle="While locked, only random local references and KDF parameters are visible. Labels, public keys, registered IDs, and private material remain inside authenticated ciphertext."
+        subtitle="Random references and KDF parameters remain visible; labels, IDs, and key material stay encrypted."
         actions={
           (entries.length > 0 || legacy.present) && (
             <button
@@ -725,7 +721,7 @@ export default function Portfolio() {
           <EmptyState
             icon={<IconVault size={22} />}
             title="No encrypted entries"
-            description="Create or explicitly migrate a key above. An empty vault is not an account connection and shows no balances."
+            description="Create or migrate a key above. An empty vault is not a connection."
           />
         ) : (
           <>
@@ -812,7 +808,7 @@ export default function Portfolio() {
       {session && (
         <Card
           title={`Unlocked: ${session.label}`}
-          subtitle="This metadata is in memory only. Locking aborts the session signal and invalidates late work."
+          subtitle="In-memory only. Locking invalidates late work."
           actions={<Pill kind="up">Private Key Extractable: {String(session.privateKeyExtractable)}</Pill>}
         >
           <div className="kv">
@@ -869,13 +865,13 @@ export default function Portfolio() {
 
       <Card
         title="Read-only Canonical Request Signer"
-        subtitle="Fixed operation registry only. This creates a local signature for inspection; it does not execute fetch, retry, or authenticate an account."
+        subtitle="Fixed operation registry. A local signature for inspection only — no fetch, retry, or auth."
         actions={<Pill kind="info">GET · {operationDefinition.path}</Pill>}
       >
         {!session ? (
           <EmptyState
             title="Vault locked"
-            description="Unlock an encrypted entry to sign. Locked, denied, or unavailable states never become account metrics or a successful connection."
+            description="Unlock an entry to sign. A locked or denied state is never an account metric."
           />
         ) : (
           <>
@@ -964,13 +960,16 @@ export default function Portfolio() {
       </Card>
 
       <div className="grid cols-2">
-        <Card title="Registration & Permission Boundary" subtitle="Key creation and policy attachment remain in Polyester's official UI.">
-          <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
-            <li>Generate locally and copy only the public key into official “Bring your own key”.</li>
-            <li>Attach only verified read policies; never add trading, transfer, or withdrawal writes for analytics.</li>
-            <li>Save the resulting server-issued ak_... ID here with the entry passphrase.</li>
-            <li>Lock clears local use; revoke a compromised key in the official UI.</li>
-          </ol>
+        <Card title="Registration & Permission Boundary" subtitle="Key creation and policy attachment stay in Polyester's official UI.">
+          <details className="disclosure">
+            <summary>Four rules</summary>
+            <ol style={{ margin: "6px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
+              <li>Generate locally and copy only the public key into official “Bring your own key”.</li>
+              <li>Attach read policies only — never trading, transfer, or withdrawal writes.</li>
+              <li>Save the server-issued ak_... ID here with the entry passphrase.</li>
+              <li>Lock clears local use; revoke a compromised key in the official UI.</li>
+            </ol>
+          </details>
           <div className="row-flex mt-2" style={{ gap: 8 }}>
             <a href={vault.POLYESTER_API_KEYS_URL} target="_blank" rel="noreferrer" className="btn sm primary">
               Official Key UI <IconExternal size={11} />
@@ -986,19 +985,20 @@ export default function Portfolio() {
           </div>
         </Card>
         <Card title="Residual Browser Limits" subtitle="AEAD and nonextractable keys reduce exposure; they do not make XSS or a compromised device safe.">
+          <details className="disclosure" style={{ marginBottom: 10 }}>
+            <summary>Memory limits</summary>
+            <p>JavaScript cannot guarantee erasure of every immutable string or garbage-collected copy. Mutable key/passphrase buffers are overwritten where possible; no perfect memory-wiping claim is made.</p>
+          </details>
           <div className="kv"><span className="k">Idle lock</span><span className="v">15 minutes of deliberate inactivity</span></div>
           <div className="kv"><span className="k">Cross-tab control</span><span className="v">Random event/generation IDs only</span></div>
           <div className="kv"><span className="k">Private responses</span><span className="v">Memory-only after explicit live-read opt-in; never persisted</span></div>
-          <p className="faint">
-            JavaScript cannot guarantee erasure of every immutable string or garbage-collected copy. Mutable key/passphrase buffers are overwritten where possible; no perfect memory-wiping claim is made.
-          </p>
         </Card>
       </div>
 
       <ConfirmDialog
         open={pendingConfirm?.kind === "delete"}
         title="Delete encrypted entry?"
-        message="This deletes the selected encrypted private-key record. There is no passphrase recovery or server backup. Other entries and public preferences are untouched."
+        message="Deletes this encrypted key record. No passphrase recovery, no server backup. Other entries stay."
         confirmLabel="Delete Encrypted Entry"
         onCancel={() => setPendingConfirm(null)}
         onConfirm={() => {
@@ -1015,7 +1015,7 @@ export default function Portfolio() {
       <ConfirmDialog
         open={pendingConfirm?.kind === "wipe"}
         title="Forget all local vault data?"
-        message="This locks every tab, deletes all encrypted entries and any quarantined legacy vault, and clears displayed signatures. It does not revoke keys at Polyester; revoke compromised keys in the official UI."
+        message="Locks every tab, deletes all encrypted entries and the quarantined legacy vault, and clears signatures. It does not revoke keys at Polyester — do that in the official UI."
         confirmLabel="Forget All Local Keys"
         onCancel={() => setPendingConfirm(null)}
         onConfirm={() => {
@@ -1030,7 +1030,7 @@ export default function Portfolio() {
       <ConfirmDialog
         open={pendingConfirm?.kind === "legacy-delete"}
         title="Delete quarantined plaintext record?"
-        message="This permanently deletes poly-tools:vault:v1 without migrating it. Other local preferences and encrypted entries are not removed."
+        message="Permanently deletes poly-tools:vault:v1 without migrating it. Other preferences and encrypted entries stay."
         confirmLabel="Delete Legacy Plaintext"
         onCancel={() => setPendingConfirm(null)}
         onConfirm={() => {

@@ -54,7 +54,7 @@ export function CompareEmptyState({
     return (
       <EmptyState
         title="No matches right now"
-        description="These markets have no usable CoinGecko USD price right now. Missing references, unmapped assets, non-USD quotes, and invalid prices are never counted as matches."
+        description="No usable CoinGecko USD price right now. Missing, unmapped, non-USD, and invalid prices are never matches."
         action={<button type="button" className="btn sm" onClick={onShowAll}>Show All Listed</button>}
       />
     );
@@ -63,7 +63,7 @@ export function CompareEmptyState({
     return (
       <EmptyState
         title="No listed markets"
-        description="Polyester returned an empty market overview. This is distinct from a zero-match filter result; no market or reference value is inferred."
+        description="Polyester returned no markets — not a zero-match filter; no value is inferred."
         action={<button type="button" className="btn sm" onClick={onRetry} aria-label="Try again: refresh both feeds">Try again</button>}
       />
     );
@@ -181,7 +181,7 @@ export default function Compare() {
             <Pill kind={ov.apiEnv === "testnet" ? "warn" : "up"}>{ov.apiEnv}</Pill>
           ) : null
         }
-        subtitle="Polyester prices next to CoinGecko USD prices for the same asset. Reference only — you cannot trade this difference."
+        subtitle="Polyester vs CoinGecko USD. Reference only — not tradable."
         actions={
           <div className="row-flex">
             <DataFreshness
@@ -495,7 +495,7 @@ export default function Compare() {
                         </Pill>
                       )}
                       {r.status === "non_usd_quote" && (
-                        <Pill title="Cross-crypto quote pair (e.g. BTC quote); USD comparison skipped">
+                        <Pill title="Cross-crypto quote (e.g. BTC); USD comparison skipped">
                           Non-USD Quote ({r.quote})
                         </Pill>
                       )}
@@ -507,7 +507,7 @@ export default function Compare() {
                       {r.status === "ref_unavailable" && (
                         <Pill
                           kind="warn"
-                          title="No valid CoinGecko USD reference is currently available; missing values are not zero"
+                          title="No valid CoinGecko USD reference; missing is not zero"
                         >
                           Ref Unavailable
                         </Pill>

@@ -113,9 +113,10 @@ describe("Phase 2 P2-5 account copy and lock consistency", () => {
 
   it("separates realized mark independence from unrealized/total requirements", () => {
     const html = renderPortfolio("/account/pnl");
-    assert.ok(html.includes("Realized P&amp;L does not require a current mark"));
-    assert.ok(html.includes("unrealized and total P&amp;L also require a fresh labeled valuation"));
-    assert.ok(html.includes("complete fills, opening basis, resolved flows, and method provenance"));
+    const costBasis = source("apps/web/src/components/AccountCostBasis.tsx");
+    assert.ok(html.includes("Realized P&amp;L needs no current mark"));
+    assert.ok(costBasis.includes("Required for unrealized/total P&L, not realized"));
+    assert.ok(costBasis.includes("Complete fills, opening basis, and resolved flows required"));
   });
 
   it("describes authenticated read-only scope and the experimental R3 path honestly", () => {

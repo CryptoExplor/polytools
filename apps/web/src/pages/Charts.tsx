@@ -124,7 +124,7 @@ export default function Charts() {
             </Pill>
           ) : null
         }
-        subtitle="Price history. Each bar is one time period (open, high, low, close, volume). Hover or use Left/Right arrow keys to inspect a bar."
+        subtitle="Price history. One bar per period. Hover or use Left/Right arrows to inspect."
         actions={
           <div className="row-flex">
             <DataFreshness
@@ -214,7 +214,7 @@ export default function Charts() {
       {/* Timeframe & Overlay Toolbar */}
       <Card
         title={`${symbol} · ${tf} Candles`}
-        subtitle="Hover or focus chart and press Left/Right arrow keys to inspect individual OHLCV bars."
+        subtitle="Focus the chart, then Left/Right inspects a bar."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             {/* All 11 supported exchange timeframes */}

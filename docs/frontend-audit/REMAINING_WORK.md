@@ -24,16 +24,15 @@ can prove from source, markup, arithmetic, or a build artifact.
 |---|---|
 | Contrast: text roles `--text-muted` / `--text-caption`; `.faint` moved to `--text-caption`; `--text-faint` now documented as decorative and used by exactly one separator | `scripts/check-contrast.mjs` (54 token×surface pairs, all ≥4.5:1 in both themes), `tests/contrast-tokens.test.mjs` |
 | Tape: alerts collapsed below the tape behind *Set up alerts*; the summary line reports the live threshold, sound, and desktop state | existing tape tests, `npm run typecheck`, whitespace gate |
-| Account: two always-on warnings → one status line plus a `What this means` disclosure holding both paragraphs **word for word**; 5-cell grid → 3 status pills + 3 compact diagnostics | account UX tests (copy still present verbatim) |
+| Account copy: remove duplicate route/panel headings; keep compatibility, session-memory, and empty-data guidance in a collapsed `What this means` disclosure | account UX tests (single heading; safe empty/denied states retained) |
 | Money Movements: one card, the choice in the card header, one-line description; the duplicated notice is gone; `?scope=` deep-link behaviour untouched | `tests/account-ux.test.mjs`, `tests/phase3-ux.test.mjs` |
 | Mobile: Tape/Book keep Notional; Match ID/age restacks onto its own line; the ladder keeps four columns; the `Read-only · <network>` badge wraps instead of hiding; `.hide-xs` and `.hide-sm` deleted | `tests/frontend-batch1.test.mjs` (mobile data visibility block) and the shell/cache tests assert no width class hides content |
 | Drawer: `height: auto; max-height: 100%; overscroll-behavior: contain` plus a body-scroll lock while open (restored on close) | `tests/dialog-focus.test.mjs`, shell tests |
 | SDK inspector: `apps/web/src/lib/canonicalRequest.ts` validates timestamp/path/query/body and never rewrites input; the panel renders the issues with `aria-invalid` / `aria-describedby` | `tests/canonical-request.test.mjs` (14 cases) |
 | Bundle: every page except the landing route is a lazy chunk behind `Suspense` | `npm run check:performance` — initial JS halved |
 
-Measured, this commit: initial JavaScript **304,727 B / 96,932 B gzip-9** against a 185,000 B ceiling
-(~88 kB headroom, previously ~6 kB); CSS **35,133 B / 7,198 B gzip-9**. Total JavaScript across all
-chunks is 609.30 kB / 191.58 kB gzip-9 — larger in total, smaller on first paint, which is the point.
+Measured, this commit: initial JavaScript **304,667 B / 96,910 B gzip-9** against a 185,000 B ceiling
+(~88 kB headroom, previously ~6 kB); CSS **35,133 B / 7,198 B gzip-9**. Total JavaScript across all 13 emitted JS chunks is 601.66 kB / 189.10 kB gzip-9 — larger in total, smaller on first paint, which is the point.
 The stylesheet is now at 88% of its 40,000 B budget: run `npm run check:performance` before adding
 another sizable block, and prefer trimming a rule to raising the ceiling.
 
@@ -130,12 +129,12 @@ table/chart refactors, and large-scale contrast migration beyond the text roles 
 3. ~~The SDK page's canonical-string inspector has no input validation~~ — **fixed.**
    `apps/web/src/lib/canonicalRequest.ts` reports one issue per field and never rewrites the input.
 4. ~~Bundle headroom is thin~~ — **fixed.** Lazy routes cut the initial payload from 179.22 kB to
-   96.94 kB gzip-9, so the ceiling now has ~88 kB of room.
+   96.91 kB gzip-9, so the ceiling now has ~88 kB of room.
 
 ## 5. Running the gates
 
 ```sh
-npm test                  # 284 tests, 63 suites
+npm test                  # 285 tests, 63 suites
 npm run typecheck
 npm run build
 npm run check:performance # 4/4 budgets

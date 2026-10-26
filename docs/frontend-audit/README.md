@@ -29,10 +29,10 @@ The audit findings, copy inventory, navigation proposal, journey maps, and the p
 | Mobile drawer | fixed `100vh` with page scroll still live behind it | `height: auto` capped at `100%`, `overscroll-behavior: contain`, and a body-scroll lock while open |
 | Text contrast | meaning-carrying `.faint`/`.muted` text at 2.40:1–4.20:1 | text roles `--text-muted` and `--text-caption`; all 54 token×surface pairs ≥4.5:1 in both themes, gated by `check:contrast` |
 | Tape alerts | an always-open control panel above the tape | trades first; alerts collapsed below with a summary line that reports the live threshold, sound, and desktop state |
-| Account warnings | two always-on notices above every account view | one status line plus a `What this means` disclosure holding both paragraphs word for word |
+| Account copy | repeated view headings, subtitles, and always-on caveats | one route heading; concise status; compatibility, session-memory, and empty-data notes collapsed under `What this means` |
 | Money movements | a choice card with a notice plus a second notice | one card, the choice in its header, one-line description, `?scope=` contract unchanged |
 | SDK inspector | hashed whatever was typed, valid or not | `canonicalRequest.ts` reports one issue per field and never rewrites the input |
-| First paint | every page and its dependencies in one 179 kB-gzip bundle | landing route only, every other page a lazy chunk behind `Suspense` (96.94 kB gzip initial) |
+| First paint | every page and its dependencies in one 179 kB-gzip bundle | landing route only, every other page a lazy chunk behind `Suspense` (96.91 kB gzip initial) |
 | Account tabs | six long labels, horizontally scrolling | `Overview · Key setup · Trades · Orders · P&L · Deposits`, active tab scrolled into view |
 | Account load action | five different verbs implying five different scopes | one label; the requests themselves are unchanged |
 | SDK snippets | copy-paste code that could place a real testnet order, never validated | always-visible warning, plus order drafts validated against `tickSize`/`stepSize`/minimums before a snippet or copy is offered |
@@ -41,9 +41,9 @@ The audit findings, copy inventory, navigation proposal, journey maps, and the p
 
 | Check | Result |
 |---|---|
-| `npm test` | 284/284, 63 suites |
+| `npm test` | 285/285, 63 suites |
 | `npm run typecheck` | pass (web + backend) |
-| `npm run build` | initial 304.73 kB JS / 96.93 kB gzip-9, 35.13 kB CSS / 7.20 kB gzip-9; 609.30 kB across all chunks |
+| `npm run build` | initial 304.67 kB JS / 96.91 kB gzip-9, 35.13 kB CSS / 7.20 kB gzip-9; 13 emitted JS chunks total 601.66 kB / 189.10 kB gzip-9 |
 | `npm run check:performance` | 4/4 budgets — JS gzip headroom ~88 kB of 185,000 B; CSS bytes 35,133 of 40,000 |
 | `npm run check:contrast` | 54/54 token×surface pairs ≥4.5:1, both themes |
 | `npm run check:whitespace` | 173/173 files, 0 violations |

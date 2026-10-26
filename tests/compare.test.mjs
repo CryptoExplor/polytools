@@ -168,12 +168,12 @@ describe("P2-10 Compare provenance and empty states", () => {
     const zeroMatch = emptyState({ allRowsCount: 3, overviewReceived: true });
     assert.ok(zeroMatch.includes("No matches right now"));
     assert.ok(zeroMatch.includes("Show All Listed"));
-    assert.ok(zeroMatch.includes("never counted as matches"));
+    assert.ok(zeroMatch.includes("never matches"));
     assert.ok(!zeroMatch.includes("No comparison data available"));
 
     const emptyOverview = emptyState({ allRowsCount: 0, overviewReceived: true });
     assert.ok(emptyOverview.includes("No listed markets"));
-    assert.ok(emptyOverview.includes("distinct from a zero-match filter result"));
+    assert.ok(emptyOverview.includes("not a zero-match filter"));
 
     const unavailable = emptyState({ allRowsCount: 0, overviewError: true });
     assert.ok(unavailable.includes("No comparison data available"));

@@ -146,27 +146,24 @@ describe("Batch 1 single symbol control", () => {
 });
 
 describe("Batch 1 shortened copy keeps its meaning", () => {
-  it("states that public pages never use an account key", () => {
-    for (const pageFile of ["Tape", "Book"]) {
-      assert.ok(
-        source(`apps/web/src/pages/${pageFile}.tsx`).includes("No account key is used"),
-        `${pageFile} keeps the read-only/no-key statement`,
-      );
-    }
+  it("labels public market data as distinct from private account activity", () => {
+    assert.ok(source("apps/web/src/pages/Tape.tsx").includes("Public data — not your fills"));
+    assert.ok(source("apps/web/src/pages/Book.tsx").includes("Public data — not your orders"));
   });
 
   it("keeps the missing-data reasons that explain an empty public view", () => {
     const compare = source("apps/web/src/pages/Compare.tsx");
-    assert.ok(compare.includes("unmapped assets"));
-    assert.ok(compare.includes("non-USD quotes"));
+    assert.ok(compare.includes("unmapped"));
+    assert.ok(compare.includes("non-USD"));
     assert.ok(compare.includes("invalid prices"));
+    assert.ok(compare.includes("never matches"));
     const heatmap = source("apps/web/src/pages/Heatmap.tsx");
     assert.ok(heatmap.includes("zero size"), "the heatmap explains why the window can be empty");
     assert.ok(heatmap.includes("Try a longer window or another market."));
     const book = source("apps/web/src/pages/Book.tsx");
     assert.ok(book.includes("bids") && book.includes("asks"), "order-book terms stay explicit");
     const charts = source("apps/web/src/pages/Charts.tsx");
-    assert.ok(charts.includes("arrow keys"), "the keyboard affordance stays discoverable");
+    assert.ok(charts.includes("Left/Right arrows"), "the keyboard affordance stays discoverable");
   });
 
   it("keeps the SDK testnet-order warning visible before any snippet", () => {

@@ -300,7 +300,7 @@ export default function Dashboard() {
             <Pill kind={data.apiEnv === "testnet" ? "warn" : "up"}>{data.apiEnv}</Pill>
           ) : null
         }
-        subtitle="Prices and 24-hour stats for every Polyester spot market. Updates every 3 seconds."
+        subtitle="Spot markets with 24h stats. Refreshes every 3s."
         actions={
           <DataFreshness
             updatedAt={updatedAt}
@@ -365,7 +365,7 @@ export default function Dashboard() {
       <Card
         flush
         title="Spot markets"
-        subtitle="Open a chart from the symbol, or use the row buttons for order book, trades, and depth."
+        subtitle="Click a symbol for its chart, or open book, trades, or depth."
         actions={
           <button
             type="button"

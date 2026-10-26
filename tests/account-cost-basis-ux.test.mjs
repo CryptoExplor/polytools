@@ -137,15 +137,14 @@ describe("R3 cost-basis panel states and privacy", () => {
     value.fills.data = null;
     value.fills.coverage.status = "denied";
     const html = render(value);
-    assert.ok(html.includes("Profit and loss inputs unavailable"));
     assert.ok(html.includes("Complete fills and transfers are required"));
-    assert.ok(html.includes("Private read failures are never converted to zero activity"));
+    assert.ok(html.includes("Unavailable reads are not zero"));
   });
 
   it("does not infer lifetime inactivity or opening zero from an empty validated fill result", () => {
     const html = render(snapshot({ withFill: false }));
-    assert.ok(html.includes("No fills in the validated response"));
-    assert.ok(html.includes("does not prove lifetime inactivity or establish opening zero"));
+    assert.ok(html.includes("No validated fills"));
+    assert.ok(html.includes("Lifetime history and opening zero are unverified"));
   });
 
   it("adds no credential, persistence, mutation, or public-market fallback path", () => {
@@ -154,6 +153,6 @@ describe("R3 cost-basis panel states and privacy", () => {
       assert.ok(!component.includes(forbidden), forbidden);
     }
     assert.ok(component.includes("Memory only"));
-    assert.ok(component.includes("A current balance or price is never used as historical cost"));
+    assert.ok(component.includes("Current balances and prices are never historical cost"));
   });
 });
