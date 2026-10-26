@@ -184,9 +184,26 @@ describe("Account UX source and cache isolation", () => {
     const analytics = source("apps/web/src/components/AccountAnalytics.tsx");
     assert.ok(portfolio.includes("if (!privateAnalyticsActive) return"));
     assert.ok(portfolio.includes("privateAnalyticsActiveRef.current && document.visibilityState === \"visible\""));
+    assert.ok(analytics.includes("owner?.setRange(range)"));
+    assert.ok(!analytics.includes("refreshIfActivated"), "tab changes select cached data without auto-refreshing");
     assert.ok(analytics.includes("if (!active) return null;"));
-    assert.ok(analytics.includes("return owner.load({ explicit, secureContext })"));
+    assert.ok(analytics.includes("return owner.load({ explicit, secureContext, range })"));
     assert.equal(render(React.createElement(AccountAnalytics, { session: null, active: false })), "");
+  });
+
+  it("keeps periods local to each view, caches them in the owner, and scopes errors to relevant datasets", () => {
+    const analytics = source("apps/web/src/components/AccountAnalytics.tsx");
+    const owner = source("apps/web/src/lib/accountSessionOwner.ts");
+    assert.ok(analytics.includes("const [rangesByView, setRangesByView] = useState(DEFAULT_VIEW_RANGES)"));
+    assert.ok(analytics.includes("const range = rangesByView[view]"));
+    assert.ok(analytics.includes("ownerState.periods[range] ?? EMPTY_RANGE_STATE"));
+    assert.ok(analytics.includes("rangeErrors.balanceHistory ? [rangeErrors.balanceHistory] : []"));
+    assert.ok(analytics.includes("view === \"orders\" && rangeErrors.openOrders"));
+    assert.ok(analytics.includes("account-session-status__controls"));
+    assert.ok(!analytics.includes('className="account-view-controls'));
+    assert.ok(owner.includes("ACCOUNT_DATA_FRESHNESS_MS = 2 * 60 * 1000"));
+    assert.ok(owner.includes("periods: { ...this.state.periods, [range]: next }"));
+    assert.ok(owner.includes("mergeImportedHistory(\n    identity: AccountSessionIdentity"));
   });
 });
 

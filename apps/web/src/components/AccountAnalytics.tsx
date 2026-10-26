@@ -3,7 +3,7 @@ import { account, fmtAgo } from "@poly/core";
 import { Card, ConfirmDialog, EmptyState, MetricCell, MetricStrip, Pill } from "./ui";
 import { IconActivity, IconAlert, IconClock, IconRefresh } from "./icons";
 import { downloadAccountExport } from "../lib/download";
-import type { AccountSessionOwner, AccountSessionOwnerState } from "../lib/accountSessionOwner";
+import type { AccountRangeState, AccountSessionIdentity, AccountSessionOwner, AccountSessionOwnerState } from "../lib/accountSessionOwner";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { AccountCostBasis } from "./AccountCostBasis";
 
@@ -486,19 +486,32 @@ function OrderDetailsDrawer({ selection, dataset, loading, onClose, onRetry }: {
   );
 }
 
-const EMPTY_OWNER_STATE: AccountSessionOwnerState = {
-  sessionGeneration: null,
-  range: "30d",
-  activated: false,
+const EMPTY_RANGE_STATE: AccountRangeState = {
   snapshot: null,
   balanceHistory: null,
   openOrders: null,
   loading: false,
   balanceHistoryLoading: false,
   openOrdersLoading: false,
+  lastAttemptAtMs: null,
+  errors: {},
+};
+const DEFAULT_VIEW_RANGES: Record<AccountAnalyticsView, account.AccountHistoryRange> = {
+  overview: "30d",
+  trades: "30d",
+  orders: "30d",
+  transfers: "30d",
+  pnl: "30d",
+};
+const EMPTY_OWNER_STATE: AccountSessionOwnerState = {
+  sessionGeneration: null,
+  sessionEntryId: null,
+  range: "30d",
+  activated: false,
+  periods: {},
   catalogReady: false,
   markets: {},
-  error: null,
+  catalogError: null,
 };
 const NOOP_SUBSCRIBE = () => () => {};
 const EMPTY_OWNER_SNAPSHOT = () => EMPTY_OWNER_STATE;
@@ -520,14 +533,16 @@ export function AccountAnalytics({
     owner?.getSnapshot ?? EMPTY_OWNER_SNAPSHOT,
   );
   const coordinator = owner?.coordinator ?? null;
-  const snapshot = ownerState.snapshot;
-  const balanceHistory = ownerState.balanceHistory;
-  const openOrders = ownerState.openOrders;
-  const loading = ownerState.loading;
-  const balanceHistoryLoading = ownerState.balanceHistoryLoading;
-  const openOrdersLoading = ownerState.openOrdersLoading;
+  const [rangesByView, setRangesByView] = useState(DEFAULT_VIEW_RANGES);
+  const range = rangesByView[view];
+  const rangeState = ownerState.periods[range] ?? EMPTY_RANGE_STATE;
+  const snapshot = rangeState.snapshot;
+  const balanceHistory = rangeState.balanceHistory;
+  const openOrders = rangeState.openOrders;
+  const loading = rangeState.loading;
+  const balanceHistoryLoading = rangeState.balanceHistoryLoading;
+  const openOrdersLoading = rangeState.openOrdersLoading;
   const catalogReady = ownerState.catalogReady;
-  const range = ownerState.range;
   const [orderDetails, setOrderDetails] = useState<OrderDetailsDataset | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<OrderSelection | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
@@ -549,6 +564,7 @@ export function AccountAnalytics({
   const detailsGenerationRef = useRef(0);
   const activeRef = useRef(active);
   activeRef.current = active;
+  const secureContext = typeof window !== "undefined" && window.isSecureContext;
 
   useEffect(() => {
     detailsRequestRef.current?.abort();
@@ -569,6 +585,10 @@ export function AccountAnalytics({
     setTransferDirectionFilter("ALL");
     setTransferReasonFilter("ALL");
   }, [ownerState.sessionGeneration, session?.generation]);
+
+  useEffect(() => {
+    owner?.setRange(range);
+  }, [owner, range]);
 
   useEffect(() => () => {
     detailsRequestRef.current?.abort();
@@ -593,13 +613,14 @@ export function AccountAnalytics({
     setPendingExport(null);
   }, [active]);
 
-  const secureContext = typeof window !== "undefined" && window.isSecureContext;
   const canAttempt = Boolean(
     active && secureContext && owner && session?.registeredKeyId && !loading && !importing,
   );
 
   const loadDetails = useCallback(async (selection: OrderSelection, preserve = false) => {
-    if (!active || !coordinator || !session || !secureContext || !session.registeredKeyId) return;
+    if (!active || !owner || !coordinator || !session || !secureContext || !session.registeredKeyId) return;
+    const sessionIdentity = owner.captureSessionIdentity();
+    if (!sessionIdentity || !owner.isSessionIdentityCurrent(sessionIdentity)) return;
     detailsRequestRef.current?.abort();
     const controller = new AbortController();
     const generation = ++detailsGenerationRef.current;
@@ -609,6 +630,7 @@ export function AccountAnalytics({
     setDetailsLoading(true);
     const isCurrent = () => (
       activeRef.current &&
+      owner.isSessionIdentityCurrent(sessionIdentity) &&
       detailsRequestRef.current === controller &&
       detailsGenerationRef.current === generation &&
       !controller.signal.aborted &&
@@ -668,15 +690,22 @@ export function AccountAnalytics({
     setLocalError(null);
     setImportNotice(null);
     setImportProgress({});
-    return owner.load({ explicit, secureContext });
-  }, [active, owner, secureContext, session]);
+    return owner.load({ explicit, secureContext, range });
+  }, [active, owner, range, secureContext, session]);
 
   const importHistory = useCallback(async () => {
     if (!active || !coordinator || !owner || !session || !secureContext || !session.registeredKeyId || !snapshot || !catalogReady || loading || importRequestRef.current) return;
+    const sessionIdentity = owner.captureSessionIdentity();
+    if (!sessionIdentity || !owner.isSessionIdentityCurrent(sessionIdentity)) return;
     const controller = new AbortController();
     importRequestRef.current = controller;
     const period = { ...snapshot.period };
-    const isCurrent = () => activeRef.current && importRequestRef.current === controller && !controller.signal.aborted;
+    const isCurrent = () => (
+      activeRef.current &&
+      owner.isSessionIdentityCurrent(sessionIdentity) &&
+      importRequestRef.current === controller &&
+      !controller.signal.aborted
+    );
     setImporting(true);
     setImportProgress({});
     setPendingExport(null);
@@ -703,7 +732,7 @@ export function AccountAnalytics({
         setLocalError(`${failed.code}: Cursor import did not finish. The previous snapshot remains visible; ${errorText(failed)}`);
         return;
       }
-      owner.mergeImportedHistory(period, result);
+      owner.mergeImportedHistory(sessionIdentity, period, result);
     } catch (error) {
       if (isCurrent()) {
         const safe = account.safeAccountError(error);
@@ -735,9 +764,26 @@ export function AccountAnalytics({
   const visibleSuccessful = visibleDatasets.filter((dataset) => dataset.data !== null).length;
   const hasViewResponse = visibleDatasets.length > 0;
   const latest = visibleDatasets.reduce<number | null>((latest, dataset) => {
-    if (!dataset.retrievedAtMs) return latest;
+    if (dataset.retrievedAtMs === null) return latest;
     return latest === null ? dataset.retrievedAtMs : Math.max(latest, dataset.retrievedAtMs);
   }, null);
+  const allRangeDatasets: AnyDataset[] = [
+    ...(snapshot ? [snapshot.balances, snapshot.equity, snapshot.orders, snapshot.fills, snapshot.transfers, snapshot.feeRates] : []),
+    ...(balanceHistory ? [balanceHistory] : []),
+    ...(openOrders ? [openOrders] : []),
+  ];
+  const oldestRangeUpdate = allRangeDatasets.reduce<number | null>((oldest, dataset) => {
+    if (dataset.retrievedAtMs === null) return oldest;
+    return oldest === null ? dataset.retrievedAtMs : Math.min(oldest, dataset.retrievedAtMs);
+  }, null);
+  const dataIsStale = hasViewResponse && Boolean(owner?.isRangeStale(range));
+  const rangeErrors = rangeState.errors;
+  const visibleOwnerErrors: account.SafeAccountError[] = [
+    ...(ownerState.catalogError ? [ownerState.catalogError] : []),
+    ...(rangeErrors.snapshot ? [rangeErrors.snapshot] : []),
+    ...(view === "overview" && rangeErrors.balanceHistory ? [rangeErrors.balanceHistory] : []),
+    ...(view === "orders" && rangeErrors.openOrders ? [rangeErrors.openOrders] : []),
+  ];
   const hasIncomplete = visibleDatasets.some((dataset) => dataset.coverage.status !== "complete" && dataset.coverage.status !== "filter-complete");
   const loadedTransfers = snapshot?.transfers.data?.transfers ?? null;
   const transferAssets = useMemo(
@@ -794,15 +840,19 @@ export function AccountAnalytics({
       ? "Account locked"
       : !session.registeredKeyId
         ? "Account key ID needed"
-        : ownerState.error && !hasViewResponse
+        : visibleOwnerErrors.length > 0 && !hasViewResponse
           ? "Account read needs attention"
           : hasViewResponse
             ? visibleSuccessful === 0
               ? "No account data is available"
-              : hasIncomplete
-                ? "Some account data is incomplete"
-                : "Account data loaded"
-            : "Ready to check your account";
+              : dataIsStale
+                ? "Account data may be stale"
+                : hasIncomplete || visibleOwnerErrors.length > 0
+                  ? "Some account data is incomplete"
+                  : "Account data loaded"
+            : visibleOwnerErrors.length > 0
+              ? "Account read needs attention"
+              : "Ready to check your account";
   const copy = VIEW_COPY[view];
   const costBasisAccountScope = snapshot?.fills.data?.summary.calculations[0]?.fill.accountScope
     ?? (session ? JSON.stringify([session.entryId, "root"]) : "");
@@ -835,18 +885,45 @@ export function AccountAnalytics({
 
   return (
     <Card>
-      <div className="account-session-status" role="group" aria-label="Shared account status and refresh">
+      <div className="account-session-status" role="group" aria-label="Shared account status, period, and refresh">
         <div className="account-session-status__meta">
-          <Pill kind={hasViewResponse && !hasIncomplete && visibleSuccessful > 0 ? "up" : "warn"}>{connectionLabel}</Pill>
+          <Pill kind={hasViewResponse && !hasIncomplete && visibleOwnerErrors.length === 0 && visibleSuccessful > 0 && !dataIsStale ? "up" : "warn"}>{connectionLabel}</Pill>
           <span className={`pill ${secureContext && session?.registeredKeyId ? "info" : "warn"}`}>
             {secureContext ? (session?.registeredKeyId ? "Key ID saved" : "Key ID required") : "HTTPS required"}
           </span>
-          {hasViewResponse && <span className="faint account-session-status__time"><IconClock size={12} /> {latest ? `Latest update ${fmtAgo(latest)}` : "No successful response time"}</span>}
+          {hasViewResponse && <span className="faint account-session-status__time"><IconClock size={12} /> {dataIsStale
+            ? (oldestRangeUpdate ? `Oldest update ${fmtAgo(oldestRangeUpdate)}` : "No successful response time")
+            : (latest ? `Latest update ${fmtAgo(latest)}` : "No successful response time")}</span>}
         </div>
-        <button type="button" className="btn primary account-session-status__refresh" disabled={!canAttempt} onClick={() => void load(true)}>
-          {loading ? <IconRefresh size={14} /> : <IconActivity size={14} />}
-          {loading ? "Refreshing…" : ownerState.activated ? refreshLabel : loadLabel}
-        </button>
+        <div className="account-session-status__controls">
+          {view !== "transfers" && <label className="field account-session-status__period">
+            <span className="faint">{periodLabel}</span>
+            <select className="select" value={range} onChange={(event) => {
+              const nextRange = event.target.value as account.AccountHistoryRange;
+              detailsRequestRef.current?.abort();
+              importRequestRef.current?.abort();
+              detailsRequestRef.current = null;
+              importRequestRef.current = null;
+              detailsGenerationRef.current += 1;
+              setOrderDetails(null);
+              setSelectedOrder(null);
+              selectedOrderRef.current = null;
+              setImporting(false);
+              setImportNotice(null);
+              setImportProgress({});
+              setDetailsLoading(false);
+              setPendingExport(null);
+              setRangesByView((current) => ({ ...current, [view]: nextRange }));
+              owner?.setRange(nextRange);
+            }} aria-label="Account reporting period">
+              {RANGES.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>}
+          <button type="button" className="btn primary account-session-status__refresh" disabled={!canAttempt} onClick={() => void load(true)}>
+            {loading ? <IconRefresh size={14} /> : <IconActivity size={14} />}
+            {loading ? "Refreshing…" : ownerState.activated ? refreshLabel : loadLabel}
+          </button>
+        </div>
       </div>
 
       <details className="disclosure account-read-help">
@@ -861,7 +938,7 @@ export function AccountAnalytics({
         <div className="notice info account-load-scope" role="note">
           <div>
             <strong>Before loading account data:</strong>{" "}
-            Activation requests the official spot-market catalog and starts read-only requests for balances, equity history, order history, fills, transfers, fee rates, balance history, and open orders—not just the dataset shown in this section. After activation, while a private Account view is active, the same broad bundle may be requested again when the document becomes visible. No trade, order, or transaction actions are submitted.
+            Activation requests the official spot-market catalog and starts read-only requests for balances, equity history, order history, fills, transfers, fee rates, balance history, and open orders—not just the dataset shown in this section. After activation, when the document becomes visible, the owner refreshes only if the selected range is over two minutes old; concurrent triggers share one request. Manual refresh bypasses the age threshold. No trade, order, or transaction actions are submitted.
           </div>
         </div>
         <p>
@@ -876,32 +953,8 @@ export function AccountAnalytics({
         </div>
       </details>
 
-      {ownerState.error && <div className="notice error" role="alert" title={`Technical error code: ${ownerState.error.code}`}><IconAlert size={15} /><span>{errorText(ownerState.error)}</span></div>}
+      {visibleOwnerErrors.map((error, index) => <div className="notice error" role="alert" key={`${error.code}-${index}`} title={`Technical error code: ${error.code}`}><IconAlert size={15} /><span>{errorText(error)}</span></div>)}
       {localError && <div className="notice error" role="alert" style={{ marginBottom: 14 }}><IconAlert size={15} /><span>{localError}</span></div>}
-
-      <div className="account-view-controls row-flex" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-        {view !== "transfers" && <label className="field" style={{ minWidth: 180 }}>
-          <span className="faint">{periodLabel}</span>
-          <select className="select" value={range} onChange={(event) => {
-            detailsRequestRef.current?.abort();
-            importRequestRef.current?.abort();
-            detailsRequestRef.current = null;
-            importRequestRef.current = null;
-            detailsGenerationRef.current += 1;
-            setOrderDetails(null);
-            setSelectedOrder(null);
-            selectedOrderRef.current = null;
-            setImporting(false);
-            setImportNotice(null);
-            setImportProgress({});
-            setDetailsLoading(false);
-            setPendingExport(null);
-            owner?.setRange(event.target.value as account.AccountHistoryRange);
-          }} aria-label="Account reporting period">
-            {RANGES.map((value) => <option key={value} value={value}>{value}</option>)}
-          </select>
-        </label>}
-      </div>
       {snapshot && CURSOR_IMPORT_OPERATIONS[view].length > 0 && (
         <div className="notice info" role="note" style={{ marginBottom: 14 }}>
           <div className="row-flex" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
