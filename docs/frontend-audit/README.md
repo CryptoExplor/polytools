@@ -28,6 +28,7 @@ The goal is the one the owner asked for: make existing functionality easier to *
 | [REVIEW_BRIEF.md](./REVIEW_BRIEF.md) | Short independent-review brief for a second AI/human reviewer |
 | [BATCH1_IMPLEMENTATION.md](./BATCH1_IMPLEMENTATION.md) | What the approved batch 1 changed, what the automated checks prove, and the browser pass still required |
 | [BATCH2_SDK_ORDER_VALIDATION.md](./BATCH2_SDK_ORDER_VALIDATION.md) | Batch 2: order-draft validation and tick-size handling for the SDK snippets, plus the checks still owed to a browser |
+| [BATCH3_DIALOGS_AND_NAV_LABELS.md](./BATCH3_DIALOGS_AND_NAV_LABELS.md) | Batch 3: one focus contract for every overlay, glossary discoverability, phone-width account tabs |
 
 ## Why a new package instead of editing `docs/audit/`
 

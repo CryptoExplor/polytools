@@ -6,7 +6,7 @@
  * CORS, and owner-controlled read-policy verification.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useSearchParams } from "react-router-dom";
 import { NETWORKS, vault } from "@poly/core";
 import {
@@ -48,13 +48,15 @@ type SignedOutput = vault.SignedRequestResult & {
 
 type AccountSection = "overview" | "api" | "trade" | "orders" | "pnl" | "transactions";
 
+// Short labels so all six tabs fit a phone width; the page headings keep the
+// full names. Routes are unchanged.
 const ACCOUNT_TABS: Array<{ to: string; section: AccountSection; label: string }> = [
   { to: "/account", section: "overview", label: "Overview" },
-  { to: "/account/api", section: "api", label: "API setup" },
-  { to: "/account/trade", section: "trade", label: "Your Trades" },
+  { to: "/account/api", section: "api", label: "Key setup" },
+  { to: "/account/trade", section: "trade", label: "Trades" },
   { to: "/account/orders", section: "orders", label: "Orders" },
-  { to: "/account/pnl", section: "pnl", label: "Profit and Loss" },
-  { to: "/account/transactions", section: "transactions", label: "Money Movements" },
+  { to: "/account/pnl", section: "pnl", label: "P&L" },
+  { to: "/account/transactions", section: "transactions", label: "Deposits" },
 ];
 
 const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle: string }> = {
@@ -94,6 +96,16 @@ function accountSection(pathname: string): AccountSection {
 }
 
 function AccountTabs() {
+  const { pathname } = useLocation();
+  const section = accountSection(pathname);
+  const activeRef = useRef<HTMLAnchorElement | null>(null);
+
+  // The strip scrolls horizontally on a phone, so keep the current section in
+  // view instead of leaving the user on a tab they cannot see.
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [section]);
+
   return (
     <nav className="account-tabs" aria-label="Account sections">
       {ACCOUNT_TABS.map((tab) => (
@@ -101,7 +113,9 @@ function AccountTabs() {
           key={tab.to}
           to={tab.to}
           end={tab.section === "overview"}
+          ref={tab.section === section ? activeRef : undefined}
           className={({ isActive }) => `account-tab ${isActive ? "active" : ""}`}
+          aria-current={tab.section === section ? "page" : undefined}
         >
           {tab.label}
         </NavLink>

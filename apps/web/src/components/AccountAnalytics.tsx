@@ -3,6 +3,7 @@ import { account, fmtAgo } from "@poly/core";
 import { Card, ConfirmDialog, EmptyState, MetricCell, MetricStrip, Pill } from "./ui";
 import { IconActivity, IconAlert, IconClock, IconRefresh } from "./icons";
 import { downloadAccountExport } from "../lib/download";
+import { useDialogFocus } from "../lib/dialogFocus";
 import { AccountCostBasis } from "./AccountCostBasis";
 
 const RANGES: account.AccountHistoryRange[] = ["1d", "7d", "30d", "90d", "180d", "365d"];
@@ -431,46 +432,13 @@ function OrderDetailsDrawer({ selection, dataset, loading, onClose, onRetry }: {
   onRetry: () => void;
 }) {
   const titleId = useId();
-  const drawerRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const data = dataset?.data ?? null;
   const order = data?.order ?? null;
 
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    closeRef.current?.focus();
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = [...(drawerRef.current?.querySelectorAll<HTMLElement>("button, a[href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])") ?? [])]
-        .filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true");
-      if (focusable.length === 0) return;
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
-      if (!drawerRef.current?.contains(document.activeElement)) {
-        event.preventDefault();
-        first.focus();
-      } else if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previousOverflow;
-      previous?.focus?.();
-    };
-  }, [onClose]);
+  // Focus behaviour comes from the shared hook; this drawer keeps its own
+  // "Close" button as the initial target.
+  const drawerRef = useDialogFocus<HTMLElement>(true, onClose, { initialFocus: closeRef });
 
   return (
     <div className="order-drawer-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }} role="presentation">

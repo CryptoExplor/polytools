@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { fmtAgo, splitSymbol } from "@poly/core";
 import { useApp } from "../lib/store";
 import { useNow } from "../lib/hooks";
+import { useDialogFocus } from "../lib/dialogFocus";
 import {
   copyButtonPresentation,
   copyTextToClipboard,
@@ -419,30 +420,28 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
+  // Every dialog instance owns its own id, so two confirmations can never
+  // collide on a hard-coded label reference.
+  const titleId = useId();
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, onCancel);
 
   if (!open) return null;
 
   return (
     <div className="modal-backdrop" onClick={onCancel} role="presentation">
       <div
+        ref={dialogRef}
         className="modal-card"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="confirm-dialog-title"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 id="confirm-dialog-title">{title}</h3>
+        <h3 id={titleId}>{title}</h3>
         <div>{typeof message === "string" ? <p>{message}</p> : message}</div>
         <div className="modal-actions">
-          <button type="button" className="btn ghost" onClick={onCancel} autoFocus>
+          <button type="button" className="btn ghost" onClick={onCancel} data-autofocus>
             {cancelLabel}
           </button>
           <button

@@ -517,9 +517,12 @@ export function Layout() {
               className="btn sm ghost"
               onClick={() => setGlossaryOpen(true)}
               title="Open plain-English definitions glossary"
+              aria-label="Open the plain-English glossary"
             >
               <IconInfo size={13} />
-              <span className="hide-sm">Glossary</span>
+              {/* The label stays at every width: the glossary is the main
+                  beginner aid and a bare icon does not advertise itself. */}
+              <span>Glossary</span>
             </button>
 
             <button

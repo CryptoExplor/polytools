@@ -358,6 +358,14 @@ The SDK generator now validates the order draft against the selected pair before
 - **Not browser-tested** — the five checks are listed in that document.
 - Bundle: initial JS 599,795 B / 178,583 B gzip against a 185,000 B ceiling, so ~6.4 kB of gzip headroom remains. Code splitting (P2) should be reconsidered before the next module-scale addition.
 
+### Batch 3 — P1-7, P1-11, P1-12 (done, see `BATCH3_DIALOGS_AND_NAV_LABELS.md`)
+
+- **P1-7** — one `useDialogFocus` hook now backs `ConfirmDialog`, `GlossaryDrawer`, and `OrderDetailsDrawer`: focus in, Tab trapped, Escape closes, focus restored, scroll locked, and a stack so the topmost overlay owns the keyboard. Dialog title ids come from `useId()`, so duplicates are impossible.
+- **P1-11** — the glossary button keeps a visible label at every width plus an explicit `aria-label`.
+- **P1-12** — account tabs use short labels (`Overview · Key setup · Trades · Orders · P&L · Deposits`), the active tab scrolls into view, and it carries `aria-current="page"`. Routes and page headings are unchanged.
+- Automated: `tests/dialog-focus.test.mjs` (12 assertions), suite 251/251, all build/budget/whitespace/runtime/dependency/external checks pass.
+- **Not browser-tested** — five checks listed in that document, including stacked overlays.
+
 Still open from P0/P1 after these batches: P1-1 navigation restructuring, P1-6 account notice consolidation, P1-7 shared dialog focus management (`ConfirmDialog`, `GlossaryDrawer`), P1-8 unsaved-account-work warning, P1-11 glossary discoverability, P1-13 contrast tokens.
 
 ---
