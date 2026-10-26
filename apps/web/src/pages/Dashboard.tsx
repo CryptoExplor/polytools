@@ -294,13 +294,13 @@ export default function Dashboard() {
   return (
     <div className="page-stack">
       <PageHeader
-        title="Spot Market Overview"
+        title="Markets"
         badge={
           data?.apiEnv ? (
             <Pill kind={data.apiEnv === "testnet" ? "warn" : "up"}>{data.apiEnv}</Pill>
           ) : null
         }
-        subtitle="Real-time top-of-book prices, 24-hour volume, basis-point spreads, and live session tick sparklines across all listed Polyester spot pairs."
+        subtitle="Prices and 24-hour stats for every Polyester spot market. Updates every 3 seconds."
         actions={
           <DataFreshness
             updatedAt={updatedAt}
@@ -364,8 +364,8 @@ export default function Dashboard() {
 
       <Card
         flush
-        title="Spot Markets"
-        subtitle="Open a market chart from its symbol, or jump directly to Book, Tape, Chart, or Heatmap."
+        title="Spot markets"
+        subtitle="Open a chart from the symbol, or use the row buttons for order book, trades, and depth."
         actions={
           <button
             type="button"
@@ -374,14 +374,14 @@ export default function Dashboard() {
             disabled={!rows.length}
             title="Download filtered spot markets as CSV"
           >
-            Export CSV
+            Download CSV
           </button>
         }
         footer={
           <>
             <span>
-              Wire prices are decoded from scaled integers (<code className="mono">raw ÷ 10³</code>).
-              Session sparklines accumulate live observed ticks in your browser with zero extra API calls.
+              Prices come from the public Polyester testnet feed. Session sparklines build up
+              from observations in this browser tab.
             </span>
             {updatedAt && <span>Snapshot synced {fmtAgo(updatedAt, now)}</span>}
           </>
@@ -496,13 +496,13 @@ export default function Dashboard() {
                     <EmptyState
                       title={
                         data?.markets?.length
-                          ? "No markets match your filter"
+                          ? "No markets match"
                           : "No market overview data available"
                       }
                       description={
                         data?.markets?.length
-                          ? "Try clearing the search query or switching the quote/direction filter."
-                          : "Verify the backend MCP connection or click Refresh to retry."
+                          ? "Clear the filters to see every market."
+                          : "Check your connection, then refresh."
                       }
                       action={
                         (query || quoteFilter !== "ALL" || trendFilter !== "all") && (
@@ -515,7 +515,7 @@ export default function Dashboard() {
                               setTrendFilter("all");
                             }}
                           >
-                            Reset filters
+                            Clear filters
                           </button>
                         )
                       }

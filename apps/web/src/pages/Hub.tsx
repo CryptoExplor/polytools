@@ -225,14 +225,14 @@ export default function Hub() {
   return (
     <div className="page-stack">
       <PageHeader
-        title="Testnet Hub & Onboarding Guide"
+        title="Start on testnet"
         badge={<Pill kind="warn">ENV: {environmentLabel}</Pill>}
-        subtitle="Track the daily 00:00 UTC paper-asset reset window, work through the local onboarding checklist, and access verified Polyester testnet faucets and documentation."
+        subtitle="A checklist to get started on Polyester testnet, plus the daily reset time and official links."
         actions={
           <div className="row-flex">
             <Link to="/sdk" className="btn sm primary">
               <IconKey size={13} />
-              <span>Open SDK Quickstart (TS · Python · Rust)</span>
+              <span>Open SDK quickstart (TypeScript · Python · Rust)</span>
             </Link>
             <span className="pill mono" title="Current UTC clock">
               <IconClock size={12} /> {fmtTimeUTC(now)} UTC
@@ -413,11 +413,11 @@ export default function Hub() {
 
       {/* Connection & Environment Diagnostics (FEAT-11) */}
       <Card
-        title="Backend & MCP Connection Diagnostics"
-        subtitle="Telemetry from /api/env and /api/markets. Missing fields are labeled instead of being shown as live defaults."
+        title="Connection details"
+        subtitle="Telemetry from /api/env and /api/markets. Missing values are labeled, never guessed."
         actions={
           <button type="button" className="btn sm ghost" onClick={refreshMarkets}>
-            Refresh Diagnostics
+            Refresh
           </button>
         }
       >

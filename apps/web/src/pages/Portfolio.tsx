@@ -68,7 +68,7 @@ const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle: string 
   },
   trade: {
     title: "Your Trades",
-    subtitle: "Only executions belonging to your connected account. Public market trades are available under Market Data → Recent Trades.",
+    subtitle: "Only executions belonging to your connected account. Public market trades are available under Market Data → Trades.",
   },
   orders: {
     title: "Your Orders",

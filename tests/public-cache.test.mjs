@@ -752,7 +752,7 @@ describe("public cache retention, offline policy, and UI provenance", () => {
     assert.ok(fresh.includes("IndexedDB cache"));
     assert.ok(fresh.includes("Saved 1970-01-01T00:01:40.000Z"));
     assert.ok(fresh.includes("Not a live price or order book"));
-    assert.ok(fresh.includes("hide-xs"), "fresh status may remain compact on small screens");
+    assert.ok(!fresh.includes("hide-xs"), "fresh status keeps its provenance visible on small screens");
 
     const stale = renderToStaticMarkup(React.createElement(PublicCacheStatus, {
       ...base,
@@ -768,7 +768,7 @@ describe("public cache retention, offline policy, and UI provenance", () => {
       now: 102_000,
       error: "synthetic refresh failure",
     }));
-    assert.ok(failed.includes("Retry"));
+    assert.ok(failed.includes("Try again"));
     assert.ok(failed.includes("last valid cached copy is retained"));
     assert.ok(!failed.includes("hide-xs"), "failure status must remain visible on small screens");
   });

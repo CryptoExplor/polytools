@@ -114,9 +114,9 @@ export function BrandKitPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        title="Polyester Brand Kit & Token Assets"
+        title="Polyester brand kit"
         badge={<Pill kind="accent">#FA2F6F · Brand Guidelines</Pill>}
-        subtitle="Official logos, favicons, color specifications, 15 market token packshots (front, side, low-angle), 3D imagery loops, Polybot avatars, and Scan / Zipper partner lockups."
+        subtitle="Logos, token images, 3D loops, avatars, colours, and type for Polyester and PolyTools."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <CopyButton text={POLYESTER_LOGOMARK_SVG} label="Copy Symbol SVG" />

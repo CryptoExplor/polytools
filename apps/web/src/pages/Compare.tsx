@@ -53,8 +53,8 @@ export function CompareEmptyState({
   if (allRowsCount > 0) {
     return (
       <EmptyState
-        title="No matched pairs"
-        description="No listed USDT/USDC market currently has a valid CoinGecko USD reference match. Unavailable references, unmapped assets, non-USD quotes, and invalid prices are not counted as matches."
+        title="No matches right now"
+        description="These markets have no usable CoinGecko USD price right now. Missing references, unmapped assets, non-USD quotes, and invalid prices are never counted as matches."
         action={<button type="button" className="btn sm" onClick={onShowAll}>Show All Listed</button>}
       />
     );
@@ -64,7 +64,7 @@ export function CompareEmptyState({
       <EmptyState
         title="No listed markets"
         description="Polyester returned an empty market overview. This is distinct from a zero-match filter result; no market or reference value is inferred."
-        action={<button type="button" className="btn sm" onClick={onRetry}>Retry Both Feeds</button>}
+        action={<button type="button" className="btn sm" onClick={onRetry} aria-label="Try again: refresh both feeds">Try again</button>}
       />
     );
   }
@@ -74,7 +74,7 @@ export function CompareEmptyState({
       description={overviewError
         ? "Polyester market overview is unavailable, so no match count can be calculated. CoinGecko data alone cannot create a comparison row."
         : "Neither Polyester market rows nor a completed reference comparison is available yet. Missing values are not treated as zero."}
-      action={<button type="button" className="btn sm" onClick={onRetry}>Retry Both Feeds</button>}
+      action={<button type="button" className="btn sm" onClick={onRetry} aria-label="Try again: refresh both feeds">Try again</button>}
     />
   );
 }
@@ -175,13 +175,13 @@ export default function Compare() {
   return (
     <div className="page-stack">
       <PageHeader
-        title="Cross-Venue Price Comparison"
+        title="Compare prices"
         badge={
           ov?.apiEnv ? (
             <Pill kind={ov.apiEnv === "testnet" ? "warn" : "up"}>{ov.apiEnv}</Pill>
           ) : null
         }
-        subtitle="Compares Polyester testnet prices with public CoinGecko USD reference prices. CoinGecko USD vs Polyester USDT/USDC testnet prices — differences are not executable trades."
+        subtitle="Polyester prices next to CoinGecko USD prices for the same asset. Reference only — you cannot trade this difference."
         actions={
           <div className="row-flex">
             <DataFreshness
@@ -213,7 +213,7 @@ export default function Compare() {
         <MetricCell
           label="Polyester Feed Status"
           trend={ovError ? "down" : polyesterSample ? "warn" : ovAt ? "up" : undefined}
-          value={ovError ? "Unavailable" : polyesterSample ? "Sample data" : ovAt ? `Synced ${fmtAgo(ovAt, now)}` : "Syncing…"}
+          value={ovError ? "Unavailable" : polyesterSample ? "Sample data" : ovAt ? `Updated ${fmtAgo(ovAt, now)}` : "Loading…"}
           sub={
             ovAt
               ? `${polyesterSample ? "Development wire sample · not live" : "Polled every 5s"} · ${fmtTimeUTC(ovAt)} UTC`
@@ -223,7 +223,7 @@ export default function Compare() {
         <MetricCell
           label="CoinGecko Reference Feed"
           trend={cgError ? "warn" : cgAt ? "up" : undefined}
-          value={cgError ? "Rate-Limited / Error" : cgAt ? `Synced ${fmtAgo(cgAt, now)}` : "Syncing…"}
+          value={cgError ? "Rate-Limited / Error" : cgAt ? `Updated ${fmtAgo(cgAt, now)}` : "Loading…"}
           sub={
             cgAt
               ? `Polled every 35s · ${fmtTimeUTC(cgAt)} UTC`
@@ -280,7 +280,7 @@ export default function Compare() {
           so divergence from external spot markets is expected.
         </div>
         <button type="button" className="btn sm ghost" onClick={refreshCg} disabled={cgRefreshing}>
-          <IconRefresh size={12} /> Sync CoinGecko
+          <IconRefresh size={12} /> Refresh reference prices
         </button>
       </div>
 

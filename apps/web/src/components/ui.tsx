@@ -38,11 +38,8 @@ export function PageHeader({
   return (
     <div className="page-header">
       <div className="page-header-info">
-        <div className="page-eyebrow">
-          <span>Read-only · Testnet</span>
-          {badge}
-        </div>
-        <h2>{title}</h2>
+        {badge && <div className="page-eyebrow">{badge}</div>}
+        <h1>{title}</h1>
         {subtitle && <p className="page-header-desc">{subtitle}</p>}
       </div>
       {actions && <div className="page-header-actions">{actions}</div>}
@@ -100,7 +97,7 @@ export function Card({
       {(title || actions || subtitle) && (
         <div className="panel-header">
           <div className="panel-title-wrap">
-            {title && <h3 className="panel-title">{title}</h3>}
+            {title && <h2 className="panel-title">{title}</h2>}
             {subtitle && <span className="panel-subtitle">{subtitle}</span>}
           </div>
           {actions && <div className="row-flex">{actions}</div>}
@@ -201,10 +198,10 @@ export function DataFreshness({
         {paused
           ? "Paused"
           : refreshing && !updatedAt
-            ? "Syncing…"
+            ? "Loading…"
             : updatedAt
               ? `Updated ${fmtAgo(updatedAt, now)}`
-              : "No data yet"}
+              : "Waiting for data"}
       </span>
       {onTogglePause && (
         <button
@@ -223,11 +220,11 @@ export function DataFreshness({
           className="btn sm ghost"
           onClick={onRefresh}
           disabled={refreshing}
-          title="Refresh now"
-          aria-label="Refresh data now"
+          title="Refresh data"
+          aria-label="Refresh data"
         >
           <IconRefresh size={13} />
-          <span>{refreshing ? "Syncing" : "Refresh"}</span>
+          <span>{refreshing ? "Loading" : "Refresh"}</span>
         </button>
       )}
     </div>
@@ -256,20 +253,20 @@ export function ErrorBox({
     /^(invalid_argument|validation error|invalid )/i.test(error);
 
   const heading = isInvalid
-    ? "Invalid input — check format:"
+    ? "That ID does not look right."
     : kind === "notfound"
-      ? "No public record indexed:"
+      ? "No public record found."
       : kind === "tool"
-        ? "Tool error:"
-        : "Cannot reach Polyester MCP right now:";
+        ? "Something went wrong."
+        : "Cannot reach the market data service.";
 
   const helper = isInvalid
-    ? "Check that the identifier matches the expected format (e.g. 0x-prefixed 64-character hex hash or UUID flow ID) and try again."
+    ? "A transaction hash starts with 0x followed by 64 hex characters. A flow ID looks like 123e4567-…. Check the ID and try again."
     : kind === "notfound"
-      ? "Polyester has no public flow for this identifier. That is not the same as a failed transfer."
+      ? "Polyester has no public record for this ID. That does not mean the transfer failed."
       : hasStaleData
-        ? "Showing last known data snapshot while automatic background retry continues."
-        : "Automatic polling remains active and will recover as soon as the endpoint responds.";
+        ? "Showing the last data we received. Retrying automatically."
+        : "Retrying automatically until the service responds.";
 
   return (
     <div
@@ -296,7 +293,7 @@ export function ErrorBox({
       </div>
       {onRetry && (
         <button type="button" className="btn sm" onClick={onRetry}>
-          <IconRefresh size={13} /> Retry now
+          <IconRefresh size={13} /> Try again
         </button>
       )}
     </div>

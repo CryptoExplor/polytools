@@ -20,7 +20,6 @@ import {
   MetricStrip,
   PageHeader,
   Pill,
-  SymbolSelect,
   TermTip,
 } from "../components/ui";
 
@@ -341,7 +340,7 @@ export default function Calc() {
   return (
     <div className="page-stack">
       <PageHeader
-        title={`Trading & Risk Calculators · ${symbol}`}
+        title={`Calculators · ${symbol}`}
         badge={
           isFinite(live) ? (
             <Pill kind="accent" liveDot>
@@ -349,10 +348,9 @@ export default function Calc() {
             </Pill>
           ) : null
         }
-        subtitle="Scratchpads for trade size, profit/loss after fees, and unit conversion. These numbers are yours to type. Nothing is sent to Polyester."
+        subtitle="Work out trade size, fees, and profit. Everything stays in your browser."
         actions={
           <div className="row-flex">
-            <SymbolSelect value={symbol} onChange={setSymbol} />
             <button
               type="button"
               className="btn sm primary"
@@ -364,7 +362,7 @@ export default function Calc() {
                   : "Waiting for live price from exchange"
               }
             >
-              ⇩ Sync Live Price ({isFinite(live) ? fmtNum(live) : "—"})
+              Use current price ({isFinite(live) ? fmtNum(live) : "—"})
             </button>
           </div>
         }
@@ -423,7 +421,7 @@ export default function Calc() {
       <div className="grid cols-2">
         {/* 1. Position Sizing */}
         <Card
-          title="1. Risk-Based Position Sizing"
+          title="1. Position size"
           subtitle="Calculates exact position size so a stop-out loses only your target risk %."
           actions={
             <div className="row-flex" style={{ gap: 6 }}>
@@ -433,7 +431,7 @@ export default function Calc() {
                 onClick={applySampleSizing}
                 title="Load a beginner-friendly 1% risk example with a 3-line explanation"
               >
-                Try a sample
+                Use example numbers
               </button>
               {sizingResult.valid ? (
                 <Pill kind={sizingResult.inferredSide === "LONG" ? "up" : "down"}>
@@ -561,7 +559,7 @@ export default function Calc() {
 
         {/* 2. Educational Isolated-Margin Sketch (UX-03 / A6) */}
         <Card
-          title="2. Educational Isolated-Margin Sketch (Not Polyester Liquidation)"
+          title="2. Liquidation estimate (simple model)"
           subtitle="Toy textbook 1/L math — Polyester's public product is unified-asset spot + lending, not isolated-margin perpetuals."
           actions={
             <div className="seg-group" role="group" aria-label="Liquidation position direction">
@@ -658,7 +656,7 @@ export default function Calc() {
 
         {/* 3. PnL, Fees & Break-Even */}
         <Card
-          title="3. Profit, Loss & Fee Analyzer"
+          title="3. Profit and fees"
           subtitle="Computes gross PnL, maker/taker round-trip fees, net ROI, and break-even exit."
           actions={
             <div className="seg-group" role="group" aria-label="PnL trade side">
@@ -712,7 +710,7 @@ export default function Calc() {
               value={feeBps}
               onChange={setFeeBps}
               error={pnlResult.errors.feeBps}
-              hint="Default 10 bps is a placeholder. Polyester VIP fees are not on this MCP."
+              hint="Example fee rate. Check your own fee tier in Polyester."
             />
           </div>
 
@@ -770,7 +768,7 @@ export default function Calc() {
 
         {/* 4. Asset & Unit Converter */}
         <Card
-          title="4. Asset, Tick & Basis-Point Converter"
+          title="4. Unit converter"
           subtitle={`Convert between ${base}, ${quote}, exchange tick increments, and basis points.`}
           footer={
             <span className="mono">

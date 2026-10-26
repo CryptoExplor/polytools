@@ -60,25 +60,25 @@ const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
     group: "Market Data",
     items: [
       { to: "/", label: "Markets", icon: <IconDashboard size={15} /> },
-      { to: "/tape", label: "Recent Trades", icon: <IconTape size={15} /> },
-      { to: "/book", label: "Order Book", icon: <IconBook size={15} /> },
+      { to: "/tape", label: "Trades", icon: <IconTape size={15} /> },
+      { to: "/book", label: "Order book", icon: <IconBook size={15} /> },
       { to: "/charts", label: "Price chart", icon: <IconChart size={15} /> },
-      { to: "/heatmap", label: "Liquidity heatmap", icon: <IconActivity size={15} /> },
-      { to: "/compare", label: "Venue compare", icon: <IconCompare size={15} /> },
+      { to: "/heatmap", label: "Depth heatmap", icon: <IconActivity size={15} /> },
+      { to: "/compare", label: "Compare prices", icon: <IconCompare size={15} /> },
     ],
   },
   {
     group: "Cross-Chain",
     items: [
-      { to: "/zipper", label: "Zipper routes", icon: <IconZipper size={15} /> },
+      { to: "/zipper", label: "Bridge routes", icon: <IconZipper size={15} /> },
     ],
   },
   {
     group: "Toolkit & Docs",
     items: [
       { to: "/calc", label: "Calculators", icon: <IconCalc size={15} /> },
-      { to: "/hub", label: "Testnet hub", icon: <IconHub size={15} /> },
-      { to: "/sdk", label: "SDK quickstart", icon: <IconKey size={15} /> },
+      { to: "/hub", label: "Start on testnet", icon: <IconHub size={15} /> },
+      { to: "/sdk", label: "Developers: SDK", icon: <IconKey size={15} /> },
       { to: "/brand-kit", label: "Brand kit", icon: <IconLayers size={15} /> },
     ],
   },
@@ -96,17 +96,17 @@ const ROUTE_META: Record<
   "/account/order-book": { title: "Orders", group: "Account", showSymbolSelector: false },
   "/account/pnl": { title: "Profit and Loss", group: "Account", showSymbolSelector: false },
   "/account/transactions": { title: "Money Movements", group: "Account", showSymbolSelector: false },
-  "/book": { title: "Order Book", group: "Market Data", showSymbolSelector: true },
-  "/tape": { title: "Recent Trades", group: "Market Data", showSymbolSelector: true },
+  "/book": { title: "Order book", group: "Market Data", showSymbolSelector: true },
+  "/tape": { title: "Trades", group: "Market Data", showSymbolSelector: true },
   "/charts": { title: "Price chart", group: "Market Data", showSymbolSelector: true },
-  "/heatmap": { title: "Liquidity heatmap", group: "Market Data", showSymbolSelector: true },
-  "/compare": { title: "Venue compare", group: "Market Data", showSymbolSelector: false },
-  "/zipper": { title: "Zipper routes", group: "Cross-Chain", showSymbolSelector: false },
+  "/heatmap": { title: "Depth heatmap", group: "Market Data", showSymbolSelector: true },
+  "/compare": { title: "Compare prices", group: "Market Data", showSymbolSelector: false },
+  "/zipper": { title: "Bridge routes", group: "Cross-Chain", showSymbolSelector: false },
   "/flow": { title: "Money Movements", group: "Account", showSymbolSelector: false },
   "/calc": { title: "Calculators", group: "Toolkit & Docs", showSymbolSelector: true },
-  "/hub": { title: "Testnet hub", group: "Toolkit & Docs", showSymbolSelector: false },
-  "/sdk": { title: "SDK quickstart", group: "Toolkit & Docs", showSymbolSelector: true },
-  "/portfolio": { title: "API setup", group: "Account", showSymbolSelector: false },
+  "/hub": { title: "Start on testnet", group: "Toolkit & Docs", showSymbolSelector: false },
+  "/sdk": { title: "Developers: SDK", group: "Toolkit & Docs", showSymbolSelector: true },
+  "/portfolio": { title: "Overview", group: "Account", showSymbolSelector: false },
   "/brand-kit": { title: "Brand kit", group: "Toolkit & Docs", showSymbolSelector: false },
 };
 
@@ -141,6 +141,15 @@ export function Layout() {
   });
   const brandMenuRef = useRef<HTMLDivElement | null>(null);
   const brandTriggerRef = useRef<HTMLAnchorElement | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const navBurgerRef = useRef<HTMLButtonElement | null>(null);
+  // The drawer is only off-canvas below the 960px breakpoint. Above it the
+  // sidebar is always visible, so its focusability must never be removed.
+  const [mobileNav, setMobileNav] = useState<boolean>(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(max-width: 960px)").matches
+      : false,
+  );
 
   const loc = useLocation();
   const navigate = useNavigate();
@@ -188,6 +197,61 @@ export function Layout() {
     brandMenuRef.current?.querySelector<HTMLElement>("button, a")?.focus();
   }, [brandMenuOpen]);
 
+  // Track the layout mode so the closed drawer can be removed from the tab
+  // order on phones/tablets without ever hiding the desktop sidebar.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(max-width: 960px)");
+    const sync = () => setMobileNav(query.matches);
+    sync();
+    if (typeof query.addEventListener === "function") {
+      query.addEventListener("change", sync);
+      return () => query.removeEventListener("change", sync);
+    }
+    query.addListener(sync);
+    return () => query.removeListener(sync);
+  }, []);
+
+  // Hide the closed mobile drawer from focus and assistive technology.
+  useEffect(() => {
+    const sidebar = sidebarRef.current;
+    if (!sidebar) return;
+    const hidden = mobileNav && !navOpen;
+    if (hidden) {
+      // Resizing into the mobile layout must not strand focus in a subtree that
+      // is about to become inert.
+      if (sidebar.contains(document.activeElement)) navBurgerRef.current?.focus();
+      sidebar.setAttribute("inert", "");
+      sidebar.setAttribute("aria-hidden", "true");
+    } else {
+      sidebar.removeAttribute("inert");
+      sidebar.removeAttribute("aria-hidden");
+    }
+  }, [mobileNav, navOpen]);
+
+  // Move focus into the opened drawer, then hand it somewhere sensible on
+  // close: the new page when a link was followed, otherwise the burger.
+  const mobileNavTouched = useRef(false);
+  const navFollowedLink = useRef(false);
+  useEffect(() => {
+    if (!mobileNav) return;
+    if (navOpen) {
+      mobileNavTouched.current = true;
+      sidebarRef.current
+        ?.querySelector<HTMLElement>(".nav-item")
+        ?.focus();
+    } else if (mobileNavTouched.current) {
+      mobileNavTouched.current = false;
+      const followed = navFollowedLink.current;
+      navFollowedLink.current = false;
+      if (followed) {
+        document.getElementById("main-workspace")?.focus();
+      } else {
+        navBurgerRef.current?.focus();
+      }
+    }
+  }, [mobileNav, navOpen]);
+
   useEffect(() => {
     const prefix = meta.showSymbolSelector ? `${symbol} · ` : "";
     document.title = `${prefix}${meta.title} — PolyTools`;
@@ -231,7 +295,12 @@ export function Layout() {
         aria-hidden="true"
       />
 
-      <aside className={`sidebar ${navOpen ? "open" : ""}`} aria-label="Primary navigation">
+      <aside
+        ref={sidebarRef}
+        className={`sidebar ${navOpen ? "open" : ""}`}
+        id="primary-navigation"
+        aria-label="Primary navigation"
+      >
         <div className="sidebar-header" style={{ position: "relative" }}>
           <NavLink
             ref={brandTriggerRef}
@@ -240,7 +309,10 @@ export function Layout() {
             title="Left-click for Markets · Right-click or press Shift+F10 for Brand Kit quick actions"
             aria-expanded={brandMenuOpen}
             aria-controls="brand-quick-actions"
-            onClick={() => setNavOpen(false)}
+            onClick={() => {
+              if (mobileNav) navFollowedLink.current = true;
+              setNavOpen(false);
+            }}
             onKeyDown={(e) => {
               if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
                 e.preventDefault();
@@ -336,6 +408,10 @@ export function Layout() {
                   to={item.to}
                   end={item.to === "/" || item.to === "/account"}
                   className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+                  onClick={() => {
+                    if (mobileNav) navFollowedLink.current = true;
+                    setNavOpen(false);
+                  }}
                 >
                   <span className="ico">{item.icon}</span>
                   <span>{item.label}</span>
@@ -363,11 +439,13 @@ export function Layout() {
       <div className="main">
         <header className="topbar">
           <button
+            ref={navBurgerRef}
             type="button"
             className="burger"
             onClick={() => setNavOpen((v) => !v)}
-            aria-label="Toggle navigation menu"
+            aria-label={navOpen ? "Close navigation menu" : "Open navigation menu"}
             aria-expanded={navOpen}
+            aria-controls="primary-navigation"
           >
             <IconMenu size={16} />
           </button>
@@ -410,27 +488,27 @@ export function Layout() {
                   dataSource === "wire-samples"
                     ? "Serving captured testnet wire samples (sandbox offline fallback)"
                     : marketsUpdatedAt
-                      ? `Backend connected · Synced ${fmtAgo(marketsUpdatedAt, now)}`
+                      ? `Backend connected · Updated ${fmtAgo(marketsUpdatedAt, now)}`
                       : "Backend connected"
                 }
               >
                 <span className="dot live" />
-                {dataSource === "wire-samples" ? "Sample data" : "Live MCP"}
+                {dataSource === "wire-samples" ? "Sample data" : "Live"}
               </span>
             ) : connectionStatus === "connecting" ? (
               <span className="pill hide-xs">
                 <span className="dot" />
-                Syncing…
+                Loading…
               </span>
             ) : (
               <button
                 type="button"
-                className="btn sm danger"
+                className="btn sm"
                 onClick={refreshMarkets}
                 title={`Connection issue: ${marketsError ?? "unreachable"}. Click to retry.`}
               >
                 <IconRefresh size={12} />
-                <span>Retry</span>
+                <span>Try again</span>
               </button>
             )}
 

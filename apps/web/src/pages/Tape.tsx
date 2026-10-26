@@ -30,7 +30,6 @@ import {
   MetricStrip,
   PageHeader,
   Pill,
-  SymbolSelect,
   TermTip,
 } from "../components/ui";
 import {
@@ -275,12 +274,11 @@ export default function Tape() {
   return (
     <div className="page-stack">
       <PageHeader
-        title={`Recent Market Trades · ${symbol}`}
+        title={`Trades · ${symbol}`}
         badge={<Pill kind="accent">{rows.length} recent trades</Pill>}
-        subtitle="Public trades for everyone on this market, newest first. No account key is used. These are not necessarily your trades."
+        subtitle="Every trade on this market, newest first. No account key is used; these may not be your trades."
         actions={
           <div className="row-flex">
-            <SymbolSelect value={symbol} onChange={setSymbol} />
             <DataFreshness
               updatedAt={updatedAt}
               refreshing={refreshing}
@@ -364,12 +362,12 @@ export default function Tape() {
 
       {/* Alert Controls Bar */}
       <Card
-        title="Large Print Alert & Tape Controls"
-        subtitle="Alerts are local. They are not orders. Triggered once per unique matchId on newly arriving trades."
+        title="Alerts"
+        subtitle="Alerts stay in this browser and never place orders. Each trade alerts once."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <button type="button" className="btn sm ghost" onClick={triggerTestAlert}>
-              Test Alert
+              Test alert
             </button>
             {whales.length > 0 && (
               <button
@@ -378,7 +376,7 @@ export default function Tape() {
                 onClick={() => setWhales([])}
                 title="Clear whale log"
               >
-                <IconTrash size={12} /> Clear Whale Log
+                <IconTrash size={12} /> Clear log
               </button>
             )}
           </div>
@@ -517,10 +515,10 @@ export default function Tape() {
 
         {!loading && filteredRows.length === 0 && (
           <EmptyState
-            title="No trades match current view"
+            title="No trades match"
             description={
               rows.length > 0
-                ? "Try switching the tape filter back to All or lowering the whale threshold."
+                ? "Show all trades, or lower the alert size."
                 : "Waiting for trade prints from the exchange."
             }
           />

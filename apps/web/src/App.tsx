@@ -40,7 +40,7 @@ export default function App() {
             <Route path="calc" element={<Calc />} />
             <Route path="hub" element={<Hub />} />
             <Route path="flow" element={<AccountRedirect to="/account/transactions" scope="public" />} />
-            <Route path="portfolio" element={<AccountRedirect to="/account/api" />} />
+            <Route path="portfolio" element={<AccountRedirect to="/account" />} />
             <Route path="account/*" element={<Portfolio />} />
             <Route path="sdk" element={<SdkGuide />} />
             <Route path="brand-kit" element={<BrandKitPage />} />

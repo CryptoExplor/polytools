@@ -245,9 +245,9 @@ export default function Flow({ embedded = false }: { embedded?: boolean } = {}) 
     <div className="page-stack">
       {!embedded && (
         <PageHeader
-        title="Track a Deposit or Withdrawal"
+        title="Track a transfer"
         badge={<Pill kind="accent">Read-Only Trace</Pill>}
-        subtitle="Paste a public transaction hash or Polyester flow ID to see what stage a deposit or withdrawal is in."
+        subtitle="Paste a transaction hash or flow ID to see where a deposit or withdrawal is."
         />
       )}
 
@@ -389,7 +389,7 @@ export default function Flow({ embedded = false }: { embedded?: boolean } = {}) 
               disabled={busy || !validation.valid}
             >
               <IconFlow size={14} />
-              <span>{busy ? "Tracing…" : "Trace Lifecycle"}</span>
+              <span>{busy ? "Tracing…" : "Track transfer"}</span>
             </button>
           </div>
         </form>
@@ -450,8 +450,8 @@ export default function Flow({ embedded = false }: { embedded?: boolean } = {}) 
         <Card>
           <EmptyState
             icon={<IconFlow size={18} />}
-            title="Ready to trace a transaction or flow"
-            description="Paste a deposit/withdrawal transaction hash from any supported Zipper chain or a Polyester flow ID above to inspect its settlement lifecycle."
+            title="Enter an ID to track a transfer"
+            description="Paste a deposit or withdrawal hash from a supported Zipper chain, or a Polyester flow ID above."
           />
         </Card>
       )}

@@ -36,8 +36,9 @@ export function PublicCacheStatus({
 
   return (
     <span className="row-flex" style={{ gap: 6 }}>
+      {/* Provenance and age stay visible at every width; only the wording is compact. */}
       <span
-        className={`pill ${stale || error ? "warn" : "up"}${stale || error ? "" : " hide-xs"}`}
+        className={`pill ${stale || error ? "warn" : "up"}`}
         title={`Public market metadata from the ${storeLabel} cache · Saved ${new Date(savedAt).toISOString()} · ${stateLabel} · Not a live price or order book`}
       >
         <span className="dot" />
@@ -46,13 +47,13 @@ export function PublicCacheStatus({
       {error && (
         <button
           type="button"
-          className="btn sm danger"
+          className="btn sm"
           onClick={onRetry}
-          aria-label="Retry public metadata refresh"
+          aria-label="Try again: refresh public metadata"
           title={`${error} The last valid cached copy is retained.`}
         >
           <IconRefresh size={12} />
-          <span>Retry</span>
+          <span>Try again</span>
         </button>
       )}
     </span>

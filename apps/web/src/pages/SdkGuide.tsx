@@ -26,7 +26,6 @@ import {
   MetricStrip,
   PageHeader,
   Pill,
-  SymbolSelect,
   TermTip,
 } from "../components/ui";
 import { IconCheck, IconExternal, IconKey } from "../components/icons";
@@ -410,12 +409,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   return (
     <div className="page-stack">
       <PageHeader
-        title="Beginner SDK & Trading Bot Quickstart Studio"
+        title="Developers: SDK quickstart"
         badge={<Pill kind="accent">TypeScript · Python · Rust</Pill>}
-        subtitle="Step-by-step interactive guide for building on Polyester with the official TypeScript, Python, and Rust SDKs — from zero-credential public market reads to Ed25519 authenticated orders."
+        subtitle="Copy-paste code for the TypeScript, Python, and Rust SDKs, starting with public data and then authenticated requests."
         actions={
           <div className="row-flex">
-            <SymbolSelect value={symbol} onChange={setSymbol} />
             <a
               className="btn sm ghost"
               href={DOC_URLS.matrix}
@@ -459,6 +457,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           sub="32B public key · ±10s timestamp"
         />
       </MetricStrip>
+
+      <div className="notice warn" role="note">
+        <div>
+          <strong>PolyTools does not run this code.</strong> These snippets are examples you
+          copy into your own project. Running the order examples places real orders on
+          testnet and may cancel them again — nothing here executes on your behalf.
+        </div>
+      </div>
 
       {/* Beginner 4-Step Orientation */}
       <Card
@@ -651,7 +657,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       {/* Interactive Code Generator */}
       <Card
         title={`Interactive SDK Code Generator · ${symbol}`}
-        subtitle="Customize the market, timeframe, and order parameters below — ready-to-run code updates automatically."
+        subtitle="Pick a language and parameters; the example updates as you type."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <div className="seg-group" role="group" aria-label="Select SDK language">
