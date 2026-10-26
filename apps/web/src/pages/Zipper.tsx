@@ -188,13 +188,13 @@ export default function Zipper() {
   return (
     <div className="page-stack">
       <PageHeader
-        title="Zipper Cross-Chain Route Comparator"
+        title="Bridge routes"
         badge={
           cfg?.apiEnv ? (
             <Pill kind={cfg.apiEnv === "testnet" ? "warn" : "up"}>{cfg.apiEnv}</Pill>
           ) : null
         }
-        subtitle="Which blockchains can send or receive each token on Polyester, with published minimum amounts, network fees, and confirmation times. Public route list — no deposit address is created here."
+        subtitle="Compare deposit routes for each token: network fee, minimum amount, and confirmation time. No deposit address is created here."
         actions={
           <DataFreshness
             updatedAt={cmpAt ?? cfgAt}
@@ -460,7 +460,7 @@ export default function Zipper() {
       <Card
         flush
         title={`Supported Zipper Chains (${cfg?.chains?.length ?? 0})`}
-        subtitle="Source and destination blockchains connected to the Polyester Zipper bridge."
+        subtitle="Blockchains connected to the Polyester Zipper bridge."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <div className="input-group" style={{ width: 220 }}>

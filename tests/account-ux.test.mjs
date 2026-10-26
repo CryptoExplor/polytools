@@ -190,28 +190,28 @@ describe("Account per-view rendering and empty states", () => {
       view: "trades",
       title: "Your Trades",
       empty: "Your Trades are not loaded",
-      load: "Load your trades",
+      load: "Load account data",
       forbidden: ["Current balances", "Order history", "Money Movements", "Current fee rates"],
     },
     {
       view: "orders",
       title: "Your Orders",
       empty: "Your Orders are not loaded",
-      load: "Load your orders",
+      load: "Load account data",
       forbidden: ["Your Trades and Actual Fees", "Current balances", "Money Movements"],
     },
     {
       view: "transfers",
       title: "Money Movements",
       empty: "Your money movements are not loaded",
-      load: "Load money movements",
+      load: "Load account data",
       forbidden: ["Your Trades and Actual Fees", "Order history", "Current balances"],
     },
     {
       view: "pnl",
       title: "Profit and Loss",
       empty: "Profit and loss inputs are not loaded",
-      load: "Load P&amp;L inputs",
+      load: "Load account data",
       forbidden: ["Your Trades and Actual Fees", "Order history", "Current balances", "Money Movements"],
     },
   ];
@@ -232,8 +232,8 @@ describe("Account per-view rendering and empty states", () => {
 
   it("uses the session-aware empty description instead of the locked copy after unlock", () => {
     const html = renderAccount("trades", { generation: "synthetic-generation", registeredKeyId: "ak_synthetic" });
-    assert.ok(html.includes("Choose Load your trades"));
-    assert.ok(!html.includes("Unlock a registered read-only key, then choose Load your trades"));
+    assert.ok(html.includes("Choose Load account data"));
+    assert.ok(!html.includes("Unlock a registered read-only key, then choose Load account data"));
   });
 
   it("renders the locked private transfers state with public lookup as a separate choice", () => {

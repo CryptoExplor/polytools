@@ -30,7 +30,6 @@ import {
   MetricStrip,
   PageHeader,
   Pill,
-  SymbolSelect,
   TermTip,
 } from "../components/ui";
 import { DepthChart } from "../components/DepthChart";
@@ -131,7 +130,7 @@ export default function Book() {
   return (
     <div className="page-stack">
       <PageHeader
-        title={`Public Order Book · ${symbol}`}
+        title={`Order book · ${symbol}`}
         badge={
           stats ? (
             <Pill kind={stats.change24hBps >= 0 ? "up" : "down"}>
@@ -140,10 +139,9 @@ export default function Book() {
             </Pill>
           ) : null
         }
-        subtitle="Public buy orders (bids) and sell orders (asks) waiting to be matched. No account key is used. These orders are not necessarily yours."
+        subtitle="Bids (buy orders) and asks (sell orders) waiting to be matched. No account key is used; these orders are not yours."
         actions={
           <div className="row-flex">
-            <SymbolSelect value={symbol} onChange={setSymbol} />
             <div className="seg-group" role="group" aria-label="Order book depth levels">
               {([10, 20, 50, 100] as BookDepth[]).map((d) =>
                 BOOK_DEPTHS.includes(d) ? (
@@ -285,8 +283,8 @@ export default function Book() {
           <DepthChart bids={book.bids} asks={book.asks} height={275} quoteAsset={quote} />
         ) : (
           <EmptyState
-            title="No order book snapshot loaded"
-            description="Could not retrieve order book levels for this market."
+            title="No order book data"
+            description="This market may have no resting orders, or the data did not load."
           />
         )}
       </Card>
@@ -359,7 +357,7 @@ export default function Book() {
             <div className="ladder-head">
               <span>Bid Price ({quote})</span>
               <span className="right">Size ({base})</span>
-              <span className="right hide-xs">Notional</span>
+              <span className="right">Notional</span>
               <span className="right">Cumulative ({base})</span>
             </div>
             {loading && !book && (
@@ -384,7 +382,7 @@ export default function Book() {
                     {isWall && <span className="wall-tag">WALL</span>}
                   </span>
                   <span className="right">{fmtNum(l.qty, qtyDecimals)}</span>
-                  <span className="right muted hide-xs">
+                  <span className="right muted">
                     {formatCompactQuoteNotional(l.price * l.qty, quote)}
                   </span>
                   <span className="right muted">{fmtNum(book.bidsCum[i], qtyDecimals)}</span>
@@ -409,7 +407,7 @@ export default function Book() {
             <div className="ladder-head">
               <span>Ask Price ({quote})</span>
               <span className="right">Size ({base})</span>
-              <span className="right hide-xs">Notional</span>
+              <span className="right">Notional</span>
               <span className="right">Cumulative ({base})</span>
             </div>
             {loading && !book && (
@@ -434,7 +432,7 @@ export default function Book() {
                     {isWall && <span className="wall-tag">WALL</span>}
                   </span>
                   <span className="right">{fmtNum(l.qty, qtyDecimals)}</span>
-                  <span className="right muted hide-xs">
+                  <span className="right muted">
                     {formatCompactQuoteNotional(l.price * l.qty, quote)}
                   </span>
                   <span className="right muted">{fmtNum(book.asksCum[i], qtyDecimals)}</span>

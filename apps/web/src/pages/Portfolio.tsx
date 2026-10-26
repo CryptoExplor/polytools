@@ -6,7 +6,7 @@
  * CORS, and owner-controlled read-policy verification.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useSearchParams } from "react-router-dom";
 import { NETWORKS, vault } from "@poly/core";
 import {
@@ -48,13 +48,15 @@ type SignedOutput = vault.SignedRequestResult & {
 
 type AccountSection = "overview" | "api" | "trade" | "orders" | "pnl" | "transactions";
 
+// Short labels so all six tabs fit a phone width; the page headings keep the
+// full names. Routes are unchanged.
 const ACCOUNT_TABS: Array<{ to: string; section: AccountSection; label: string }> = [
   { to: "/account", section: "overview", label: "Overview" },
-  { to: "/account/api", section: "api", label: "API setup" },
-  { to: "/account/trade", section: "trade", label: "Your Trades" },
+  { to: "/account/api", section: "api", label: "Key setup" },
+  { to: "/account/trade", section: "trade", label: "Trades" },
   { to: "/account/orders", section: "orders", label: "Orders" },
-  { to: "/account/pnl", section: "pnl", label: "Profit and Loss" },
-  { to: "/account/transactions", section: "transactions", label: "Money Movements" },
+  { to: "/account/pnl", section: "pnl", label: "P&L" },
+  { to: "/account/transactions", section: "transactions", label: "Deposits" },
 ];
 
 const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle: string }> = {
@@ -68,7 +70,7 @@ const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle: string 
   },
   trade: {
     title: "Your Trades",
-    subtitle: "Only executions belonging to your connected account. Public market trades are available under Market Data → Recent Trades.",
+    subtitle: "Only executions belonging to your connected account. Public market trades are available under Market Data → Trades.",
   },
   orders: {
     title: "Your Orders",
@@ -94,6 +96,16 @@ function accountSection(pathname: string): AccountSection {
 }
 
 function AccountTabs() {
+  const { pathname } = useLocation();
+  const section = accountSection(pathname);
+  const activeRef = useRef<HTMLAnchorElement | null>(null);
+
+  // The strip scrolls horizontally on a phone, so keep the current section in
+  // view instead of leaving the user on a tab they cannot see.
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [section]);
+
   return (
     <nav className="account-tabs" aria-label="Account sections">
       {ACCOUNT_TABS.map((tab) => (
@@ -101,7 +113,9 @@ function AccountTabs() {
           key={tab.to}
           to={tab.to}
           end={tab.section === "overview"}
+          ref={tab.section === section ? activeRef : undefined}
           className={({ isActive }) => `account-tab ${isActive ? "active" : ""}`}
+          aria-current={tab.section === section ? "page" : undefined}
         >
           {tab.label}
         </NavLink>
@@ -124,25 +138,31 @@ function AccountTransactions({
   };
   return (
     <>
+      {/* One decision, one control. The description beside the choice says what
+          the current view does, so a second notice would only repeat it. */}
       <Card
-        title="Choose a money-movement view"
-        subtitle="Your account view uses signed private reads. Public lookup is separate and never requires your account key."
+        title="Money movements"
+        subtitle={
+          scope === "mine"
+            ? "Signed private reads. Nothing loads until you choose Load account data, and missing data is never shown as an empty history."
+            : "Lookup by transaction hash or flow ID. It is not a feed of every transaction and never requires your account key."
+        }
+        actions={
+          <div className="seg-group" role="group" aria-label="Money movement view">
+            <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} aria-pressed={scope === "mine"} onClick={() => selectScope("mine")}>
+              My account
+            </button>
+            <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} aria-pressed={scope === "all"} onClick={() => selectScope("all")}>
+              Public transaction lookup
+            </button>
+          </div>
+        }
       >
-        <div className="seg-group" role="group" aria-label="Money movement view">
-          <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} aria-pressed={scope === "mine"} onClick={() => selectScope("mine")}>
-            My account
-          </button>
-          <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} aria-pressed={scope === "all"} onClick={() => selectScope("all")}>
-            Public transaction lookup
-          </button>
-        </div>
-        <div className={`notice ${scope === "mine" ? "info" : "warn"} mt-3`} role="note">
-          {scope === "mine" ? (
-            <span>Private transfers are shown only after you unlock an account and explicitly load them. Missing or incomplete data is never shown as an empty history.</span>
-          ) : (
-            <span>Public lookup finds a transaction or flow by the ID you enter. It is not a feed of every transaction and does not show your private account history.</span>
-          )}
-        </div>
+        <p className="faint mb-0">
+          {scope === "mine"
+            ? "Your transfers come from signed reads on this device. Public lookup is a separate, credential-free search."
+            : "Nothing about your account is read in this view."}
+        </p>
       </Card>
       {scope === "mine" ? (
         session && accountVault ? (

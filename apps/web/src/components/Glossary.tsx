@@ -3,8 +3,9 @@
  * Explains all 17 exchange & Polyester testnet terms in plain language.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { IconSearch, IconX } from "./icons";
+import { useDialogFocus } from "../lib/dialogFocus";
 
 export interface GlossaryEntry {
   term: string;
@@ -125,15 +126,10 @@ export function GlossaryDrawer({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  // Same focus contract as every other overlay: focus in, Tab trapped inside,
+  // Escape closes, focus returns to the button that opened the drawer.
+  const titleId = useId();
+  const drawerRef = useDialogFocus<HTMLElement>(open, onClose);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -151,15 +147,17 @@ export function GlossaryDrawer({
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
       <aside
+        ref={drawerRef}
         className="glossary-drawer"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="glossary-drawer-title"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="between" style={{ paddingBottom: 12, borderBottom: "1px solid var(--border-subtle)" }}>
           <div>
-            <h3 id="glossary-drawer-title" style={{ margin: 0, fontSize: 16 }}>
+            <h3 id={titleId} style={{ margin: 0, fontSize: 16 }}>
               Plain-English Definitions
             </h3>
             <p className="faint" style={{ margin: "2px 0 0", fontSize: 12 }}>
@@ -185,7 +183,7 @@ export function GlossaryDrawer({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Filter glossary terms"
-            autoFocus
+            data-autofocus
           />
         </div>
 

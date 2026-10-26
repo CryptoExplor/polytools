@@ -166,9 +166,9 @@ describe("P2-10 Compare provenance and empty states", () => {
 
   it("renders distinct zero-match, empty-overview, and unavailable-feed states", () => {
     const zeroMatch = emptyState({ allRowsCount: 3, overviewReceived: true });
-    assert.ok(zeroMatch.includes("No matched pairs"));
+    assert.ok(zeroMatch.includes("No matches right now"));
     assert.ok(zeroMatch.includes("Show All Listed"));
-    assert.ok(zeroMatch.includes("not counted as matches"));
+    assert.ok(zeroMatch.includes("never counted as matches"));
     assert.ok(!zeroMatch.includes("No comparison data available"));
 
     const emptyOverview = emptyState({ allRowsCount: 0, overviewReceived: true });

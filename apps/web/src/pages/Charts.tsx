@@ -26,7 +26,6 @@ import {
   MetricStrip,
   PageHeader,
   Pill,
-  SymbolSelect,
 } from "../components/ui";
 import { CandleChart, type CandlePoint } from "../components/CandleChart";
 
@@ -116,7 +115,7 @@ export default function Charts() {
   return (
     <div className="page-stack">
       <PageHeader
-        title={`Candlestick Chart · ${symbol}`}
+        title={`Price chart · ${symbol}`}
         badge={
           stats ? (
             <Pill kind={stats.change24hBps >= 0 ? "up" : "down"}>
@@ -125,10 +124,9 @@ export default function Charts() {
             </Pill>
           ) : null
         }
-        subtitle="Price history in time buckets. Each bar shows open, high, low, close, and volume. Hover or press Left/Right arrow keys to inspect individual OHLCV bars."
+        subtitle="Price history. Each bar is one time period (open, high, low, close, volume). Hover or use Left/Right arrow keys to inspect a bar."
         actions={
           <div className="row-flex">
-            <SymbolSelect value={symbol} onChange={setSymbol} />
             <DataFreshness
               updatedAt={updatedAt}
               refreshing={refreshing}

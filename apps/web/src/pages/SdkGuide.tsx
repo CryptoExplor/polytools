@@ -19,6 +19,8 @@ import {
 import { api } from "../lib/api";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
+import { roundToTick, validateOrderDraft } from "../lib/orderConstraints";
+import { validateCanonicalRequest } from "../lib/canonicalRequest";
 import {
   Card,
   CopyButton,
@@ -26,7 +28,6 @@ import {
   MetricStrip,
   PageHeader,
   Pill,
-  SymbolSelect,
   TermTip,
 } from "../components/ui";
 import { IconCheck, IconExternal, IconKey } from "../components/icons";
@@ -98,13 +99,22 @@ export default function SdkGuide() {
   }, [httpMethod, reqBody]);
 
   const syncLivePriceToOrder = () => {
-    if (isFinite(livePx) && livePx > 0) {
-      // Default to ~2% below live price for a safe post-only buy limit order
-      const safePx =
-        orderSide === "buy" ? (livePx * 0.98).toFixed(2) : (livePx * 1.02).toFixed(2);
-      setOrderPrice(safePx);
-    }
+    if (!isFinite(livePx) || livePx <= 0) return;
+    // Post-only requires a resting price: sit ~2% away from the live price and
+    // then snap to a legal tick so the snippet never shows sub-tick decimals.
+    const target = orderSide === "buy" ? livePx * 0.98 : livePx * 1.02;
+    const snapped = roundToTick(target, pair?.tickSize ?? "0.01", orderSide === "buy" ? "down" : "up");
+    if (snapped) setOrderPrice(snapped);
   };
+
+  // The trade snippet is generated code the user will run against testnet, so
+  // it is only offered once qty and price are provably legal for this pair.
+  const orderDraft = useMemo(
+    () => validateOrderDraft({ qty: orderQty, price: orderPrice, pair, base, quote }),
+    [orderQty, orderPrice, pair, base, quote],
+  );
+  const orderBlocked = step === "trade" && !orderDraft.ok;
+  const orderIssueText = orderDraft.issues.map((issue) => issue.message);
 
   const canonicalPreview = useMemo(() => {
     if (bodyHashError) {
@@ -128,6 +138,17 @@ export default function SdkGuide() {
       return { query: "", text: "", error: vault.vaultErrorMessage(caught) };
     }
   }, [sampleTs, httpMethod, reqPath, reqQuery, bodyHash, bodyHashError]);
+  const canonicalValidation = useMemo(
+    () =>
+      validateCanonicalRequest({
+        timestamp: sampleTs,
+        path: reqPath,
+        query: reqQuery,
+        body: reqBody,
+        method: httpMethod,
+      }),
+    [sampleTs, reqPath, reqQuery, reqBody, httpMethod],
+  );
   const canonicalQuery = canonicalPreview.query;
   const canonicalString5Line = canonicalPreview.text;
   const canonicalError = canonicalPreview.error;
@@ -209,7 +230,7 @@ const client = new PolyesterClient({
 await client.catalog.ensureReady();
 const symbolId = client.catalog.market.requireSymbolIdByPairSymbol("${symbol}");
 
-// Place a safe post-only limit ${orderSide} order on ${symbol}
+// Place a post-only limit ${orderSide} order on ${symbol} (mutates testnet state)
 const created = await client.orders.create({
   symbolId,
   side: "${orderSide}",
@@ -410,12 +431,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   return (
     <div className="page-stack">
       <PageHeader
-        title="Beginner SDK & Trading Bot Quickstart Studio"
+        title="Developers: SDK quickstart"
         badge={<Pill kind="accent">TypeScript · Python · Rust</Pill>}
-        subtitle="Step-by-step interactive guide for building on Polyester with the official TypeScript, Python, and Rust SDKs — from zero-credential public market reads to Ed25519 authenticated orders."
+        subtitle="Copy-paste code for the TypeScript, Python, and Rust SDKs, starting with public data and then authenticated requests."
         actions={
           <div className="row-flex">
-            <SymbolSelect value={symbol} onChange={setSymbol} />
             <a
               className="btn sm ghost"
               href={DOC_URLS.matrix}
@@ -459,6 +479,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           sub="32B public key · ±10s timestamp"
         />
       </MetricStrip>
+
+      <div className="notice warn" role="note">
+        <div>
+          <strong>PolyTools does not run this code.</strong> These snippets are examples you
+          copy into your own project. Running the order examples places real orders on
+          testnet and may cancel them again — nothing here executes on your behalf.
+        </div>
+      </div>
 
       {/* Beginner 4-Step Orientation */}
       <Card
@@ -651,7 +679,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       {/* Interactive Code Generator */}
       <Card
         title={`Interactive SDK Code Generator · ${symbol}`}
-        subtitle="Customize the market, timeframe, and order parameters below — ready-to-run code updates automatically."
+        subtitle="Pick a language and parameters; the example updates as you type."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <div className="seg-group" role="group" aria-label="Select SDK language">
@@ -677,7 +705,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Rust
               </button>
             </div>
-            <CopyButton text={generatedCode} label="Copy Snippet" size="md" />
+            <CopyButton
+              text={orderBlocked ? "" : generatedCode}
+              label={orderBlocked ? "Fix inputs to copy" : "Copy Snippet"}
+              size="md"
+              disabled={orderBlocked}
+            />
           </div>
         }
         footer={
@@ -768,6 +801,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 value={orderQty}
                 onChange={(e) => setOrderQty(e.target.value)}
                 aria-label="Order quantity"
+                aria-invalid={orderDraft.issues.some((i) => i.field === "qty") || undefined}
+                aria-describedby={step === "trade" && orderBlocked ? "sdk-order-issues" : undefined}
+                inputMode="decimal"
                 placeholder="Qty"
               />
               <span className="faint mono">{base} @</span>
@@ -778,6 +814,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 value={orderPrice}
                 onChange={(e) => setOrderPrice(e.target.value)}
                 aria-label="Order limit price"
+                aria-invalid={orderDraft.issues.some((i) => i.field === "price") || undefined}
+                aria-describedby={step === "trade" && orderBlocked ? "sdk-order-issues" : undefined}
+                inputMode="decimal"
                 placeholder="Price"
               />
               <span className="faint mono">{quote}</span>
@@ -803,22 +842,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           )}
         </div>
 
-        <pre
-          className="mono"
-          style={{
-            margin: 0,
-            padding: 16,
-            background: "var(--bg-shell)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-sm)",
-            overflowX: "auto",
-            fontSize: 12.5,
-            lineHeight: 1.58,
-            color: "var(--text-primary)",
-          }}
-        >
-          {generatedCode}
-        </pre>
+        {orderBlocked ? (
+          <div className="notice warn" role="alert" id="sdk-order-issues" aria-live="polite">
+            <div>
+              <strong>No snippet until this order is valid.</strong> A snippet is runnable code
+              against testnet, so it is withheld while the order breaks this pair&apos;s rules
+              ({symbol}). Nothing has been sent anywhere.
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {orderIssueText.map((message) => (
+                  <li key={message}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <pre
+            className="mono"
+            style={{
+              margin: 0,
+              padding: 16,
+              background: "var(--bg-shell)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: "var(--radius-sm)",
+              overflowX: "auto",
+              fontSize: 12.5,
+              lineHeight: 1.58,
+              color: "var(--text-primary)",
+            }}
+          >
+            {generatedCode}
+          </pre>
+        )}
       </Card>
 
       {/* Interactive Ed25519 5-Field Canonical String & Query Normalizer */}
@@ -845,6 +899,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           </span>
         }
       >
+        {!canonicalValidation.ok && (
+          <div className="notice warn mb-3" role="status" id="canon-issues">
+            <div>
+              <strong>These fields cannot be signed as entered.</strong> Nothing is sent from this
+              page; the panel shows what a signature would cover.
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {canonicalValidation.issues.map((issue) => (
+                  <li key={issue.field}>{issue.message}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
         <div className="grid cols-2">
           <div>
             <div className="grid cols-2">
@@ -881,6 +949,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   className="input mono"
                   value={sampleTs}
                   onChange={(e) => setSampleTs(e.target.value)}
+                  aria-invalid={
+                    canonicalValidation.issues.some((issue) => issue.field === "timestamp") || undefined
+                  }
+                  aria-describedby={canonicalValidation.ok ? undefined : "canon-issues"}
+                  inputMode="numeric"
                 />
               </div>
             </div>
@@ -893,6 +966,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 className="input mono"
                 value={reqPath}
                 onChange={(e) => setReqPath(e.target.value)}
+                aria-invalid={
+                  canonicalValidation.issues.some((issue) => issue.field === "path") || undefined
+                }
+                aria-describedby={canonicalValidation.ok ? undefined : "canon-issues"}
               />
             </div>
 
@@ -910,6 +987,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 value={reqQuery}
                 onChange={(e) => setReqQuery(e.target.value)}
                 placeholder="e.g. tag=z&q=hello+world&tag=a"
+                aria-invalid={
+                  canonicalValidation.issues.some((issue) => issue.field === "query") || undefined
+                }
+                aria-describedby={canonicalValidation.ok ? undefined : "canon-issues"}
               />
             </div>
 
@@ -922,6 +1003,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   className="input mono"
                   value={reqBody}
                   onChange={(e) => setReqBody(e.target.value)}
+                  aria-invalid={
+                    canonicalValidation.issues.some((issue) => issue.field === "body") || undefined
+                  }
+                  aria-describedby={canonicalValidation.ok ? undefined : "canon-issues"}
                 />
               </div>
             )}

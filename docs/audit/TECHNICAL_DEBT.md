@@ -17,7 +17,7 @@ All items are **Confirmed** from current source/configuration unless marked othe
 | TD-05 | P2 | Build/deploy paths do not run identical checks and have multiple configuration sources. | `package.json`, `vercel.json`, both Wrangler files |
 | TD-06 | P2 | Large route/account modules concentrate unrelated states and make safe review expensive. | Web/core file inventory |
 | TD-07 | P2 | Public formatting and interaction patterns are duplicated with unit/accessibility drift. | Dashboard/Tape/Book/Heatmap/DepthChart/shared UI |
-| TD-08 | P2 | Static external SDK/resource content can stale without compile/link checks. | `SdkGuide.tsx`, `brand.ts`, `Hub.tsx` |
+| TD-08 | P2 | Static external SDK/resource content can stale without compile/link checks. Input validation and the "safe"/"ready-to-run" wording are since resolved; compiling pinned examples is still absent. | `SdkGuide.tsx`, `brand.ts`, `Hub.tsx` |
 | TD-09 | P3 | Single large static bundle and limited performance budgets. | Fresh Vite build; `App.tsx` |
 | TD-10 | P3 | Repository hygiene/attribution is currently difficult. | 46-entry baseline dirty tree, deleted research files |
 
@@ -129,6 +129,14 @@ Examples:
 `SdkGuide.tsx` contains pinned package versions, capability matrices, and generated TypeScript/Python/Rust code. Quantity/price/key ID interpolation is not validated, and snippets are not compiled. Hub and Brand Kit contain external links/assets whose current availability was not checked.
 
 **Risk:** “ready-to-run,” “official,” or “verified” copy can become stale; a pair's actual tick/step can differ from hardcoded formatting; copied trading snippets can fail or have unintended testnet effects.
+
+**Status (2026-10-26):** partially resolved. Order inputs are now validated against the selected
+pair's `tickSize`, `stepSize`, `minQtyBase`, and `minNotionalQuote` before a snippet or copy action is
+offered (`apps/web/src/lib/orderConstraints.ts`, with tests), the page states that PolyTools does not
+execute the code, and the generated comment no longer calls the order "safe". Version pinning is
+gated by `npm run check:external` (offline inventory; the live variants are opt-in). **Still open:**
+compiling pinned examples against their stated SDK versions, and the availability of Hub/Brand Kit
+external links and assets. See `../frontend-audit/REMAINING_WORK.md`.
 
 **Recommended direction:**
 

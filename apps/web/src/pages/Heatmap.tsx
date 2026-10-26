@@ -26,7 +26,6 @@ import {
   MetricStrip,
   PageHeader,
   Pill,
-  SymbolSelect,
   TermTip,
 } from "../components/ui";
 
@@ -310,12 +309,11 @@ export function HeatmapPage() {
   return (
     <div>
       <PageHeader
-        title="Order Book Liquidity Heatmap"
+        title="Depth heatmap"
         subtitle={
           <>
-            Historical resting bid and ask liquidity buckets from{" "}
-            <code className="mono">get_heatmap</code>. Brighter green and red bands
-            highlight price zones where large limit orders rested over time.
+            Where buy and sell orders rested over time. Brighter bands mean more
+            resting size at that price.
           </>
         }
         badge={<Pill kind="accent">{symbol}</Pill>}
@@ -334,7 +332,6 @@ export function HeatmapPage() {
 
       <div className="toolbar mb-3">
         <div className="toolbar-group">
-          <SymbolSelect value={symbol} onChange={setSymbol} />
 
           <div className="seg-group" role="group" aria-label="Heatmap bucket interval">
             {(["1m", "5m", "1h"] as HeatInterval[]).map((iv) => (
@@ -517,8 +514,8 @@ export function HeatmapPage() {
       {data && !decoded && !loading && (
         <Card>
           <EmptyState
-            title="No non-zero resting liquidity in this window"
-            description="The response was empty or contained only zero-quantity levels. Try another market or increase the lookback window."
+            title="No resting orders in this window"
+            description="The response had no levels, or every level had zero size. Try a longer window or another market."
           />
         </Card>
       )}

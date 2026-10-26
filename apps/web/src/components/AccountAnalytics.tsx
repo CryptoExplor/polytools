@@ -3,6 +3,7 @@ import { account, fmtAgo } from "@poly/core";
 import { Card, ConfirmDialog, EmptyState, MetricCell, MetricStrip, Pill } from "./ui";
 import { IconActivity, IconAlert, IconClock, IconRefresh } from "./icons";
 import { downloadAccountExport } from "../lib/download";
+import { useDialogFocus } from "../lib/dialogFocus";
 import { AccountCostBasis } from "./AccountCostBasis";
 
 const RANGES: account.AccountHistoryRange[] = ["1d", "7d", "30d", "90d", "180d", "365d"];
@@ -28,33 +29,33 @@ type AccountAnalyticsView = "overview" | "trades" | "orders" | "transfers" | "pn
 const VIEW_COPY: Record<AccountAnalyticsView, { title: string; subtitle: string; emptyTitle: string; emptyDescription: string }> = {
   overview: {
     title: "Account overview",
-    subtitle: "Your private account data, with a separate status for each read. Public market data is not used as a substitute.",
+    subtitle: "Your private account data. Each read keeps its own status, and public market data is never substituted.",
     emptyTitle: "No account data loaded",
-    emptyDescription: "Unlock a registered read-only key, then choose Load account data. Nothing is shown as empty or zero when a read is denied or unavailable.",
+    emptyDescription: "Unlock a registered read-only key, then choose Load account data. A denied or unavailable read is never shown as empty or zero.",
   },
   trades: {
     title: "Your Trades",
-    subtitle: "Only executions returned by the authenticated account fills read. Actual fees come from those executions; public market trades are never substituted.",
+    subtitle: "Only executions from the authenticated fills read. Actual fees come from those executions; public trades are never substituted.",
     emptyTitle: "Your Trades are not loaded",
-    emptyDescription: "Unlock a registered read-only key, then choose Load your trades. If the private read is denied or unavailable, you will see that status instead of public trades.",
+    emptyDescription: "Unlock a registered read-only key, then choose Load account data. A denied or unavailable read shows that status instead of public trades.",
   },
   orders: {
     title: "Your Orders",
-    subtitle: "Open and completed orders returned by authenticated account reads. This is separate from the public order book.",
+    subtitle: "Open and completed orders from authenticated reads, separate from the public order book.",
     emptyTitle: "Your Orders are not loaded",
-    emptyDescription: "Unlock a registered read-only key, then choose Load your orders. Missing or denied data is not shown as an empty order history.",
+    emptyDescription: "Unlock a registered read-only key, then choose Load account data. Missing or denied data is never shown as an empty order history.",
   },
   transfers: {
     title: "Money Movements",
-    subtitle: "Deposits, withdrawals, and transfers returned by the authenticated account read. Public transaction lookup is a separate option.",
+    subtitle: "Deposits, withdrawals, and transfers from the authenticated read. Public transaction lookup is separate.",
     emptyTitle: "Your money movements are not loaded",
-    emptyDescription: "Unlock a registered read-only key, then choose Load money movements. Missing or denied data is not shown as an empty history.",
+    emptyDescription: "Unlock a registered read-only key, then choose Load account data. Missing or denied data is never shown as an empty history.",
   },
   pnl: {
     title: "Profit and Loss",
-    subtitle: "Exact cost-basis accounting only after complete fills, opening lots, resolved non-fill flows, and method provenance are established. Unrealized values also need a fresh labeled mark.",
+    subtitle: "Cost basis is exact only with complete fills, opening lots, resolved non-fill flows, and method provenance. Unrealized values also need a fresh labeled mark.",
     emptyTitle: "Profit and loss inputs are not loaded",
-    emptyDescription: "Unlock a registered read-only key, then choose Load P&L inputs. Missing or denied data is never treated as zero activity or opening cost.",
+    emptyDescription: "Unlock a registered read-only key, then choose Load account data. Missing or denied data is never treated as zero activity or opening cost.",
   },
 };
 
@@ -407,7 +408,7 @@ function OpenOrdersCard({ dataset, loading, onDetails }: {
       ) : dataset ? (
         <><NoDataset dataset={dataset} /><DatasetMessages dataset={dataset} /></>
       ) : !loading ? (
-        <EmptyState title="Open orders are not loaded" description="Choose Load your orders to request open orders separately from completed orders." />
+        <EmptyState title="Open orders are not loaded" description="Choose Load account data to request open orders as a separate read from completed orders." />
       ) : null}
     </Card>
   );
@@ -431,46 +432,13 @@ function OrderDetailsDrawer({ selection, dataset, loading, onClose, onRetry }: {
   onRetry: () => void;
 }) {
   const titleId = useId();
-  const drawerRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const data = dataset?.data ?? null;
   const order = data?.order ?? null;
 
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    closeRef.current?.focus();
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = [...(drawerRef.current?.querySelectorAll<HTMLElement>("button, a[href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])") ?? [])]
-        .filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true");
-      if (focusable.length === 0) return;
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
-      if (!drawerRef.current?.contains(document.activeElement)) {
-        event.preventDefault();
-        first.focus();
-      } else if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previousOverflow;
-      previous?.focus?.();
-    };
-  }, [onClose]);
+  // Focus behaviour comes from the shared hook; this drawer keeps its own
+  // "Close" button as the initial target.
+  const drawerRef = useDialogFocus<HTMLElement>(true, onClose, { initialFocus: closeRef });
 
   return (
     <div className="order-drawer-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }} role="presentation">
@@ -482,7 +450,7 @@ function OrderDetailsDrawer({ selection, dataset, loading, onClose, onRetry }: {
             <span className="faint">Scope: {selection.subaccountId ? "Selected subaccount" : "Main account"}</span>
           </div>
           <div className="row-flex" style={{ gap: 6 }}>
-            <button type="button" className="btn sm ghost" onClick={onRetry} disabled={loading}><IconRefresh size={13} /> Retry</button>
+            <button type="button" className="btn sm ghost" onClick={onRetry} disabled={loading}><IconRefresh size={13} /> Try again</button>
             <button ref={closeRef} type="button" className="btn sm ghost" onClick={onClose} aria-label="Close order details">Close</button>
           </div>
         </header>
@@ -533,7 +501,7 @@ function OrderDetailsDrawer({ selection, dataset, loading, onClose, onRetry }: {
           ) : dataset ? (
             <NoDataset dataset={dataset} />
           ) : !loading ? (
-            <EmptyState title="Order details unavailable" description="No validated order-details response is loaded. Retry the read; no synthetic order data is shown." />
+            <EmptyState title="Order details unavailable" description="No validated order-details response is loaded. Try again; no synthetic order data is shown." />
           ) : null}
         </div>
       </aside>
@@ -931,8 +899,9 @@ export function AccountAnalytics({
   const copy = VIEW_COPY[view];
   const costBasisAccountScope = snapshot?.fills.data?.summary.calculations[0]?.fill.accountScope
     ?? (session ? JSON.stringify([session.entryId, "root"]) : "");
-  const loadLabel = view === "overview" ? "Load account data" : view === "trades" ? "Load your trades" : view === "orders" ? "Load your orders" : view === "pnl" ? "Load P&L inputs" : "Load money movements";
-  const refreshLabel = view === "overview" ? "Refresh account data" : view === "trades" ? "Refresh your trades" : view === "orders" ? "Refresh your orders" : view === "pnl" ? "Refresh P&L inputs" : "Refresh money movements";
+  // One action covers every read this view makes, so the label stays generic.
+  const loadLabel = "Load account data";
+  const refreshLabel = "Refresh account data";
   const periodLabel = view === "trades" ? "Trade time period" : view === "orders" ? "Completed-order time period" : view === "pnl" ? "P&L analysis time period" : "Balance and equity time period";
   const emptyDescription = !session
     ? copy.emptyDescription
@@ -962,26 +931,31 @@ export function AccountAnalytics({
       subtitle={copy.subtitle}
       actions={<Pill kind={hasViewResponse && !hasIncomplete && visibleSuccessful > 0 ? "up" : "warn"}>{connectionLabel}</Pill>}
     >
-      <div className="notice warn" role="note" style={{ marginBottom: 14 }}>
-        <div>
+      {/* One status line before the primary action, with the full caveats one
+          click away and quoted word for word. Nothing here is weakened. */}
+      <div className="row-flex" style={{ gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <span className={`pill ${secureContext && session?.registeredKeyId ? "info" : "warn"}`}>
+          {secureContext ? (session?.registeredKeyId ? "Key ID saved" : "Key ID required") : "HTTPS required"}
+        </span>
+        <span className="pill">{catalogReady ? "Pair catalog loaded" : "Pair catalog required before fills"}</span>
+        <span className="faint">Reads are not verified on this device until one succeeds.</span>
+      </div>
+
+      <details className="disclosure" style={{ marginBottom: 14 }}>
+        <summary>What this means</summary>
+        <p>
           <strong>Live compatibility remains unverified.</strong>{" "}
           Authenticated GET reads are enabled, but each operation still succeeds or fails independently. Browser CORS, origin, and owner-controlled read-policy checks determine whether a real response is available; a response is not evidence of another permission.
-        </div>
-      </div>
-
-      <div className="notice info" role="note" style={{ marginBottom: 14 }}>
-        <div>
+        </p>
+        <p>
           <strong>Section-scoped memory.</strong> Changing account sections intentionally discards this section&apos;s in-memory snapshots, cursor imports, and manual P&amp;L inputs. Reload or re-enter them when you return; no private data is persisted to retain them.
+        </p>
+        <div className="grid cols-3" style={{ marginTop: 8 }}>
+          <div className="kv"><span className="k">Secure browser context</span><span className="v">{secureContext ? "Yes" : "No"}</span></div>
+          <div className="kv"><span className="k">Authenticated GET reads</span><span className="v">Enabled</span></div>
+          <div className="kv"><span className="k">CORS / permissions</span><span className="v">{snapshot ? "Per-operation result below" : "Not live-verified"}</span></div>
         </div>
-      </div>
-
-      <div className="grid cols-4" style={{ marginBottom: 14 }}>
-        <div className="kv"><span className="k">Registered key ID</span><span className="v">{session?.registeredKeyId ? "Saved" : "Required"}</span></div>
-        <div className="kv"><span className="k">Secure browser context</span><span className="v">{secureContext ? "Yes" : "No"}</span></div>
-        <div className="kv"><span className="k">Authenticated GET reads</span><span className="v">Enabled</span></div>
-        <div className="kv"><span className="k">Official pair catalog</span><span className="v">{catalogReady ? "SpotConfig validated" : "Required before fills"}</span></div>
-        <div className="kv"><span className="k">CORS / permissions</span><span className="v">{snapshot ? "Per-operation result below" : "Not live-verified"}</span></div>
-      </div>
+      </details>
 
       <div className="row-flex" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         {view !== "transfers" && <label className="field" style={{ minWidth: 180 }}>

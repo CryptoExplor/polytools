@@ -30,7 +30,6 @@ import {
   MetricStrip,
   PageHeader,
   Pill,
-  SymbolSelect,
   TermTip,
 } from "../components/ui";
 import {
@@ -101,6 +100,8 @@ export default function Tape() {
   } = usePollData(() => api.trades(symbol, 50), 1500, [symbol]);
 
   const [threshold, setThreshold] = useState<number>(10_000);
+  // The alert controls sit below the tape and stay collapsed until opened.
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const [sideFilter, setSideFilter] = useState<"all" | "buy" | "sell" | "whales">("all");
   const [sound, setSound] = useState<boolean>(false);
   const [notify, setNotify] = useState<boolean>(false);
@@ -275,12 +276,11 @@ export default function Tape() {
   return (
     <div className="page-stack">
       <PageHeader
-        title={`Recent Market Trades · ${symbol}`}
+        title={`Trades · ${symbol}`}
         badge={<Pill kind="accent">{rows.length} recent trades</Pill>}
-        subtitle="Public trades for everyone on this market, newest first. No account key is used. These are not necessarily your trades."
+        subtitle="Every trade on this market, newest first. No account key is used; these may not be your trades."
         actions={
           <div className="row-flex">
-            <SymbolSelect value={symbol} onChange={setSymbol} />
             <DataFreshness
               updatedAt={updatedAt}
               refreshing={refreshing}
@@ -362,109 +362,6 @@ export default function Tape() {
 
       <ErrorBox error={error} onRetry={refresh} hasStaleData={rows.length > 0} />
 
-      {/* Alert Controls Bar */}
-      <Card
-        title="Large Print Alert & Tape Controls"
-        subtitle="Alerts are local. They are not orders. Triggered once per unique matchId on newly arriving trades."
-        actions={
-          <div className="row-flex" style={{ gap: 8 }}>
-            <button type="button" className="btn sm ghost" onClick={triggerTestAlert}>
-              Test Alert
-            </button>
-            {whales.length > 0 && (
-              <button
-                type="button"
-                className="btn sm ghost"
-                onClick={() => setWhales([])}
-                title="Clear whale log"
-              >
-                <IconTrash size={12} /> Clear Whale Log
-              </button>
-            )}
-          </div>
-        }
-      >
-        <div className="between" style={{ gap: 12 }}>
-          <div className="row-flex" style={{ gap: 10 }}>
-            <label className="faint" htmlFor="whale-threshold-select">
-              Whale Threshold ({quote}):
-            </label>
-            <select
-              id="whale-threshold-select"
-              className="select mono"
-              style={{ width: "auto", padding: "5px 10px" }}
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-            >
-              {[500, 1000, 5000, 10000, 25000, 50000, 100000, 250000].map((v) => (
-                <option key={v} value={v}>
-                  ≥ {formatCompactQuoteNotional(v, quote)}
-                </option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              className={`btn sm ${sound ? "primary" : "ghost"}`}
-              onClick={() => setSound((v) => !v)}
-              aria-pressed={sound}
-            >
-              {sound ? <IconVolume size={13} /> : <IconVolumeOff size={13} />}
-              <span>Sound {sound ? "On" : "Off"}</span>
-            </button>
-
-            <button
-              type="button"
-              className={`btn sm ${notify ? "primary" : "ghost"}`}
-              onClick={() => void toggleDesktopNotify()}
-              aria-pressed={notify}
-              disabled={notifPerm === "denied" || notifPerm === "unsupported"}
-              title={
-                notifPerm === "denied"
-                  ? "Browser notifications are blocked in site permissions"
-                  : "Toggle desktop notifications for whale trades"
-              }
-            >
-              <IconBell size={13} />
-              <span>
-                Desktop {notify ? "On" : notifPerm === "denied" ? "Blocked" : "Off"}
-              </span>
-            </button>
-          </div>
-
-          <div className="seg-group" role="group" aria-label="Filter tape rows">
-            <button
-              type="button"
-              className={`seg-btn ${sideFilter === "all" ? "active" : ""}`}
-              onClick={() => setSideFilter("all")}
-            >
-              All ({rows.length})
-            </button>
-            <button
-              type="button"
-              className={`seg-btn ${sideFilter === "buy" ? "active" : ""}`}
-              onClick={() => setSideFilter("buy")}
-            >
-              ▲ Buys ({stats.buyCount})
-            </button>
-            <button
-              type="button"
-              className={`seg-btn ${sideFilter === "sell" ? "active" : ""}`}
-              onClick={() => setSideFilter("sell")}
-            >
-              ▼ Sells ({stats.sellCount})
-            </button>
-            <button
-              type="button"
-              className={`seg-btn ${sideFilter === "whales" ? "active" : ""}`}
-              onClick={() => setSideFilter("whales")}
-              title="Single trade notional (price × qty) above your chosen threshold"
-            >
-              Large prints (≥ {formatCompactQuoteNotional(threshold, quote)})
-            </button>
-          </div>
-        </div>
-      </Card>
 
       {/* Session Whale Log */}
       {whales.length > 0 && (
@@ -501,12 +398,12 @@ export default function Tape() {
         }
       >
         <div className="tape-head">
-          <span>Time (UTC)</span>
-          <span>Side</span>
-          <span className="right">Price ({quote})</span>
-          <span className="right">Quantity ({base})</span>
-          <span className="right hide-xs">Notional</span>
-          <span className="right hide-sm">Match ID / Age</span>
+          <span className="tape-time">Time (UTC)</span>
+          <span className="tape-side">Side</span>
+          <span className="right tape-price">Price ({quote})</span>
+          <span className="right tape-qty">Quantity ({base})</span>
+          <span className="right tape-notional">Notional</span>
+          <span className="right tape-mid">Match ID / Age</span>
         </div>
 
         {loading && !rows.length && (
@@ -517,10 +414,10 @@ export default function Tape() {
 
         {!loading && filteredRows.length === 0 && (
           <EmptyState
-            title="No trades match current view"
+            title="No trades match"
             description={
               rows.length > 0
-                ? "Try switching the tape filter back to All or lowering the whale threshold."
+                ? "Show all trades, or lower the alert size."
                 : "Waiting for trade prints from the exchange."
             }
           />
@@ -534,15 +431,15 @@ export default function Tape() {
                 className={`tape-row ${isWhale ? "whale" : ""}`}
                 key={r.matchId}
               >
-                <span className="muted">{fmtTimeUTC(r.tsMs)}</span>
-                <span className={`side ${r.sideLabel}`}>
+                <span className="muted tape-time">{fmtTimeUTC(r.tsMs)}</span>
+                <span className={`side ${r.sideLabel} tape-side`}>
                   {r.sideLabel === "buy" ? "▲ BUY" : "▼ SELL"}
                 </span>
-                <span className="right" style={{ fontWeight: 600 }}>
+                <span className="right tape-price" style={{ fontWeight: 600 }}>
                   {fmtNum(r.px)}
                 </span>
-                <span className="right muted">{fmtNum(r.qtyNum, qtyDecimals)}</span>
-                <span className="right hide-xs" style={{ fontWeight: isWhale ? 700 : 500 }}>
+                <span className="right muted tape-qty">{fmtNum(r.qtyNum, qtyDecimals)}</span>
+                <span className="right tape-notional" style={{ fontWeight: isWhale ? 700 : 500 }}>
                   {formatCompactQuoteNotional(r.notional, quote)}{" "}
                   {isWhale && (
                     <Pill kind="warn" title="Exceeds whale threshold">
@@ -551,7 +448,7 @@ export default function Tape() {
                   )}
                 </span>
                 <span
-                  className="right hide-sm row-flex"
+                  className="right tape-mid row-flex"
                   style={{ justifyContent: "flex-end", gap: 6 }}
                 >
                   <span className="faint">{fmtAgo(r.tsMs, now)}</span>
@@ -560,6 +457,124 @@ export default function Tape() {
               </div>
             );
           })}
+        </div>
+      </Card>
+      {/* Alert Controls — below the tape, collapsed until asked for */}
+      <Card
+        title="Alerts"
+        subtitle={
+          alertsOpen
+            ? "Alerts stay in this browser and never place orders. Each trade alerts once."
+            : `${sound || notify ? "Alerts on" : "Alerts off"} · prints ≥ ${formatCompactQuoteNotional(threshold, quote)} ${quote} · sound ${sound ? "on" : "off"} · desktop ${notify ? "on" : notifPerm === "denied" ? "blocked" : "off"}`
+        }
+        actions={
+          <div className="row-flex" style={{ gap: 8 }}>
+            <button
+              type="button"
+              className="btn sm ghost"
+              aria-expanded={alertsOpen}
+              aria-controls="tape-alert-controls"
+              onClick={() => setAlertsOpen((open) => !open)}
+            >
+              {alertsOpen ? "Hide alert setup" : "Set up alerts"}
+            </button>
+            <button type="button" className="btn sm ghost" onClick={triggerTestAlert}>
+              Test alert
+            </button>
+            {whales.length > 0 && (
+              <button
+                type="button"
+                className="btn sm ghost"
+                onClick={() => setWhales([])}
+                title="Clear whale log"
+              >
+                <IconTrash size={12} /> Clear log
+              </button>
+            )}
+          </div>
+        }
+      >
+        <div id="tape-alert-controls" hidden={!alertsOpen}>
+          <div className="between" style={{ gap: 12 }}>
+            <div className="row-flex" style={{ gap: 10 }}>
+              <label className="faint" htmlFor="whale-threshold-select">
+                Whale Threshold ({quote}):
+              </label>
+              <select
+                id="whale-threshold-select"
+                className="select mono"
+                style={{ width: "auto", padding: "5px 10px" }}
+                value={threshold}
+                onChange={(e) => setThreshold(Number(e.target.value))}
+              >
+                {[500, 1000, 5000, 10000, 25000, 50000, 100000, 250000].map((v) => (
+                  <option key={v} value={v}>
+                    ≥ {formatCompactQuoteNotional(v, quote)}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                className={`btn sm ${sound ? "primary" : "ghost"}`}
+                onClick={() => setSound((v) => !v)}
+                aria-pressed={sound}
+              >
+                {sound ? <IconVolume size={13} /> : <IconVolumeOff size={13} />}
+                <span>Sound {sound ? "On" : "Off"}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`btn sm ${notify ? "primary" : "ghost"}`}
+                onClick={() => void toggleDesktopNotify()}
+                aria-pressed={notify}
+                disabled={notifPerm === "denied" || notifPerm === "unsupported"}
+                title={
+                  notifPerm === "denied"
+                    ? "Browser notifications are blocked in site permissions"
+                    : "Toggle desktop notifications for whale trades"
+                }
+              >
+                <IconBell size={13} />
+                <span>
+                  Desktop {notify ? "On" : notifPerm === "denied" ? "Blocked" : "Off"}
+                </span>
+              </button>
+            </div>
+
+            <div className="seg-group" role="group" aria-label="Filter tape rows">
+              <button
+                type="button"
+                className={`seg-btn ${sideFilter === "all" ? "active" : ""}`}
+                onClick={() => setSideFilter("all")}
+              >
+                All ({rows.length})
+              </button>
+              <button
+                type="button"
+                className={`seg-btn ${sideFilter === "buy" ? "active" : ""}`}
+                onClick={() => setSideFilter("buy")}
+              >
+                ▲ Buys ({stats.buyCount})
+              </button>
+              <button
+                type="button"
+                className={`seg-btn ${sideFilter === "sell" ? "active" : ""}`}
+                onClick={() => setSideFilter("sell")}
+              >
+                ▼ Sells ({stats.sellCount})
+              </button>
+              <button
+                type="button"
+                className={`seg-btn ${sideFilter === "whales" ? "active" : ""}`}
+                onClick={() => setSideFilter("whales")}
+                title="Single trade notional (price × qty) above your chosen threshold"
+              >
+                Large prints (≥ {formatCompactQuoteNotional(threshold, quote)})
+              </button>
+            </div>
+          </div>
         </div>
       </Card>
 
