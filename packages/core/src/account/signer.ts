@@ -25,6 +25,11 @@ export const READ_ONLY_OPERATIONS = {
     path: "/v1/orders/history",
     label: "Terminal order history",
   },
+  orderDetails: {
+    method: "GET",
+    path: "/v1/spot/orders/{order_id}",
+    label: "Order details and lineage executions",
+  },
   fills: { method: "GET", path: "/v1/spot/trades", label: "User fills" },
   transfers: { method: "GET", path: "/v1/transfers", label: "Finalized transfers" },
   feeRates: { method: "GET", path: "/v1/spot/fee-rates", label: "Current fee rates" },

@@ -3,6 +3,11 @@ import { fmtAgo, splitSymbol } from "@poly/core";
 import { useApp } from "../lib/store";
 import { useNow } from "../lib/hooks";
 import {
+  copyButtonPresentation,
+  copyTextToClipboard,
+  type CopyStatus,
+} from "../lib/clipboard";
+import {
   getTokenBrandSpec,
   getTokenPackshotUrl,
   type TokenViewAngle,
@@ -34,7 +39,7 @@ export function PageHeader({
     <div className="page-header">
       <div className="page-header-info">
         <div className="page-eyebrow">
-          <span>Read-only MCP · Testnet</span>
+          <span>Read-only · Testnet</span>
           {badge}
         </div>
         <h2>{title}</h2>
@@ -366,28 +371,29 @@ export function CopyButton({
   copiedLabel?: string;
   size?: "sm" | "md";
 }) {
-  const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState<CopyStatus>("idle");
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* ignore clipboard error */
-    }
+    const succeeded = await copyTextToClipboard(text, (value) =>
+      navigator.clipboard.writeText(value),
+    );
+    setStatus(succeeded ? "copied" : "failed");
+    setTimeout(() => setStatus("idle"), succeeded ? 1600 : 2400);
   };
+
+  const presentation = copyButtonPresentation(status, label, copiedLabel);
 
   return (
     <button
       type="button"
-      className={`btn ${size === "sm" ? "sm" : ""} ${copied ? "primary" : "ghost"}`}
+      className={`btn ${size === "sm" ? "sm" : ""} ${status === "copied" ? "primary" : "ghost"}`}
       onClick={(e) => void handleCopy(e)}
-      aria-label={`Copy ${label}`}
+      aria-label={presentation.accessibleLabel}
+      title={presentation.title}
     >
-      {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
-      <span>{copied ? copiedLabel : label}</span>
+      {status === "copied" ? <IconCheck size={12} /> : status === "failed" ? <IconAlert size={12} /> : <IconCopy size={12} />}
+      <span aria-live="polite">{presentation.visibleLabel}</span>
     </button>
   );
 }
@@ -757,7 +763,9 @@ export function Countdown({ to, label }: { to: number; label: string }) {
           letterSpacing: 1.5,
           color: "var(--text-primary)",
         }}
-        aria-live="polite"
+        role="timer"
+        aria-live="off"
+        aria-label="Time remaining until the next daily claim reset"
       >
         {pad(h)}h : {pad(m)}m : {pad(s)}s
       </div>

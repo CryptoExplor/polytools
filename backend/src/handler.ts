@@ -36,6 +36,7 @@ import {
   type BookDepth,
   type CandleTimeframe,
 } from "../../packages/core/src/index";
+import { applySecurityHeaders } from "../../packages/core/src/deploymentSecurity";
 import { cached, cacheStats } from "./cache";
 import { dataFor } from "./mcpServer";
 
@@ -58,6 +59,12 @@ const VALID_SIDES = new Set<string>(["buy", "sell"]);
 const VALID_COMPARE_BY = new Set<string>(["networkFee", "depositMinAmount"]);
 const VALID_LOOKUP_KIND = new Set<string>(["source", "any"]);
 
+/** Resolve the primary endpoint, honoring a mainnet-only deployment override. */
+export function resolveBackendMcpUrl(env?: Record<string, string | undefined>): string {
+  return resolveMcpUrl("testnet", env?.MCP_URL ?? env?.MCP_URL_MAINNET) ||
+    resolveMcpUrl("mainnet", env?.MCP_URL_MAINNET);
+}
+
 class ValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -69,6 +76,7 @@ function json(body: unknown, init: ResponseInit = {}, extra?: Record<string, str
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json; charset=utf-8");
   for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  applySecurityHeaders(headers);
   if (extra) for (const [k, v] of Object.entries(extra)) headers.set(k, v);
   return new Response(JSON.stringify(body, null, 0), { ...init, headers });
 }
@@ -129,14 +137,15 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, {
+      status: 204,
+      headers: applySecurityHeaders(new Headers(CORS_HEADERS)),
+    });
   }
   if (request.method !== "GET") return error(405, "Method not allowed");
 
   // ---- environment resolution -------------------------------------------------
-  const mcpUrl =
-    resolveMcpUrl("testnet", opts.env?.MCP_URL) ||
-    resolveMcpUrl("mainnet", opts.env?.MCP_URL_MAINNET);
+  const mcpUrl = resolveBackendMcpUrl(opts.env);
 
   // ---- meta routes -------------------------------------------------------------
   if (path === "/api" || path === "/api/health") {

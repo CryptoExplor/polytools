@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cumulativeDepth, fmtCompact, fmtNum } from "@poly/core";
 import { EmptyState } from "./ui";
+import { formatCompactQuoteNotional } from "../lib/format";
 
 interface Level {
   price: number;
@@ -16,10 +17,12 @@ export function DepthChart({
   bids,
   asks,
   height = 290,
+  quoteAsset,
 }: {
   bids: Level[];
   asks: Level[];
   height?: number;
+  quoteAsset: string;
 }) {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [hover, setHover] = useState<{
@@ -302,7 +305,7 @@ export function DepthChart({
             {hover.distPct.toFixed(2)}% from mid
           </div>
           <div className="muted">Cum Qty: {fmtNum(hover.cum, 4)}</div>
-          <div className="muted">Cum Notional: ≈ {fmtCompact(hover.cum * hover.price, "$")}</div>
+          <div className="muted">Cum Notional: ≈ {formatCompactQuoteNotional(hover.cum * hover.price, quoteAsset)}</div>
         </div>
       )}
     </div>

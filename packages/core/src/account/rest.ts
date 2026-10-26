@@ -80,6 +80,7 @@ export interface AccountRequestParams {
   lineageId?: string;
   throughGeneration?: number;
   includeTransfers?: boolean;
+  includeExecutionHistory?: boolean;
   includeAttachedRisk?: boolean;
   includeAttachedRiskState?: boolean;
   limit?: number;
@@ -235,6 +236,7 @@ export function serializeReadOperation(
     throw invalid(String(operation), "Operation is not in the read-only registry.");
   }
   const definition = READ_ONLY_OPERATIONS[operation];
+  let path: string = definition.path;
   let pairs: QueryPair[] = [];
   const allKeys = new Set<string>();
 
@@ -308,6 +310,25 @@ export function serializeReadOperation(
       }
       break;
     }
+    case "orderDetails": {
+      [
+        "orderId", "subaccountId", "includeExecutionHistory", "limit", "pageToken",
+        "includeAttachedRisk", "includeAttachedRiskState",
+      ].forEach((key) => allKeys.add(key));
+      assertKeys(operation, params, allKeys);
+      const orderId = id(params.orderId, operation, "orderId");
+      if (!orderId) throw invalid(operation, "A validated orderId is required for order details.");
+      // The identifier is the only dynamic path segment. It is base58-checked
+      // above and is never accepted as an arbitrary caller-supplied path.
+      path = `/v1/spot/orders/${orderId}`;
+      push(pairs, "subaccountId", id(params.subaccountId, operation, "subaccountId"));
+      push(pairs, "includeExecutionHistory", booleanValue(params.includeExecutionHistory, operation, "includeExecutionHistory"));
+      push(pairs, "limit", limit(params.limit, operation));
+      push(pairs, "pageToken", cursor(params.pageToken, operation));
+      push(pairs, "includeAttachedRisk", booleanValue(params.includeAttachedRisk, operation, "includeAttachedRisk"));
+      push(pairs, "includeAttachedRiskState", booleanValue(params.includeAttachedRiskState, operation, "includeAttachedRiskState"));
+      break;
+    }
     case "fills": {
       [
         "subaccountId", "symbol", "side", "startTime", "endTime", "afterMatchId",
@@ -353,7 +374,7 @@ export function serializeReadOperation(
     case "feeRates":
       ["subaccountId", "symbol"].forEach((key) => allKeys.add(key));
       assertKeys(operation, params, allKeys);
-      push(pairs, "subaccountId", text(params.subaccountId, operation, "subaccountId", 256));
+      push(pairs, "subaccountId", id(params.subaccountId, operation, "subaccountId"));
       for (const symbol of symbols(params.symbol, operation)) push(pairs, "symbol", symbol);
       break;
     default:
@@ -361,7 +382,7 @@ export function serializeReadOperation(
   }
 
   const canonicalQuery = canonicalizePairs(pairs).canonicalQuery;
-  return { path: definition.path, pairs, canonicalQuery };
+  return { path, pairs, canonicalQuery };
 }
 
 export function buildReadRequest(
@@ -543,11 +564,14 @@ export class AccountRestClient {
         const built = buildReadRequest(operation, params, this.baseUrl);
         const signed = await this.vault.signReadRequest({
           operation,
+          path: built.path,
           query: built.canonicalQuery,
         });
-        const signedQuery = signed.canonicalString.split("\n")[3];
-        if (signedQuery !== built.canonicalQuery) {
-          throw new AccountRestError("CONTRACT_CONFLICT", operation, "The sent query and signed query differ; request blocked.", {
+        const canonicalLines = signed.canonicalString.split("\n");
+        const signedPath = canonicalLines[2];
+        const signedQuery = canonicalLines[3];
+        if (signedPath !== built.path || signedQuery !== built.canonicalQuery) {
+          throw new AccountRestError("CONTRACT_CONFLICT", operation, "The sent path/query and signed path/query differ; request blocked.", {
             localCorrelationId: correlationId(),
           });
         }

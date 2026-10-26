@@ -10,8 +10,10 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { dec, fmtCompact, fmtNum, price, splitSymbol } from "@poly/core";
+import { dec, fmtNum, price, splitSymbol } from "@poly/core";
 import { api } from "../lib/api";
+import { formatCompactQuoteNotional } from "../lib/format";
+import { decodeHeatmapBuckets, HEATMAP_PRICE_BINS, inspectHeatmapCell } from "../lib/heatmap";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -29,27 +31,86 @@ import {
 } from "../components/ui";
 
 const fmtPrice = (n: number) => fmtNum(n, 2);
-const fmtUsd = (n: number) => fmtCompact(n, "$");
 
 type HeatInterval = "1m" | "5m" | "1h";
 type HeatDepth = 10 | 50 | 100;
 
-interface DecodedPoint {
-  px: number;
-  qty: number;
-  side: "bid" | "ask";
-}
+const PRICE_BINS = HEATMAP_PRICE_BINS;
 
-interface DecodedBucket {
-  tsSec: number;
-  points: DecodedPoint[];
-  bestBid: number | null;
-  bestAsk: number | null;
-  totalBidQty: number;
-  totalAskQty: number;
-}
+type DecodedHeatmap = NonNullable<ReturnType<typeof decodeHeatmapBuckets>>;
 
-const PRICE_BINS = 36;
+export function HeatmapTextInspector({
+  decoded,
+  base,
+  quote,
+}: {
+  decoded: DecodedHeatmap;
+  base: string;
+  quote: string;
+}) {
+  const [selection, setSelection] = useState({ bucketIdx: 0, binIdx: 0 });
+  const bucketIdx = Math.min(selection.bucketIdx, Math.max(0, decoded.buckets.length - 1));
+  const inspection = inspectHeatmapCell(decoded, bucketIdx, selection.binIdx);
+  // Keep adjacent native options distinguishable even for narrow or low-priced books.
+  const priceDecimals = Math.min(12, Math.max(2, Math.ceil(-Math.log10(decoded.binSize)) + 2));
+  const formatBandPrice = (value: number) => fmtNum(value, priceDecimals);
+
+  return (
+    <details className="heatmap-text-inspector mt-3">
+      <summary>Keyboard and text inspection</summary>
+      <p className="faint">
+        Choose any time bucket and price band with native controls. The readout includes zero-liquidity cells and uses the same decoded data as pointer hover.
+      </p>
+      <div className="grid cols-2">
+        <label className="field">
+          <span className="faint">Time bucket</span>
+          <select
+            className="select"
+            aria-label="Heatmap time bucket"
+            value={bucketIdx}
+            onChange={(event) => setSelection((current) => ({
+              ...current,
+              bucketIdx: Number(event.target.value),
+            }))}
+          >
+            {decoded.buckets.map((bucket, index) => (
+              <option key={`${bucket.tsSec}-${index}`} value={index}>
+                Bucket {index + 1} · {new Date(bucket.tsSec * 1000).toISOString().slice(11, 16)} UTC
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span className="faint">Price band ({quote})</span>
+          <select
+            className="select"
+            aria-label={`Heatmap price band in ${quote}`}
+            value={selection.binIdx}
+            onChange={(event) => setSelection((current) => ({
+              ...current,
+              binIdx: Number(event.target.value),
+            }))}
+          >
+            {Array.from({ length: PRICE_BINS }, (_, binIdx) => {
+              const low = decoded.renderMinPx + binIdx * decoded.binSize;
+              const high = low + decoded.binSize;
+              return (
+                <option key={binIdx} value={binIdx}>
+                  {formatBandPrice(low)} – {formatBandPrice(high)} {quote}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+      </div>
+      {inspection && (
+        <p className="notice info" style={{ marginTop: 12 }}>
+          <strong>Selected cell:</strong> {new Date(inspection.tsSec * 1000).toISOString().slice(0, 19).replace("T", " ")} UTC · Price {formatBandPrice(inspection.priceLow)}–{formatBandPrice(inspection.priceHigh)} {quote} · Resting bid {fmtNum(inspection.bidQty)} {base} · Resting ask {fmtNum(inspection.askQty)} {base}
+        </p>
+      )}
+    </details>
+  );
+}
 
 export function HeatmapPage() {
   const { symbol, setSymbol } = useApp();
@@ -97,139 +158,10 @@ export function HeatmapPage() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
-  const decoded = useMemo(() => {
-    const rawBuckets = data?.buckets ?? [];
-    if (!rawBuckets.length) return null;
-
-    let minPx = Infinity;
-    let maxPx = -Infinity;
-    let peakLevelQty = 0;
-    let peakBidPx = 0;
-    let peakBidQty = 0;
-    let peakAskPx = 0;
-    let peakAskQty = 0;
-
-    const buckets: DecodedBucket[] = rawBuckets.map((b) => {
-      const points: DecodedPoint[] = [];
-      let bestBid: number | null = null;
-      let bestAsk: number | null = null;
-      let totalBidQty = 0;
-      let totalAskQty = 0;
-
-      const bidPrices = b.bids?.price ?? [];
-      const bidQtys = b.bids?.qty ?? [];
-      for (let i = 0; i < bidPrices.length; i++) {
-        const q = dec(bidQtys[i]);
-        if (!(q > 0)) continue; // FIN-11: ignore zero-qty levels
-        const p = price(bidPrices[i]);
-        if (!(p > 0)) continue;
-        points.push({ px: p, qty: q, side: "bid" });
-        totalBidQty += q;
-        if (bestBid === null || p > bestBid) bestBid = p;
-        if (p < minPx) minPx = p;
-        if (p > maxPx) maxPx = p;
-        if (q > peakBidQty) {
-          peakBidQty = q;
-          peakBidPx = p;
-        }
-      }
-
-      const askPrices = b.asks?.price ?? [];
-      const askQtys = b.asks?.qty ?? [];
-      for (let i = 0; i < askPrices.length; i++) {
-        const q = dec(askQtys[i]);
-        if (!(q > 0)) continue; // FIN-11: ignore zero-qty levels
-        const p = price(askPrices[i]);
-        if (!(p > 0)) continue;
-        points.push({ px: p, qty: q, side: "ask" });
-        totalAskQty += q;
-        if (bestAsk === null || p < bestAsk) bestAsk = p;
-        if (p < minPx) minPx = p;
-        if (p > maxPx) maxPx = p;
-        if (q > peakAskQty) {
-          peakAskQty = q;
-          peakAskPx = p;
-        }
-      }
-
-      return {
-        tsSec: b.tsSec,
-        points,
-        bestBid,
-        bestAsk,
-        totalBidQty,
-        totalAskQty,
-      };
-    });
-
-    if (!Number.isFinite(minPx) || !Number.isFinite(maxPx) || maxPx <= minPx) {
-      return null;
-    }
-
-    const span = maxPx - minPx || 1;
-    const binSize = span / PRICE_BINS;
-
-    // Build 2D grid: [bucketIdx][binIdx] -> { bidQty, askQty }
-    const grid = buckets.map((b) => {
-      const bins = Array.from({ length: PRICE_BINS }, () => ({
-        bidQty: 0,
-        askQty: 0,
-      }));
-      for (const pt of b.points) {
-        const idx = Math.min(
-          PRICE_BINS - 1,
-          Math.max(0, Math.floor((pt.px - minPx) / binSize)),
-        );
-        if (pt.side === "bid") bins[idx].bidQty += pt.qty;
-        else bins[idx].askQty += pt.qty;
-        const tot = bins[idx].bidQty + bins[idx].askQty;
-        if (tot > peakLevelQty) peakLevelQty = tot;
-      }
-      return bins;
-    });
-
-    // Top persistent liquidity bands across all buckets
-    const bandTotals = Array.from({ length: PRICE_BINS }, (_, i) => {
-      let bidSum = 0;
-      let askSum = 0;
-      let activeBuckets = 0;
-      for (let col = 0; col < grid.length; col++) {
-        const cell = grid[col][i];
-        if (cell.bidQty > 0 || cell.askQty > 0) activeBuckets++;
-        bidSum += cell.bidQty;
-        askSum += cell.askQty;
-      }
-      const low = minPx + i * binSize;
-      const high = low + binSize;
-      return {
-        binIdx: i,
-        low,
-        high,
-        mid: (low + high) / 2,
-        side: bidSum >= askSum ? ("bid" as const) : ("ask" as const),
-        totalQty: bidSum + askSum,
-        avgQty: buckets.length ? (bidSum + askSum) / buckets.length : 0,
-        persistencePct: buckets.length ? (activeBuckets / buckets.length) * 100 : 0,
-      };
-    })
-      .filter((b) => b.totalQty > 0)
-      .sort((a, b) => b.totalQty - a.totalQty)
-      .slice(0, 8);
-
-    return {
-      buckets,
-      grid,
-      minPx,
-      maxPx,
-      binSize,
-      peakLevelQty: peakLevelQty || 1,
-      peakBidPx,
-      peakBidQty,
-      peakAskPx,
-      peakAskQty,
-      bandTotals,
-    };
-  }, [data]);
+  const decoded = useMemo(
+    () => decodeHeatmapBuckets(data?.buckets ?? []),
+    [data],
+  );
 
   // Draw 2D canvas heatmap
   const height = 340;
@@ -290,7 +222,8 @@ export function HeatmapPage() {
       const y =
         padT +
         plotH -
-        ((bb - decoded.minPx) / (decoded.maxPx - decoded.minPx || 1)) * plotH;
+        ((bb - decoded.renderMinPx) /
+          (decoded.renderMaxPx - decoded.renderMinPx)) * plotH;
       if (!startedBid) {
         ctx.moveTo(x, y);
         startedBid = true;
@@ -310,7 +243,8 @@ export function HeatmapPage() {
       const y =
         padT +
         plotH -
-        ((ba - decoded.minPx) / (decoded.maxPx - decoded.minPx || 1)) * plotH;
+        ((ba - decoded.renderMinPx) /
+          (decoded.renderMaxPx - decoded.renderMinPx)) * plotH;
       if (!startedAsk) {
         ctx.moveTo(x, y);
         startedAsk = true;
@@ -327,7 +261,8 @@ export function HeatmapPage() {
     const steps = 5;
     for (let i = 0; i <= steps; i++) {
       const frac = i / steps;
-      const pxVal = decoded.maxPx - frac * (decoded.maxPx - decoded.minPx);
+      const pxVal =
+        decoded.renderMaxPx - frac * (decoded.renderMaxPx - decoded.renderMinPx);
       const y = padT + frac * plotH;
       ctx.fillText(fmtPrice(pxVal), padL + plotW + 6, y + 4);
     }
@@ -369,23 +304,7 @@ export function HeatmapPage() {
       Math.max(0, Math.floor(((my - padT) / plotH) * PRICE_BINS)),
     );
     const binIdx = PRICE_BINS - 1 - rowFromTop;
-    const cell = decoded.grid[bucketIdx]?.[binIdx];
-    const bucket = decoded.buckets[bucketIdx];
-    if (!cell || !bucket) {
-      setHoverCell(null);
-      return;
-    }
-    const priceLow = decoded.minPx + binIdx * decoded.binSize;
-    const priceHigh = priceLow + decoded.binSize;
-    setHoverCell({
-      bucketIdx,
-      binIdx,
-      tsSec: bucket.tsSec,
-      priceLow,
-      priceHigh,
-      bidQty: cell.bidQty,
-      askQty: cell.askQty,
-    });
+    setHoverCell(inspectHeatmapCell(decoded, bucketIdx, binIdx));
   };
 
   return (
@@ -549,6 +468,7 @@ export function HeatmapPage() {
                 aria-label={`Order book liquidity heatmap for ${symbol}`}
               />
             </div>
+            <HeatmapTextInspector decoded={decoded} base={base} quote={quote} />
           </Card>
 
           <div className="mt-3">
@@ -582,7 +502,7 @@ export function HeatmapPage() {
                         </td>
                         <td className="right mono">{fmtNum(b.avgQty, 4)}</td>
                         <td className="right mono">{fmtNum(b.totalQty, 4)}</td>
-                        <td className="right mono">{fmtUsd(b.avgQty * b.mid)}</td>
+                        <td className="right mono">{formatCompactQuoteNotional(b.avgQty * b.mid, quote)}</td>
                         <td className="right mono">{b.persistencePct.toFixed(0)}% of buckets</td>
                       </tr>
                     ))}
@@ -597,8 +517,8 @@ export function HeatmapPage() {
       {data && !decoded && !loading && (
         <Card>
           <EmptyState
-            title="No non-zero resting liquidity buckets in this window"
-            description="Try switching to BTC-USDT or increasing the lookback window."
+            title="No non-zero resting liquidity in this window"
+            description="The response was empty or contained only zero-quantity levels. Try another market or increase the lookback window."
           />
         </Card>
       )}

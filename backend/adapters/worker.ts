@@ -17,6 +17,7 @@
 
 import { api } from "../src/handler";
 import { dataFor } from "../src/mcpServer";
+import { withSecurityHeaders } from "../../packages/core/src/deploymentSecurity";
 import {
   NETWORKS,
   price,
@@ -86,7 +87,9 @@ export default {
       return api(request, { env });
     }
     if (env.ASSETS && typeof env.ASSETS.fetch === "function") {
-      return env.ASSETS.fetch(request);
+      return env.ASSETS.fetch(request).then((response) =>
+        withSecurityHeaders(response),
+      );
     }
     return api(request, { env });
   },

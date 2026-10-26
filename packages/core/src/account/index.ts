@@ -13,6 +13,7 @@ export * from "./decimal";
 export * from "./coverage";
 export * from "./pagination";
 export * from "./analytics";
+export * from "./lots";
 export * from "./memoryStore";
 export * from "./normalize";
 export * from "./activity";

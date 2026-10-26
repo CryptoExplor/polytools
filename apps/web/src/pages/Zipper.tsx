@@ -335,10 +335,12 @@ export default function Zipper() {
         footer={
           <>
             <span>
-              <strong>Estimation Notice:</strong> Fees and minimums come from live Zipper
-              configuration (`get_deposit_withdraw_config` / `compare_deposit_routes`). Always
-              confirm final parameters in the official Polyester app before initiating a
-              transfer.
+              <strong>Estimation Notice:</strong> Fees and minimums come from the currently
+              loaded public Zipper configuration, which may be cached, stale, or a labeled
+              development sample. Illustrative Deposit Net subtracts the listed network fee
+              from the entered amount and checks the deposit minimum only; it is not a
+              withdrawal or executable transfer quote. Confirm final parameters in the
+              official Polyester app before initiating a transfer.
             </span>
             <span className="mono">
               Tip: Try <strong>tETH</strong> to compare 4 multi-chain testnet routes.
@@ -382,8 +384,8 @@ export default function Zipper() {
                   <th>Confirmations / Finality</th>
                   <th>
                     <TermTip
-                      label={`Illustrative Net (${asset})`}
-                      tip="Illustrative: amount minus network fee string. Not a Zipper quote."
+                      label={`Illustrative Deposit Net (${asset})`}
+                      tip="Deposit-oriented illustration: entered amount minus the listed network fee, with a deposit-minimum check. Not a withdrawal or executable transfer quote."
                     />
                   </th>
                   <th className="align-left">Ranking Rationale & Status</th>
@@ -547,7 +549,7 @@ export default function Zipper() {
         <Card
           flush
           title={`Zipper Protocol Smart Contracts (${cfgContracts.length})`}
-          subtitle="Verified contract addresses returned by get_deposit_withdraw_config"
+          subtitle="Addresses returned by the loaded public get_deposit_withdraw_config response; not independently verified by PolyTools"
         >
           <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
             <table className="data">

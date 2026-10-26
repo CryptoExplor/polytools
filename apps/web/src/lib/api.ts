@@ -19,6 +19,37 @@ import type {
   RecentTradesResult,
   SpotMarketsResult,
 } from "@poly/core";
+import {
+  isWireSamplePayload,
+  WIRE_SAMPLE_DATA_SOURCE,
+  WIRE_SAMPLE_HEADER,
+} from "./provenance";
+
+let wireSampleUsed = false;
+const wireSampleListeners = new Set<() => void>();
+
+function noteWireSampleUsage(): void {
+  if (wireSampleUsed) return;
+  wireSampleUsed = true;
+  for (const listener of wireSampleListeners) {
+    try {
+      listener();
+    } catch {
+      // Provenance reporting must not break an otherwise valid public response.
+    }
+  }
+}
+
+export function hasUsedWireSamples(): boolean {
+  return wireSampleUsed;
+}
+
+export function subscribeWireSampleUsage(listener: () => void): () => void {
+  wireSampleListeners.add(listener);
+  return () => {
+    wireSampleListeners.delete(listener);
+  };
+}
 
 export const API_BASE: string =
   (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, "") ?? "";
@@ -51,10 +82,16 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(
+export interface ApiResponse<T> {
+  data: T;
+  cacheControl: string | null;
+}
+
+async function getResponse<T>(
   path: string,
   params?: Record<string, string | number | undefined>,
-): Promise<T> {
+  cache?: RequestCache,
+): Promise<ApiResponse<T>> {
   const qs = new URLSearchParams();
   if (params) {
     for (const [k, v] of Object.entries(params)) {
@@ -63,13 +100,20 @@ async function get<T>(
   }
   const queryStr = qs.toString();
   const url = `${API_BASE}/api${path}${queryStr ? `?${queryStr}` : ""}`;
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    ...(cache ? { cache } : {}),
+  });
+  if (res.headers.get(WIRE_SAMPLE_HEADER) === WIRE_SAMPLE_DATA_SOURCE) {
+    noteWireSampleUsage();
+  }
   if (!res.ok) {
     let msg = `${res.status}`;
     let code: string | undefined;
     let detail: string | undefined;
     try {
       const body = await res.json();
+      if (isWireSamplePayload(body)) noteWireSampleUsage();
       if (typeof body?.error === "string") code = body.error;
       if (typeof body?.detail === "string") detail = body.detail;
       if (code && detail) {
@@ -84,13 +128,24 @@ async function get<T>(
     }
     throw new ApiError(msg, res.status, code, detail);
   }
-  return res.json() as Promise<T>;
+  const data = await res.json() as T;
+  if (isWireSamplePayload(data)) noteWireSampleUsage();
+  return { data, cacheControl: res.headers.get("cache-control") };
+}
+
+async function get<T>(
+  path: string,
+  params?: Record<string, string | number | undefined>,
+): Promise<T> {
+  return (await getResponse<T>(path, params)).data;
 }
 
 export const api = {
   health: () => get<HealthInfo>("/health").catch(() => null),
   env: () => get<EnvInfo>("/env").catch(() => null),
   markets: () => get<SpotMarketsResult>("/markets"),
+  // no-cache asks the HTTP cache to revalidate; it does not bypass the backend TTL.
+  marketsForCache: () => getResponse<unknown>("/markets", undefined, "no-cache"),
   overview: (symbols?: string[]) =>
     get<MarketOverviewResult>("/overview", { symbols: symbols?.join(",") }),
   orderbook: (symbol: string, depth = 50) =>

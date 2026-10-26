@@ -9,6 +9,11 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { NETWORKS, fmtTimeUTC } from "@poly/core";
 import { useNow } from "../lib/hooks";
+import {
+  formatBooleanTelemetry,
+  formatCountTelemetry,
+  telemetryFallback,
+} from "../lib/telemetry";
 import { useApp } from "../lib/store";
 import {
   Card,
@@ -159,7 +164,10 @@ export default function Hub() {
     dataSource,
     envInfo,
     marketsError,
+    marketsLoading,
     marketsUpdatedAt,
+    marketsRefreshing,
+    marketsCacheStatus,
     connectionStatus,
     refreshMarkets,
     pairs,
@@ -194,12 +202,31 @@ export default function Hub() {
   const resetAll = () => setDone(new Set());
 
   const pct = Math.round((done.size / CHECKLIST.length) * 100);
+  const metadataAvailable = marketsUpdatedAt !== null;
+  const metadataPending = !metadataAvailable && marketsLoading;
+  const environmentLabel = metadataAvailable
+    ? apiEnv.toUpperCase()
+    : metadataPending
+      ? "PENDING"
+      : "UNKNOWN";
+  const environmentTelemetry = metadataAvailable
+    ? apiEnv
+    : telemetryFallback(metadataPending);
+  const metadataStale = marketsCacheStatus ? now >= marketsCacheStatus.freshUntil : false;
+  const dataSourceLabel = metadataAvailable
+    ? marketsCacheStatus
+      ? `${metadataStale ? "Stale" : "Fresh"} local public metadata cache${marketsRefreshing ? " (refreshing)" : ""}`
+      : dataSource === "wire-samples"
+        ? "wire-samples (sandbox offline fallback)"
+        : "live MCP endpoint"
+    : telemetryFallback(metadataPending);
+  const envTelemetryPending = !envInfo && marketsLoading && !marketsError;
 
   return (
     <div className="page-stack">
       <PageHeader
         title="Testnet Hub & Onboarding Guide"
-        badge={<Pill kind="warn">ENV: {apiEnv.toUpperCase()}</Pill>}
+        badge={<Pill kind="warn">ENV: {environmentLabel}</Pill>}
         subtitle="Track the daily 00:00 UTC paper-asset reset window, work through the local onboarding checklist, and access verified Polyester testnet faucets and documentation."
         actions={
           <div className="row-flex">
@@ -218,8 +245,16 @@ export default function Hub() {
         <MetricCell
           label="Active Environment"
           trend="warn"
-          value={apiEnv.toUpperCase()}
-          sub="Read-only MCP data source"
+          value={environmentLabel}
+          sub={
+            metadataAvailable
+              ? marketsCacheStatus
+                ? "Validated cached public catalog"
+                : "Read-only MCP data source"
+              : metadataPending
+                ? "Waiting for market metadata"
+                : "Market metadata unavailable"
+          }
         />
         <MetricCell
           label="Daily Claim Reset"
@@ -234,8 +269,16 @@ export default function Hub() {
         />
         <MetricCell
           label="Listed Testnet Markets"
-          value={pairs.length ? `${pairs.length} pairs` : "19 pairs"}
-          sub={assets.length ? `${assets.length} supported assets` : "Spot & Zipper assets"}
+          value={
+            metadataAvailable
+              ? `${pairs.length} pairs`
+              : telemetryFallback(metadataPending)
+          }
+          sub={
+            metadataAvailable
+              ? `${assets.length} supported assets`
+              : "Market metadata unavailable"
+          }
         />
       </MetricStrip>
 
@@ -371,7 +414,7 @@ export default function Hub() {
       {/* Connection & Environment Diagnostics (FEAT-11) */}
       <Card
         title="Backend & MCP Connection Diagnostics"
-        subtitle="Live telemetry from /api/env and /api/markets showing MCP configuration, isolate TTL cache state, and data source."
+        subtitle="Telemetry from /api/env and /api/markets. Missing fields are labeled instead of being shown as live defaults."
         actions={
           <button type="button" className="btn sm ghost" onClick={refreshMarkets}>
             Refresh Diagnostics
@@ -398,15 +441,11 @@ export default function Hub() {
             </div>
             <div className="kv">
               <span className="k">Serving Environment (apiEnv)</span>
-              <span className="v mono">{apiEnv}</span>
+              <span className="v mono">{environmentTelemetry}</span>
             </div>
             <div className="kv">
               <span className="k">Data Source</span>
-              <span className="v mono">
-                {dataSource === "wire-samples"
-                  ? "wire-samples (sandbox offline fallback)"
-                  : "live MCP endpoint"}
-              </span>
+              <span className="v mono">{dataSourceLabel}</span>
             </div>
             <div className="kv">
               <span className="k">Last Metadata Sync</span>
@@ -415,7 +454,7 @@ export default function Hub() {
                   ? `${fmtTimeUTC(marketsUpdatedAt)} UTC`
                   : marketsError
                     ? `Error: ${marketsError}`
-                    : "Pending"}
+                    : telemetryFallback(marketsLoading)}
               </span>
             </div>
           </div>
@@ -423,22 +462,39 @@ export default function Hub() {
             <div className="kv">
               <span className="k">Testnet MCP Configured</span>
               <span className="v mono">
-                {String(envInfo?.networks?.testnet?.mcpConfigured ?? true)}
+                {formatBooleanTelemetry(
+                  envInfo?.networks?.testnet?.mcpConfigured,
+                  Boolean(envTelemetryPending),
+                )}
               </span>
             </div>
             <div className="kv">
               <span className="k">Mainnet MCP Configured</span>
               <span className="v mono">
-                {String(envInfo?.networks?.mainnet?.mcpConfigured ?? false)}
+                {formatBooleanTelemetry(
+                  envInfo?.networks?.mainnet?.mcpConfigured,
+                  Boolean(envTelemetryPending),
+                )}
               </span>
             </div>
             <div className="kv">
               <span className="k">Backend Isolate Cache Keys</span>
-              <span className="v mono">{envInfo?.cache?.keys ?? 0} / 200 max</span>
+              <span className="v mono">
+                {formatCountTelemetry(
+                  envInfo?.cache?.keys,
+                  Boolean(envTelemetryPending),
+                  " / 200 max",
+                )}
+              </span>
             </div>
             <div className="kv">
               <span className="k">In-Flight Coalesced Requests</span>
-              <span className="v mono">{envInfo?.cache?.inFlight ?? 0}</span>
+              <span className="v mono">
+                {formatCountTelemetry(
+                  envInfo?.cache?.inFlight,
+                  Boolean(envTelemetryPending),
+                )}
+              </span>
             </div>
           </div>
         </div>

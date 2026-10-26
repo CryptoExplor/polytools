@@ -15,7 +15,7 @@ import {
   getTokenPackshotUrl,
   type TokenViewAngle,
 } from "../brand";
-import { Card, CopyButton, MetricCell, MetricStrip, PageHeader, Pill, SymBadge } from "../components/ui";
+import { Card, CopyButton, EmptyState, MetricCell, MetricStrip, PageHeader, Pill, SymBadge } from "../components/ui";
 import { IconSearch } from "../components/icons";
 
 type BrandSectionTab = "all" | "logos" | "tokens" | "colors" | "imagery" | "avatars" | "partners";
@@ -46,6 +46,25 @@ function LogoPreviewImage({
       className="brand-logo-img"
       loading="lazy"
       onError={() => setFailed(true)}
+    />
+  );
+}
+
+export function BrandFilterEmptyState({
+  kind,
+  query,
+  onClear,
+}: {
+  kind: "token" | "avatar";
+  query: string;
+  onClear: () => void;
+}) {
+  const subject = kind === "token" ? "token packshots" : "Polybot avatars";
+  return (
+    <EmptyState
+      title={`No ${subject} match`}
+      description={`No results for “${query.trim()}”. Try another symbol or name, or clear the filter.`}
+      action={<button type="button" className="btn sm" onClick={onClear}>Clear Filter</button>}
     />
   );
 }
@@ -139,7 +158,7 @@ export function BrandKitPage() {
 
       {/* Section Filter Bar */}
       <div className="row-flex between" style={{ gap: 12 }}>
-        <div className="seg-group" role="tablist" aria-label="Brand kit sections">
+        <div className="seg-group" role="group" aria-label="Brand kit sections">
           {(
             [
               ["all", "All Sections"],
@@ -154,8 +173,7 @@ export function BrandKitPage() {
             <button
               key={id}
               type="button"
-              role="tab"
-              aria-selected={activeTab === id}
+              aria-pressed={activeTab === id}
               className={`seg-btn ${activeTab === id ? "active" : ""}`}
               onClick={() => setActiveTab(id)}
             >
@@ -329,7 +347,10 @@ export function BrandKitPage() {
             </div>
           }
         >
-          <div className="brand-token-grid">
+          {filteredTokens.length === 0 ? (
+            <BrandFilterEmptyState kind="token" query={tokenQuery} onClear={() => setTokenQuery("")} />
+          ) : (
+            <div className="brand-token-grid">
             {filteredTokens.map((token) => {
               const url = getTokenPackshotUrl(token.symbol, tokenAngle) ?? "";
               return (
@@ -337,7 +358,7 @@ export function BrandKitPage() {
                   <div className="brand-token-stage">
                     <span className="brand-token-index mono">{token.id}</span>
                     <SymBadge asset={token.symbol} size={68} angle={tokenAngle} />
-                  </div>
+                    </div>
                   <div className="brand-token-meta">
                     <div className="between">
                       <div className="row-flex" style={{ gap: 6 }}>
@@ -375,6 +396,7 @@ export function BrandKitPage() {
               );
             })}
           </div>
+          )}
         </Card>
       )}
 
@@ -525,7 +547,10 @@ export function BrandKitPage() {
             </div>
           }
         >
-          <div className="brand-token-grid">
+          {filteredAvatars.length === 0 ? (
+            <BrandFilterEmptyState kind="avatar" query={avatarQuery} onClear={() => setAvatarQuery("")} />
+          ) : (
+            <div className="brand-token-grid">
             {filteredAvatars.map((avatar) => (
               <div key={avatar.id} className="brand-token-card">
                 <div className="brand-token-stage" style={{ padding: 12 }}>
@@ -536,7 +561,7 @@ export function BrandKitPage() {
                     className="brand-avatar-img"
                     loading="lazy"
                   />
-                </div>
+                  </div>
                 <div className="brand-token-meta">
                   <div className="between">
                     <strong>{avatar.name}</strong>
@@ -560,6 +585,7 @@ export function BrandKitPage() {
               </div>
             ))}
           </div>
+          )}
         </Card>
       )}
 

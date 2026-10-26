@@ -1,5 +1,5 @@
 /**
- * TOOL 2 — Live Order Book & Cumulative Depth (/#/account/order-book)
+ * TOOL 2 — Public Order Book & Cumulative Depth (/#/book)
  * L2 bid/ask ladders with selectable depth (10/20/50/100), cumulative depth chart,
  * liquidity imbalance gauge, spread telemetry, and automatic wall detection.
  */
@@ -8,7 +8,6 @@ import { useMemo, useState } from "react";
 import {
   BOOK_DEPTHS,
   dec,
-  fmtCompact,
   fmtNum,
   fmtPctFromBps,
   price,
@@ -18,6 +17,7 @@ import {
   type BookDepth,
 } from "@poly/core";
 import { api } from "../lib/api";
+import { formatCompactQuoteNotional } from "../lib/format";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -131,7 +131,7 @@ export default function Book() {
   return (
     <div className="page-stack">
       <PageHeader
-        title={`Order Book · ${symbol}`}
+        title={`Public Order Book · ${symbol}`}
         badge={
           stats ? (
             <Pill kind={stats.change24hBps >= 0 ? "up" : "down"}>
@@ -140,7 +140,7 @@ export default function Book() {
             </Pill>
           ) : null
         }
-        subtitle="Resting buy orders (bids, green) and sell orders (asks, red) waiting to be matched. Includes cumulative liquidity profile, bid/ask book imbalance, and statistical size outlier detection."
+        subtitle="Public buy orders (bids) and sell orders (asks) waiting to be matched. No account key is used. These orders are not necessarily yours."
         actions={
           <div className="row-flex">
             <SymbolSelect value={symbol} onChange={setSymbol} />
@@ -269,11 +269,11 @@ export default function Book() {
           book && (
             <div className="row-flex faint mono">
               <span className="up">
-                Bids: {fmtNum(book.totalBidQty, 3)} {base} ({fmtCompact(book.totalBidNotional, "$")})
+                Bids: {fmtNum(book.totalBidQty, 3)} {base} ({formatCompactQuoteNotional(book.totalBidNotional, quote)})
               </span>
               <span>·</span>
               <span className="down">
-                Asks: {fmtNum(book.totalAskQty, 3)} {base} ({fmtCompact(book.totalAskNotional, "$")})
+                Asks: {fmtNum(book.totalAskQty, 3)} {base} ({formatCompactQuoteNotional(book.totalAskNotional, quote)})
               </span>
             </div>
           )
@@ -282,7 +282,7 @@ export default function Book() {
         {loading && !book ? (
           <Loading lines={5} />
         ) : book ? (
-          <DepthChart bids={book.bids} asks={book.asks} height={275} />
+          <DepthChart bids={book.bids} asks={book.asks} height={275} quoteAsset={quote} />
         ) : (
           <EmptyState
             title="No order book snapshot loaded"
@@ -318,7 +318,7 @@ export default function Book() {
               return (
                 <Pill key={`bw-${lvl.rawPrice}`} kind="up">
                   ▲ BID WALL @ {fmtNum(lvl.price)} · {fmtNum(lvl.qty, qtyDecimals)} {base} (
-                  {fmtCompact(lvl.qty * lvl.price, "$")})
+                  {formatCompactQuoteNotional(lvl.qty * lvl.price, quote)})
                 </Pill>
               );
             })}
@@ -328,7 +328,7 @@ export default function Book() {
               return (
                 <Pill key={`aw-${lvl.rawPrice}`} kind="down">
                   ▼ ASK WALL @ {fmtNum(lvl.price)} · {fmtNum(lvl.qty, qtyDecimals)} {base} (
-                  {fmtCompact(lvl.qty * lvl.price, "$")})
+                  {formatCompactQuoteNotional(lvl.qty * lvl.price, quote)})
                 </Pill>
               );
             })}
@@ -385,7 +385,7 @@ export default function Book() {
                   </span>
                   <span className="right">{fmtNum(l.qty, qtyDecimals)}</span>
                   <span className="right muted hide-xs">
-                    {fmtCompact(l.price * l.qty, "$")}
+                    {formatCompactQuoteNotional(l.price * l.qty, quote)}
                   </span>
                   <span className="right muted">{fmtNum(book.bidsCum[i], qtyDecimals)}</span>
                 </div>
@@ -435,7 +435,7 @@ export default function Book() {
                   </span>
                   <span className="right">{fmtNum(l.qty, qtyDecimals)}</span>
                   <span className="right muted hide-xs">
-                    {fmtCompact(l.price * l.qty, "$")}
+                    {formatCompactQuoteNotional(l.price * l.qty, quote)}
                   </span>
                   <span className="right muted">{fmtNum(book.asksCum[i], qtyDecimals)}</span>
                 </div>

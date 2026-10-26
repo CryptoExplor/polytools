@@ -14,7 +14,26 @@ import {
   type ReactNode,
 } from "react";
 import type { PairInfo, SpotMarketsResult, AssetInfo } from "@poly/core";
-import { api, type EnvInfo } from "./api";
+import {
+  api,
+  hasUsedWireSamples,
+  subscribeWireSampleUsage,
+  type EnvInfo,
+} from "./api";
+import {
+  decodePublicSpotMarkets,
+  MARKET_METADATA_CACHE_KEY,
+  MARKET_METADATA_POLICY,
+  MARKET_METADATA_REVALIDATE_MS,
+  MARKET_METADATA_SCHEMA,
+  marketMetadataCache,
+  type PublicSpotMarkets,
+} from "./marketMetadataCache";
+import { publicCacheLoadDecision, type PublicCacheHit } from "./publicCache";
+import {
+  MetadataRequestSequencer,
+  shouldApplyMetadataNetworkResult,
+} from "./metadataRequestSequencer";
 
 export type ThemeMode = "dark" | "light";
 export type ConnectionStatus = "connecting" | "connected" | "degraded";
@@ -28,10 +47,18 @@ interface AppState {
   symbols: string[];
   apiEnv: string;
   dataSource: "live" | "wire-samples";
+  /** Sticky for this app session once any public fallback response is observed. */
+  wireSampleUsed: boolean;
   envInfo: EnvInfo | null;
   marketsError: string | null;
   marketsLoading: boolean;
   marketsUpdatedAt: number | null;
+  marketsRefreshing: boolean;
+  marketsCacheStatus: {
+    origin: "memory" | "persistent";
+    savedAt: number;
+    freshUntil: number;
+  } | null;
   connectionStatus: ConnectionStatus;
   refreshMarkets: () => void;
   symbol: string;
@@ -78,6 +105,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [marketsError, setMarketsError] = useState<string | null>(null);
   const [marketsLoading, setMarketsLoading] = useState<boolean>(true);
   const [marketsUpdatedAt, setMarketsUpdatedAt] = useState<number | null>(null);
+  const [marketsRefreshing, setMarketsRefreshing] = useState<boolean>(false);
+  const [marketsCacheStatus, setMarketsCacheStatus] = useState<AppState["marketsCacheStatus"]>(null);
+  const [wireSampleUsed, setWireSampleUsed] = useState(hasUsedWireSamples);
   const [symbol, setSymbolState] = useState<string>(() => {
     try {
       return localStorage.getItem(SYMBOL_KEY) ?? "BTC-USDT";
@@ -103,38 +133,140 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [theme]);
 
-  const metaReqRef = useRef(0);
+  useEffect(() => subscribeWireSampleUsage(() => setWireSampleUsed(true)), []);
 
-  const fetchMeta = useCallback(() => {
-    const reqId = ++metaReqRef.current;
-    setMarketsLoading(true);
-    api
-      .markets()
-      .then((m) => {
-        if (reqId !== metaReqRef.current) return;
-        setMarkets(m);
-        setMarketsError(null);
-        setMarketsUpdatedAt(Date.now());
-      })
-      .catch((e) => {
-        if (reqId !== metaReqRef.current) return;
-        setMarketsError(e instanceof Error ? e.message : "Failed to load market metadata");
-      })
-      .finally(() => {
-        if (reqId === metaReqRef.current) setMarketsLoading(false);
+  const requestSequencer = useRef(new MetadataRequestSequencer());
+  const marketsUpdatedAtRef = useRef<number | null>(null);
+
+  const fetchMeta = useCallback((options: { force?: boolean; includeEnv?: boolean } = {}) => {
+    const sequencer = requestSequencer.current;
+    const cacheRequest = sequencer.beginCacheCheck();
+    const force = options.force === true;
+    const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+    const isCurrent = () => sequencer.isCacheCheckCurrent(cacheRequest);
+    let networkRequest: number | null = null;
+    const isNetworkCurrent = () => networkRequest !== null &&
+      sequencer.isNetworkRefreshCurrent(networkRequest);
+
+    if (options.includeEnv && !offline) {
+      const environmentRequest = sequencer.beginEnvironmentRefresh();
+      void api.env().then((environment) => {
+        if (sequencer.isEnvironmentRefreshCurrent(environmentRequest) && environment) {
+          setEnvInfo(environment);
+        }
       });
+    }
 
-    api.env().then((e) => {
-      if (reqId === metaReqRef.current && e) setEnvInfo(e);
-    });
-    return () => {
-      metaReqRef.current++;
-    };
+    void (async () => {
+      try {
+        let hit: PublicCacheHit<PublicSpotMarkets> | null = null;
+        try {
+          hit = await marketMetadataCache.read(
+            MARKET_METADATA_CACHE_KEY,
+            MARKET_METADATA_POLICY,
+            decodePublicSpotMarkets,
+          );
+        } catch {
+          // Cache failure is fail-open: the validated network path remains available.
+        }
+        if (!isCurrent()) return;
+
+        if (hit && marketsUpdatedAtRef.current !== hit.entry.savedAt) {
+          marketsUpdatedAtRef.current = hit.entry.savedAt;
+          setMarkets(hit.entry.value);
+          setMarketsUpdatedAt(hit.entry.savedAt);
+          setMarketsCacheStatus({
+            origin: hit.origin,
+            savedAt: hit.entry.savedAt,
+            freshUntil: hit.entry.freshUntil,
+          });
+        }
+        if (hit) {
+          setMarketsError(null);
+          setMarketsLoading(false);
+        }
+
+        const decision = publicCacheLoadDecision({
+          offline,
+          fresh: hit?.fresh ?? false,
+          force,
+        });
+        if (decision === "use-fresh") return;
+        if (decision === "offline") {
+          setMarketsError(
+            hit
+              ? "Offline; showing the last valid cached public market metadata."
+              : "Offline; public market metadata is unavailable.",
+          );
+          return;
+        }
+
+        if (marketsUpdatedAtRef.current === null) setMarketsLoading(true);
+        setMarketsRefreshing(true);
+        // Only actual network refreshes supersede one another. A later fresh
+        // cache/offline check returns above without invalidating this request.
+        networkRequest = sequencer.beginNetworkRefresh();
+        const result = await marketMetadataCache.refresh({
+          key: MARKET_METADATA_CACHE_KEY,
+          policy: MARKET_METADATA_POLICY,
+          decode: decodePublicSpotMarkets,
+          fetcher: () => api.marketsForCache(),
+        });
+        if (!shouldApplyMetadataNetworkResult({
+          requestCurrent: isNetworkCurrent(),
+          resultSavedAt: result.savedAt,
+          visibleSavedAt: marketsUpdatedAtRef.current,
+        })) return;
+        marketsUpdatedAtRef.current = result.savedAt;
+        setMarkets(result.value);
+        setMarketsUpdatedAt(result.savedAt);
+        setMarketsCacheStatus(null);
+        setMarketsError(null);
+      } catch (error) {
+        // A later cache-only success may supersede an error, but not a successful
+        // network value. Another network request owns its own error/loading state.
+        const ownsError = networkRequest === null
+          ? isCurrent()
+          : isCurrent() && isNetworkCurrent();
+        if (!ownsError) return;
+        setMarketsError(error instanceof Error ? error.message : "Failed to load market metadata");
+      } finally {
+        const ownsLoadingState = networkRequest === null ? isCurrent() : isNetworkCurrent();
+        if (ownsLoadingState) {
+          setMarketsLoading(false);
+          setMarketsRefreshing(false);
+        }
+      }
+    })();
   }, []);
 
   useEffect(() => {
-    const cleanup = fetchMeta();
-    return cleanup;
+    void marketMetadataCache.cleanup([MARKET_METADATA_SCHEMA]).catch(() => undefined);
+    fetchMeta({ includeEnv: true });
+    return () => requestSequencer.current.invalidate();
+  }, [fetchMeta]);
+
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === "visible") fetchMeta();
+    };
+    const timer = window.setInterval(() => {
+      // Offline intervals do no work; the online/visible events trigger revalidation.
+      if (navigator.onLine) check();
+    }, MARKET_METADATA_REVALIDATE_MS);
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("online", check);
+    window.addEventListener("offline", check);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", check);
+      window.removeEventListener("online", check);
+      window.removeEventListener("offline", check);
+    };
+  }, [fetchMeta]);
+
+  const refreshMarkets = useCallback(() => {
+    fetchMeta({ force: true, includeEnv: true });
   }, [fetchMeta]);
 
   const pairs = useMemo(() => markets?.pairs ?? [], [markets]);
@@ -196,6 +328,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return src === "wire-samples" ? "wire-samples" : "live";
   }, [markets]);
 
+  useEffect(() => {
+    // Persistent cached samples also count as sample use after a reload.
+    if (dataSource === "wire-samples") setWireSampleUsed(true);
+  }, [dataSource]);
+
   const value: AppState = {
     markets,
     pairs,
@@ -205,12 +342,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     symbols,
     apiEnv: markets?.apiEnv ?? "testnet",
     dataSource,
+    wireSampleUsed,
     envInfo,
     marketsError,
     marketsLoading,
     marketsUpdatedAt,
+    marketsRefreshing,
+    marketsCacheStatus,
     connectionStatus,
-    refreshMarkets: fetchMeta,
+    refreshMarkets,
     symbol,
     setSymbol,
     watchlist,

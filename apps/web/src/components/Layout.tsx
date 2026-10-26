@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { NETWORKS, fmtAgo } from "@poly/core";
 import { useApp } from "../lib/store";
@@ -10,6 +10,8 @@ import {
 } from "../brand";
 import { SymbolSelect } from "./ui";
 import { GlossaryDrawer } from "./Glossary";
+import { PublicCacheStatus } from "./PublicCacheStatus";
+import { WireSampleNotice } from "./WireSampleNotice";
 import {
   IconActivity,
   IconBook,
@@ -48,17 +50,18 @@ const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
     items: [
       { to: "/account", label: "Overview", icon: <IconVault size={15} /> },
       { to: "/account/api", label: "API setup", icon: <IconKey size={15} /> },
-      { to: "/account/trade", label: "Trade", icon: <IconTape size={15} /> },
-      { to: "/account/order-book", label: "Order book", icon: <IconBook size={15} /> },
-      { to: "/account/pnl", label: "Profit & loss", icon: <IconChart size={15} /> },
-      { to: "/account/transactions", label: "Tx explorer", icon: <IconFlow size={15} /> },
+      { to: "/account/trade", label: "Your Trades", icon: <IconTape size={15} /> },
+      { to: "/account/orders", label: "Orders", icon: <IconBook size={15} /> },
+      { to: "/account/pnl", label: "Profit and Loss", icon: <IconChart size={15} /> },
+      { to: "/account/transactions", label: "Money Movements", icon: <IconFlow size={15} /> },
     ],
   },
   {
     group: "Market Data",
     items: [
       { to: "/", label: "Markets", icon: <IconDashboard size={15} /> },
-      { to: "/tape", label: "Recent trades", icon: <IconTape size={15} /> },
+      { to: "/tape", label: "Recent Trades", icon: <IconTape size={15} /> },
+      { to: "/book", label: "Order Book", icon: <IconBook size={15} /> },
       { to: "/charts", label: "Price chart", icon: <IconChart size={15} /> },
       { to: "/heatmap", label: "Liquidity heatmap", icon: <IconActivity size={15} /> },
       { to: "/compare", label: "Venue compare", icon: <IconCompare size={15} /> },
@@ -88,17 +91,18 @@ const ROUTE_META: Record<
   "/": { title: "Markets", group: "Market Data", showSymbolSelector: true },
   "/account": { title: "Overview", group: "Account", showSymbolSelector: false },
   "/account/api": { title: "API setup", group: "Account", showSymbolSelector: false },
-  "/account/trade": { title: "Trade", group: "Account", showSymbolSelector: true },
-  "/account/order-book": { title: "Order book", group: "Account", showSymbolSelector: true },
-  "/account/pnl": { title: "Profit & loss", group: "Account", showSymbolSelector: false },
-  "/account/transactions": { title: "Tx explorer", group: "Account", showSymbolSelector: false },
-  "/book": { title: "Order book", group: "Account", showSymbolSelector: true },
-  "/tape": { title: "Recent trades", group: "Market Data", showSymbolSelector: true },
+  "/account/trade": { title: "Your Trades", group: "Account", showSymbolSelector: false },
+  "/account/orders": { title: "Orders", group: "Account", showSymbolSelector: false },
+  "/account/order-book": { title: "Orders", group: "Account", showSymbolSelector: false },
+  "/account/pnl": { title: "Profit and Loss", group: "Account", showSymbolSelector: false },
+  "/account/transactions": { title: "Money Movements", group: "Account", showSymbolSelector: false },
+  "/book": { title: "Order Book", group: "Market Data", showSymbolSelector: true },
+  "/tape": { title: "Recent Trades", group: "Market Data", showSymbolSelector: true },
   "/charts": { title: "Price chart", group: "Market Data", showSymbolSelector: true },
   "/heatmap": { title: "Liquidity heatmap", group: "Market Data", showSymbolSelector: true },
   "/compare": { title: "Venue compare", group: "Market Data", showSymbolSelector: false },
   "/zipper": { title: "Zipper routes", group: "Cross-Chain", showSymbolSelector: false },
-  "/flow": { title: "Tx explorer", group: "Account", showSymbolSelector: false },
+  "/flow": { title: "Money Movements", group: "Account", showSymbolSelector: false },
   "/calc": { title: "Calculators", group: "Toolkit & Docs", showSymbolSelector: true },
   "/hub": { title: "Testnet hub", group: "Toolkit & Docs", showSymbolSelector: false },
   "/sdk": { title: "SDK quickstart", group: "Toolkit & Docs", showSymbolSelector: true },
@@ -110,6 +114,7 @@ export function Layout() {
   const {
     apiEnv,
     dataSource,
+    wireSampleUsed,
     symbol,
     setSymbol,
     theme,
@@ -117,6 +122,8 @@ export function Layout() {
     connectionStatus,
     marketsError,
     marketsUpdatedAt,
+    marketsRefreshing,
+    marketsCacheStatus,
     refreshMarkets,
     pairs,
     assets,
@@ -132,6 +139,8 @@ export function Layout() {
       return false;
     }
   });
+  const brandMenuRef = useRef<HTMLDivElement | null>(null);
+  const brandTriggerRef = useRef<HTMLAnchorElement | null>(null);
 
   const loc = useLocation();
   const navigate = useNavigate();
@@ -161,6 +170,7 @@ export function Layout() {
       /* ignore */
     }
     setBrandMenuOpen(false);
+    brandTriggerRef.current?.focus();
   };
 
   const handleBrowseMarkets = () => {
@@ -172,6 +182,11 @@ export function Layout() {
       if (el) el.focus();
     }, 60);
   };
+
+  useEffect(() => {
+    if (!brandMenuOpen) return;
+    brandMenuRef.current?.querySelector<HTMLElement>("button, a")?.focus();
+  }, [brandMenuOpen]);
 
   useEffect(() => {
     const prefix = meta.showSymbolSelector ? `${symbol} · ` : "";
@@ -186,8 +201,10 @@ export function Layout() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (brandMenuOpen) setBrandMenuOpen(false);
-        else if (navOpen) setNavOpen(false);
+        if (brandMenuOpen) {
+          setBrandMenuOpen(false);
+          brandTriggerRef.current?.focus();
+        } else if (navOpen) setNavOpen(false);
         else if (!introDismissed) dismissIntro();
       }
     };
@@ -217,14 +234,24 @@ export function Layout() {
       <aside className={`sidebar ${navOpen ? "open" : ""}`} aria-label="Primary navigation">
         <div className="sidebar-header" style={{ position: "relative" }}>
           <NavLink
+            ref={brandTriggerRef}
             to="/"
             className="brand"
-            title="Left-click for Markets · Right-click for Polyester Brand Kit menu"
+            title="Left-click for Markets · Right-click or press Shift+F10 for Brand Kit quick actions"
+            aria-expanded={brandMenuOpen}
+            aria-controls="brand-quick-actions"
             onClick={() => setNavOpen(false)}
+            onKeyDown={(e) => {
+              if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                e.preventDefault();
+                e.stopPropagation();
+                setBrandMenuOpen(true);
+              }
+            }}
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              setBrandMenuOpen((v) => !v);
+              setBrandMenuOpen(true);
             }}
           >
             <img src="/favicon.svg" alt="Polyester symbol" className="logo-img" />
@@ -246,15 +273,21 @@ export function Layout() {
 
           {brandMenuOpen && (
             <div
+              ref={brandMenuRef}
+              id="brand-quick-actions"
               className="brand-context-menu"
-              role="menu"
+              role="group"
               aria-label="Polyester Brand Kit quick actions"
               onClick={(e) => e.stopPropagation()}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  setBrandMenuOpen(false);
+                }
+              }}
             >
               <div className="brand-context-title mono">Polyester Brand Kit</div>
               <button
                 type="button"
-                role="menuitem"
                 className="brand-context-item"
                 onClick={() => copyBrandSvg(POLYESTER_FULL_LOGO_DARK_SVG, "Copied full logo")}
               >
@@ -262,7 +295,6 @@ export function Layout() {
               </button>
               <button
                 type="button"
-                role="menuitem"
                 className="brand-context-item"
                 onClick={() => copyBrandSvg(POLYESTER_LOGOMARK_SVG, "Copied symbol")}
               >
@@ -272,15 +304,16 @@ export function Layout() {
                 href={BRAND_KIT_ZIP_URL}
                 target="_blank"
                 rel="noreferrer"
-                role="menuitem"
                 className="brand-context-item"
-                onClick={() => setBrandMenuOpen(false)}
+                onClick={() => {
+                  setBrandMenuOpen(false);
+                  brandTriggerRef.current?.focus();
+                }}
               >
                 Download brand assets (.zip) ↗
               </a>
               <button
                 type="button"
-                role="menuitem"
                 className="brand-context-item"
                 onClick={() => {
                   setBrandMenuOpen(false);
@@ -359,7 +392,18 @@ export function Layout() {
               />
             )}
 
-            {connectionStatus === "connected" ? (
+            {marketsCacheStatus && marketsUpdatedAt ? (
+              <PublicCacheStatus
+                origin={marketsCacheStatus.origin}
+                savedAt={marketsCacheStatus.savedAt}
+                freshUntil={marketsCacheStatus.freshUntil}
+                now={now}
+                refreshing={marketsRefreshing}
+                error={marketsError}
+                sample={dataSource === "wire-samples"}
+                onRetry={refreshMarkets}
+              />
+            ) : connectionStatus === "connected" ? (
               <span
                 className={`pill ${dataSource === "wire-samples" ? "warn" : "up"} hide-xs`}
                 title={
@@ -413,6 +457,7 @@ export function Layout() {
         </header>
 
         <main id="main-workspace" className="content" tabIndex={-1}>
+          {wireSampleUsed && <WireSampleNotice />}
           {!introDismissed && (
             <section className="intent-bar" aria-label="About PolyTools">
               <div className="intent-bar-copy">
@@ -452,8 +497,12 @@ export function Layout() {
 
         <footer className="foot">
           <span>
-            PolyTools · Read-only companion for Polyester ({apiEnv}) · Prices decoded via{" "}
-            <code className="mono">raw ÷ 10³</code>
+            PolyTools · Read-only companion for Polyester ({apiEnv}) ·{" "}
+            {meta.group === "Account" ? (
+              "Account amounts retain exact API decimal strings"
+            ) : (
+              <>Prices decoded via <code className="mono">raw ÷ 10³</code></>
+            )}
           </span>
           <span className="row-flex" style={{ gap: 16 }}>
             <NavLink to="/brand-kit">Brand Kit</NavLink>

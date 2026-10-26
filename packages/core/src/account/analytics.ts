@@ -278,14 +278,27 @@ export function observedFillEligibility(
   coverage: Coverage,
 ): { available: boolean; reason?: string } {
   if (!summary.eligible) return { available: false, reason: "Fill conflicts or unknown rows block this aggregate." };
+  // Transport coverage and the normalized summary count different subsets of
+  // rows. Neither counter set may erase the other: doing so can make partial
+  // coverage look clean or hide a duplicate/conflict detected upstream.
+  const rowsAccepted = summary.rowsAccepted;
+  const duplicateRows = Math.max(coverage.duplicateRows, summary.duplicateRows);
+  const conflictingRows = Math.max(coverage.conflictingRows, summary.conflictingRows);
+  const unknownRows = Math.max(coverage.unknownRows, summary.unknownRows);
+  const droppedRows = Math.max(coverage.droppedRows, summary.droppedRows);
+  const rowsReceived = Math.max(
+    coverage.rowsReceived,
+    summary.rowsReceived,
+    rowsAccepted + duplicateRows + conflictingRows + unknownRows + droppedRows,
+  );
   return observedMetricEligibility({
     ...coverage,
-    rowsReceived: summary.rowsReceived,
-    rowsAccepted: summary.rowsAccepted,
-    duplicateRows: summary.duplicateRows,
-    conflictingRows: summary.conflictingRows,
-    unknownRows: summary.unknownRows,
-    droppedRows: summary.droppedRows,
+    rowsReceived,
+    rowsAccepted,
+    duplicateRows,
+    conflictingRows,
+    unknownRows,
+    droppedRows,
   });
 }
 

@@ -196,6 +196,32 @@ describe("Exact account arithmetic and coverage", () => {
     assert.equal(account.completeMetricEligibility(coverage).available, false);
   });
 
+  it("preserves transport-level fill coverage when checking observed eligibility", () => {
+    const summary = account.summarizeFills([fill()]);
+    const coverage = account.emptyCoverage("fills", "synthetic-contract");
+    Object.assign(coverage, {
+      status: "partial",
+      pagesFetched: 1,
+      cursorExhausted: true,
+      rowsReceived: 2,
+      rowsAccepted: 1,
+      unknownRows: 1,
+    });
+    // The summary is valid for its one normalized row, but the transport saw
+    // an additional quarantined row. That unknown row must not be erased.
+    assert.equal(account.observedFillEligibility(summary, coverage).available, false);
+
+    const clean = account.emptyCoverage("fills", "synthetic-contract");
+    Object.assign(clean, {
+      status: "complete",
+      pagesFetched: 1,
+      cursorExhausted: true,
+      rowsReceived: 1,
+      rowsAccepted: 1,
+    });
+    assert.equal(account.observedFillEligibility(summary, clean).available, true);
+  });
+
   it("estimates current fee scenarios without repricing history", () => {
     const scenario = account.currentRateScenario(
       account.parseDecimal("1000"),
@@ -226,6 +252,20 @@ describe("DTO validation and private memory partitions", () => {
     assert.throws(() => account.validateBalancesResponse({
       balances: [{ ...result.balances[0], trading: "2.5e1" }],
     }), (error) => error?.name === "AccountSchemaError");
+  });
+
+  it("allows maker rebates but rejects negative taker fee rates", () => {
+    const rate = {
+      symbol: "BTC-USDT",
+      makerFeeRatePercent: "-0.01",
+      takerFeeRatePercent: "0.1",
+      vipTier: 0,
+    };
+    assert.equal(account.validateFeeRatesResponse({ feeRates: [rate] }).feeRates[0].makerFeeRatePercent, "-0.01");
+    assert.throws(
+      () => account.validateFeeRatesResponse({ feeRates: [{ ...rate, takerFeeRatePercent: "-0.0001" }] }),
+      (error) => error?.name === "AccountSchemaError",
+    );
   });
 
   it("rejects misaligned history vectors and quarantines unknown fill markets", () => {

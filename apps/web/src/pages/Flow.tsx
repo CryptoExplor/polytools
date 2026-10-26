@@ -135,6 +135,7 @@ export default function Flow({ embedded = false }: { embedded?: boolean } = {}) 
         if (activeMode !== "flow" && lookupKind !== "any") {
           params.lookupKind = lookupKind;
         }
+        if (embedded) params.scope = "public";
         setSearchParams(params, { replace: true });
       }
 
@@ -172,7 +173,7 @@ export default function Flow({ embedded = false }: { embedded?: boolean } = {}) 
         setBusy(false);
       }
     },
-    [input, lookupKind, mode, setSearchParams],
+    [embedded, input, lookupKind, mode, setSearchParams],
   );
 
   // Run lookup automatically if URL has ?q=... on initial load

@@ -1141,6 +1141,24 @@ table.data tbody tr:last-child td {
   font-weight: 500;
 }
 
+.market-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 2px 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.market-open-btn:hover {
+  color: var(--accent-text);
+  background: var(--bg-hover);
+}
+
 .row-actions {
   display: inline-flex;
   align-items: center;
@@ -1566,6 +1584,153 @@ table.data tbody tr:last-child td {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* ---------- Account history and order details ---------- */
+.balance-series {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--bg-elevated);
+}
+
+.balance-chart {
+  display: block;
+  width: 100%;
+  height: 150px;
+  margin: 10px 0;
+  color: var(--accent);
+  overflow: visible;
+}
+
+.balance-series details summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.balance-series caption {
+  text-align: left;
+  padding: 8px;
+  caption-side: bottom;
+}
+
+.order-details-trigger {
+  min-height: 44px;
+  min-width: 64px;
+}
+
+.order-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+  background: var(--bg-overlay);
+}
+
+.order-drawer {
+  width: min(820px, 100vw);
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+.order-drawer-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.order-drawer-header h2 {
+  margin: 5px 0;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
+.order-drawer-body {
+  padding: 18px 20px 28px;
+}
+
+.order-detail-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.order-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  border: 1px solid var(--border-subtle);
+  background: var(--border-subtle);
+}
+
+.order-detail-grid > div {
+  min-width: 0;
+  padding: 11px 12px;
+  background: var(--bg-elevated);
+}
+
+.order-detail-grid dt {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+
+.order-detail-grid dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.order-executions {
+  margin-top: 20px;
+}
+
+.order-executions h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+@media (max-width: 640px) {
+  .order-drawer-header {
+    padding: 14px;
+    flex-direction: column;
+  }
+
+  .order-drawer-header .row-flex {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .order-drawer-body {
+    padding: 14px 14px 24px;
+  }
+
+  .order-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .balance-chart {
+    height: 120px;
+  }
 }
 
 /* ---------- Toast ---------- */
