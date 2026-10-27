@@ -15,7 +15,7 @@ import {
   walletErrorMessage,
   type WalletState,
 } from "../lib/walletConnection";
-import { useWalletConnection } from "../lib/useWallet";
+import { useWalletConnection, useWalletProviders } from "../lib/useWallet";
 
 export type WalletControlView =
   | { kind: "hidden" }
@@ -61,8 +61,14 @@ export function describeWalletControl(state: WalletState): WalletControlView {
   }
 }
 
+/** Tooltip for a per-wallet button. Same claim as CONNECT_TITLE, per wallet. */
+export function walletChoiceTitle(name: string): string {
+  return `Connect ${name}. Connection only: no sign-in, no account data, no trading.`;
+}
+
 export function WalletButton() {
   const { state, connect, disconnect } = useWalletConnection();
+  const { providers, choose } = useWalletProviders();
   const view = describeWalletControl(state);
 
   if (view.kind === "hidden") return null;
@@ -72,6 +78,36 @@ export function WalletButton() {
       <span className="pill wallet-pill" aria-live="polite">
         <span className="dot" />
         Connecting…
+      </span>
+    );
+  }
+
+  // Only shown when the user actually has a choice to make: two or more wallets
+  // announced themselves, or one announced itself without owning
+  // `window.ethereum` (an EIP-6963-only wallet). A single legacy wallet keeps the
+  // original button exactly, and a connected wallet is never re-prompted.
+  const showsPicker =
+    view.kind !== "connected" &&
+    (providers.length > 1 || (providers.length === 1 && view.kind === "unavailable"));
+
+  if (showsPicker) {
+    return (
+      <span className="wallet-cluster" role="group" aria-label="Choose a wallet to connect">
+        {providers.map((entry) => (
+          <button
+            key={entry.info.uuid}
+            type="button"
+            className="btn sm wallet-connect"
+            onClick={() => {
+              // Selection first, then the same explicit gesture path as always.
+              choose(entry.info.uuid);
+              void connect();
+            }}
+            title={walletChoiceTitle(entry.info.name)}
+          >
+            {entry.info.name}
+          </button>
+        ))}
       </span>
     );
   }

@@ -207,10 +207,44 @@ export class WalletConnection {
       return;
     }
     this.provider = provider;
+    this.attach(provider);
+    void this.restoreSilently();
+  }
+
+  /**
+   * Re-points the connection at a provider the user picked (EIP-6963 discovery).
+   *
+   * The previous provider is detached first, so a wallet the user moved away
+   * from cannot keep pushing `accountsChanged`/`chainChanged` into the control.
+   * Marked as started so a later `connect()` never re-detects and silently
+   * discards the selection.
+   */
+  setProvider(provider: InjectedProvider | null): void {
+    if (this.disposed || this.provider === provider) return;
+    this.detach(this.provider);
+    this.provider = provider;
+    this.started = true;
+    this.generation += 1;
+    if (!provider) {
+      this.setState({ status: "unavailable", address: null, chainId: null, error: null });
+      return;
+    }
+    this.attach(provider);
+    // Back to "detecting": the new provider's silent read decides what shows.
+    this.setState({ status: "detecting", address: null, chainId: null, error: null });
+    void this.restoreSilently();
+  }
+
+  private attach(provider: InjectedProvider): void {
     provider.on?.("accountsChanged", this.onAccountsChanged);
     provider.on?.("chainChanged", this.onChainChanged);
     provider.on?.("disconnect", this.onDisconnect);
-    void this.restoreSilently();
+  }
+
+  private detach(provider: InjectedProvider | null): void {
+    provider?.removeListener?.("accountsChanged", this.onAccountsChanged);
+    provider?.removeListener?.("chainChanged", this.onChainChanged);
+    provider?.removeListener?.("disconnect", this.onDisconnect);
   }
 
   /**
@@ -298,10 +332,7 @@ export class WalletConnection {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    const provider = this.provider;
-    provider?.removeListener?.("accountsChanged", this.onAccountsChanged);
-    provider?.removeListener?.("chainChanged", this.onChainChanged);
-    provider?.removeListener?.("disconnect", this.onDisconnect);
+    this.detach(this.provider);
     this.provider = null;
     this.listeners.clear();
   }

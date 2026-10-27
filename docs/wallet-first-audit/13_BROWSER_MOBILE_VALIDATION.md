@@ -245,20 +245,54 @@ ethereum`** — the identical message, thrown entirely outside application frame
 | Any page error attributable to the app | **None** (0 `pageerror`) |
 | Our read path against a **frozen** provider | **Pass** — `defaultDetect()` is a guarded property read (`walletConnection.ts:362–370`); the app never calls `defineProperty` on `window` |
 
-**The real consequence is which wallet you get.** Our control uses the legacy single-provider
-`window.ethereum`, so when two EVM wallets are installed it can only ever see the one that won the
-property — here, **not** Phantom. Phantom never installed its provider, so it cannot be offered or
-selected. See **F-10**.
+**The real consequence *was* which wallet you get.** The control used the legacy single-provider
+`window.ethereum`, so with two EVM wallets installed it could only ever see the one that won the
+property — here, **not** Phantom. Phantom never installed its provider, so it could not be offered or
+selected. That gap is now closed: **F-10** and §3.1b.
 
-**What to do in the meantime:** one EVM wallet extension per browser profile (or disable the other
-and reload). Phantom's own support material documents a *Default App Wallet* preference for
-coexistence with MetaMask; that governs which wallet handles a request, but it does not undo a
-property already locked by another extension, so it is not a dependable fix for this exact error.
+The conflict itself is still the extensions' to fix. Phantom's own support material documents a
+*Default App Wallet* preference for coexistence with MetaMask; that governs which wallet handles a
+request, but it does not undo a property already locked by another extension.
 
 **Does this weaken the §3.1 result?** No. "0 app console errors" was measured in a clean profile with
 no extensions. Extension-injected scripts can add console output that no application can prevent or
 suppress; the check's scope is app-origin frames, and the attribution method in §3.1 F already treats
 non-app noise separately.
+
+### 3.1b Wallet selection — EIP-6963 discovery (implemented 2026-10-27)
+
+**Why:** F-10. One extension owns `window.ethereum`; everyone else is invisible, including a wallet
+that failed to inject at all (§3.1a). EIP-6963 replaces "trust one global" with "wallets announce
+themselves, the user picks".
+
+**What changed.** `apps/web/src/lib/walletDiscovery.ts` collects `eip6963:announceProvider` replies,
+validates every announcement as untrusted input (uuid required, provider needs `request`, names
+trimmed, control characters stripped and bounded to 32 chars, malformed entries dropped, first
+announcement per uuid wins), and falls back to the legacy globals only when nothing announces.
+`WalletConnection.setProvider()` re-points the connection and **detaches the previous provider**.
+`useWalletProviders()` binds it, and the control renders one button per wallet **only when there is a
+choice** — a single wallet keeps the original "Connect wallet" button, markup and behaviour untouched.
+
+**Scope guards, asserted by tests:** discovery issues no network request (`fetch` spy), never throws
+on a hostile event target, and grants no account session.
+
+**Browser evidence (real Chromium, 18/18 checks):**
+
+| Case | Result |
+|---|---|
+| Single legacy wallet | **Unchanged** — "Connect wallet", no picker, connects to `0xabcd…ef01` |
+| Two EIP-6963 wallets, **no** `window.ethereum` at all | Two buttons; choosing Phantom connects through **Phantom's** provider (`0x2222…2222`) |
+| Legacy winner plus an announced rival | Picker wins: choosing Rabby uses Rabby (`0x3333…3333`), not the global |
+| Keyboard at 390 px | Wallet buttons reachable by Tab; **Enter connects** |
+| Layout at 390 px | Two buttons fit, `scrollWidth === innerWidth`, no overflow |
+| Console / page errors | None in any case |
+
+**Test coverage:** `tests/wallet-discovery.test.mjs` — 22 tests (parsing, sanitisation, dedupe,
+fallback, hostile targets, fetch guard, re-pointing, stale-wallet detachment, no re-detection after a
+selection). Suite total **392 pass**.
+
+**Still true:** a wallet that neither injects nor announces (disabled, or crashed before announcing)
+is undetectable by any dapp — the user must enable it. Discovery cannot fix a wallet that stays silent.
 
 ### 3.2 What the browser pass did *not* establish
 
@@ -288,8 +322,8 @@ app-wide CSS convention.
 | **F-06** | Info | 13 account error codes each map to a distinct, specific user sentence — including `CORS_BLOCKED` ("No proxy or public-data fallback was used") and `ACCOUNT_STALE`. This is inspection evidence only; **no live 401/403 was exercised**. | `AccountAnalytics.tsx:55–69` | **Inspected, not exercised** |
 | **F-07** | Info | Runtime reports `Node v22.22.3; engine >=24: FAIL`. Sandbox-only; every API probe passes. CI uses Node 24. | `npm run check:runtime` | **Verified (environmental)** |
 | **F-08** | Low (pre-existing, app-wide) | **Touch targets are below the repo's own minimum.** Measured in a 360 px viewport: `Disconnect` is **92×24 px**; the app-wide smallest interactive controls are `th-sort-btn` 17 px, `star-btn` 18×21, footer links 17, `row-action-btn` 22, `.btn.sm` 24, `.seg-btn` 24, `.btn.primary` 29, `.burger` 30. `docs/audit/UX_AUDIT.md:23` states a **44 px** minimum for account tabs, and `styles.css` uses `min-height:44px` in three places — but small buttons are consistently 24 px. **The wallet controls follow the existing `.btn.sm` convention, so this is not a regression introduced by wallet work**; it is a pre-existing gap between the documented standard and the stylesheet. | `styles.css` `.btn.sm`; measured geometry in §3.1 | **Measured, not fixed** (see §4.2) |
-| **F-09** | Low (copy) | **The in-app SDK guide prints a host that does not resolve.** `SdkGuide.tsx` shows `api-testnet.polyester.com` (lines 182, 183, 395); SDK 0.31.0 declares `apiUrl: "https://api.testnet.polyester.com"` and every other document uses the dotted name. `getent hosts api-testnet.polyester.com` → **no DNS record**; the dotted name resolves. Integrators copying the guide hit a dead host. | `apps/web/src/pages/SdkGuide.tsx`; DNS check 2026-10-27 | **Recorded, not fixed** (C-6) |
-| **F-10** | Low (enhancement) | **One wallet at a time.** The control reads a single legacy `window.ethereum` (`defaultDetect()`), so with two or more EVM extensions installed the app offers whichever extension won the property, and the other cannot be chosen — including when that other wallet failed to inject at all (Phantom, `evmAsk.js`, §3.1a). Standard remedy is **EIP-6963** multi-provider discovery (`eip6963:announceProvider`), which lets the user pick among announced wallets instead of trusting one global. | `walletConnection.ts:362–370`; no `eip6963` handling in `apps/web/src`; §3.1a | **Recorded, not implemented** (C-8) |
+| **F-09** | Low (copy) — **fixed** | **The in-app SDK guide printed a host that does not resolve.** `SdkGuide.tsx` showed `api-testnet.polyester.com` (lines 182, 183, 395); SDK 0.31.0 declares `apiUrl: "https://api.testnet.polyester.com"` and every other document uses the dotted name. `getent hosts api-testnet.polyester.com` → **no DNS record**; the dotted name resolves. Integrators copying the guide hit a dead host. | `apps/web/src/pages/SdkGuide.tsx`; DNS check 2026-10-27 | **Fixed** — canonical host in all 3 places, browser-verified |
+| **F-10** | Low (enhancement) — **implemented** | **Only one wallet could be offered.** The control read a single legacy `window.ethereum` (`defaultDetect()`), so with two or more EVM extensions the app offered whichever won the property and the other could not be chosen — including a wallet that failed to inject at all (Phantom, `evmAsk.js`, §3.1a). Now resolved by **EIP-6963** discovery: each announced wallet is a separate button, the selected provider is the one used, and the previous provider is detached. | `walletDiscovery.ts`, `WalletButton.tsx`, `walletConnection.ts:setProvider`; §3.1b | **Implemented** — 22 tests, 18/18 browser checks |
 
 ### 4.1 Correction — F-02 and F-03 are retracted (2026-10-27, post-commit review)
 
