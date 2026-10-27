@@ -336,6 +336,63 @@ Note on §4.1: the earlier "21 tables, 21 wrappers, 100 %" count was about the *
 remains true. What it did not cover was elements that are not tables — pills, buttons, selects and
 long unbreakable identifiers — which is exactly where the real overflow was.
 
+### 3.1d Headless wallet login transport (2026-10-28)
+
+The exchange answers a browser preflight from our origin with no
+`Access-Control-Allow-Origin`, so an in-page call to the auth service cannot
+leave the page. CORS does not apply between servers, so the call moved to the
+backend that already fronts this app:
+
+```
+POST /api/auth/challenge   -> auth.v1.AuthService/CreateWalletChallenge
+POST /api/auth/login       -> auth.v1.AuthService/LoginWithWallet
+```
+
+**Design constraints, all enforced in code and asserted in tests:**
+
+- The private key never reaches the server. The wallet signs in the browser and
+  only the resulting 65-byte signature is relayed.
+- **`uri` is derived from the incoming request's own origin**, and a
+  client-supplied `uri` is ignored. The endpoint cannot be used to mint a
+  challenge claiming somebody else's origin — tested with a spoof attempt.
+- No `Access-Control-Allow-Origin` on auth responses, `Cache-Control: no-store`,
+  and a cross-site caller is refused before it reaches the exchange. A bearer
+  token is not readable by another origin and does not enter any cache.
+- Nothing is logged: no token, signature, message or address.
+- Validation mirrors the proto — 40-hex addresses, 65-byte signatures, the
+  4096-byte message cap, the 32-character provider hint, an 8192-byte body cap.
+- Plain-HTTP upstreams are refused unless loopback, so a signature cannot be
+  sent in the clear.
+
+**Wire parity, and the bug it caught.** My first hand-written body sent
+`"purpose": 1`. Pointing the installed SDK's own `createClient` at a capture
+server showed Connect's JSON encoding writes the enum **name**:
+`{"smartAccountAddress":…,"signerAddress":…,"uri":…,"purpose":"LOGIN"}`. The
+proxy now emits exactly what the official client emits, and a test compares the
+two bodies directly rather than trusting my reading of the `.proto`.
+
+**Read-only invariant, narrowed rather than deleted.** `tests/api-surface.test.mjs`
+previously said "no write RPC appears in application code". That is no longer
+true — login genuinely calls two mutating-in-the-POST-sense RPCs. The rule is now
+split into three, each stricter about what matters: no order/cancel/transfer/
+profile RPC anywhere; the two login RPCs pinned to exactly one file,
+`backend/src/authProxy.ts`; and the frontend forbidden from touching the auth
+API at all, so the browser path cannot quietly reappear.
+
+**Dev/prod parity bug (C-14).** The Vite dev middleware built
+`new Request(url, { method })` — no body, no headers. The POST routes worked in
+production and could never work in `npm run dev`. Only testing through the real
+stack surfaced it; the in-memory `Request` objects in the unit tests were fine.
+Fixed, with a test that wraps the actual Vite middleware.
+
+**What this does *not* establish.** Everything above was verified against a
+local mock and the SDK's own client. No request has ever reached
+`api.testnet.polyester.com` from this sandbox (`ECONNRESET` on TLS). So this
+does not show that login works — it shows the transport is correct and that the
+only remaining unknowns are the exchange's answers: whether it will issue a
+challenge for our origin (C-1) and what it requires as `smartAccountAddress` for
+an EOA-only wallet.
+
 ### 3.2 What the browser pass did *not* establish
 
 - No exchange key was used, so **items 6, 7, 8, 11 and the stale/401/403 half of item 12 remain

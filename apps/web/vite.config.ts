@@ -263,8 +263,24 @@ function devApiPlugin(): Plugin {
                 ) => Promise<Response>;
               };
               const path = `/api${req.url ?? "/"}`;
+              // Forward the body and headers. This middleware used to build a
+              // Request from the method alone, so any POST arrived with an
+              // empty body and no Origin/Content-Type/Sec-Fetch-Site — every
+              // POST route worked in production and could never work in dev.
+              const chunks: Buffer[] = [];
+              for await (const chunk of req) chunks.push(chunk as Buffer);
+              const raw = Buffer.concat(chunks);
+              const headers = new Headers();
+              for (const [name, value] of Object.entries(req.headers)) {
+                if (!value) continue;
+                // Rewritten by Request, or derived from the buffered body.
+                if (name === "host" || name === "connection" || name === "content-length") continue;
+                headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+              }
               const webReq = new Request(`http://localhost${path}`, {
                 method: req.method ?? "GET",
+                headers,
+                body: raw.length > 0 ? raw : undefined,
               });
               const webRes = await api(webReq, { env: process.env });
               const fb = devWireSampleFallbackForStatus(new URL(webReq.url), webRes.status);

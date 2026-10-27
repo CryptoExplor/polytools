@@ -10,7 +10,7 @@
  *  - exposes clean, CORS-open GET JSON endpoints the static frontend can call
  *  - caches hot routes at the edge of the isolate (TTL per endpoint)
  *
- * Routes (all GET):
+ * Routes (GET unless noted):
  *   /api/health
  *   /api/env
  *   /api/markets
@@ -25,6 +25,10 @@
  *   /api/flow?flowId=...
  *   /api/flow/by-tx?txHash=...
  *   /api/flow/explain?txHash=...
+ *
+ *   POST /api/auth/challenge   wallet login: obtain the message to sign
+ *   POST /api/auth/login       wallet login: exchange a signature for a token
+ *                              (same-origin only, never cached, never logged)
  */
 
 import {
@@ -39,6 +43,7 @@ import {
 import { applySecurityHeaders } from "../../packages/core/src/deploymentSecurity";
 import { cached, cacheStats } from "./cache";
 import { dataFor } from "./mcpServer";
+import { handleAuthRoute, isAuthPath } from "./authProxy";
 
 export interface ApiOptions {
   /** Platform env vars (Cloudflare bindings / process.env). */
@@ -145,6 +150,10 @@ const isValidFlowId = (flowId: string): boolean =>
 export async function api(request: Request, opts: ApiOptions = {}): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
+
+  // Wallet login is the only non-GET surface, and it is deliberately narrow:
+  // two fixed paths, same-origin only, no account state. See authProxy.ts.
+  if (isAuthPath(path)) return handleAuthRoute(request, path, opts);
 
   if (request.method === "OPTIONS") {
     return new Response(null, {

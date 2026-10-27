@@ -110,35 +110,79 @@ describe("API surface — read/write classification", () => {
 });
 
 describe("API surface — PolyTools stays read-only", () => {
+  /**
+   * Two auth calls are now made for real, from the server, for wallet login:
+   * the challenge request and the signature-for-token exchange. Neither places
+   * an order, cancels one, moves funds, or changes a profile — but they are
+   * POSTs with a server-side effect, so the old blanket rule ("no write RPC in
+   * application code, ever") would either be violated or be quietly deleted.
+   * Instead it is narrowed to the property that actually matters, and the
+   * exception is pinned to one named file.
+   */
+  const AUTH_TRANSPORT_RPCS = new Set([
+    "auth.v1.AuthService/CreateWalletChallenge",
+    "auth.v1.AuthService/LoginWithWallet",
+  ]);
+  const AUTH_TRANSPORT_FILE = "backend/src/authProxy.ts";
+
   const APP_SOURCES = [
     "apps/web/src",
-    "apps/web/src/lib",
-    "apps/web/src/components",
-    "apps/web/src/pages",
     "packages/core/src",
     "backend/src",
   ];
 
-  it("no write RPC is referenced by application code", () => {
-    const offenders = [];
+  function* walk(relative) {
+    let entries = [];
+    try {
+      entries = readdirSync(resolve(rootDir, relative), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const path = `${relative}/${entry.name}`;
+      if (entry.isDirectory()) yield* walk(path);
+      else if (/\.(ts|tsx)$/.test(entry.name) && entry.name !== "apiSurface.ts") yield path;
+    }
+  }
+
+  function references(rpc) {
+    const hits = [];
     for (const dir of APP_SOURCES) {
-      let names = [];
-      try {
-        names = readdirSync(resolve(rootDir, dir));
-      } catch {
-        continue;
-      }
-      for (const name of names) {
-        if (!/\.(ts|tsx)$/.test(name) || name === "apiSurface.ts") continue;
-        const text = readFileSync(resolve(rootDir, dir, name), "utf8");
-        for (const entry of surface.API_SURFACE) {
-          if (entry.mode !== "write") continue;
-          // The RPC path, and the bare method name for REST-shaped calls.
-          if (text.includes(entry.rpc)) offenders.push(`${dir}/${name} → ${entry.rpc}`);
-        }
+      for (const file of walk(dir)) {
+        if (readFileSync(resolve(rootDir, file), "utf8").includes(rpc)) hits.push(file);
       }
     }
-    assert.deepEqual(offenders, [], `application code calls write RPCs: ${offenders.join(", ")}`);
+    return hits;
+  }
+
+  it("places no order and mutates no trading or account state, anywhere", () => {
+    const offenders = [];
+    for (const entry of surface.API_SURFACE) {
+      if (entry.mode !== "write" || AUTH_TRANSPORT_RPCS.has(entry.rpc)) continue;
+      for (const file of references(entry.rpc)) offenders.push(`${file} → ${entry.rpc}`);
+    }
+    assert.deepEqual(offenders, [], `application code calls a mutating RPC: ${offenders.join(", ")}`);
+  });
+
+  it("confines the two login RPCs to the named auth transport file", () => {
+    const where = new Map();
+    for (const rpc of AUTH_TRANSPORT_RPCS) where.set(rpc, references(rpc));
+    for (const [rpc, files] of where) {
+      assert.deepEqual(files, [AUTH_TRANSPORT_FILE], `${rpc} may only appear in ${AUTH_TRANSPORT_FILE}`);
+    }
+  });
+
+  it("keeps the browser out of the exchange's auth API entirely", () => {
+    // Login is server-side on purpose: the exchange sends no CORS header to our
+    // origin, so an in-page call cannot work. The frontend must call /api/auth/*.
+    const offenders = [];
+    for (const file of walk("apps/web/src")) {
+      const text = readFileSync(resolve(rootDir, file), "utf8");
+      for (const rpc of AUTH_TRANSPORT_RPCS) {
+        if (text.includes(rpc) || text.includes("auth.v1.AuthService/")) offenders.push(`${file} → ${rpc}`);
+      }
+    }
+    assert.deepEqual(offenders, [], `frontend must not call the auth API directly: ${offenders.join(", ")}`);
   });
 });
 
