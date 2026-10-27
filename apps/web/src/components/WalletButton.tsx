@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode, Ref } from "react";
 import {
   chainLabel,
   shortenAddress,
@@ -78,9 +79,80 @@ export function walletClickAction(
   return providers.length > 1 ? "menu" : "connect";
 }
 
+/**
+ * What the user can do after a failed connection.
+ *
+ * "Retry" only ever re-asks the *same* wallet. With one wallet that is the whole
+ * story. With several, the wallet that failed may simply be the wrong one — a
+ * locked extension, or the one that owns `window.ethereum` rather than the one
+ * the user meant — so the choice has to stay reachable. It did not: the error
+ * view replaced the picker, and the only offered action was to retry the same
+ * provider forever.
+ */
+export function walletErrorRecovery(
+  providers: readonly DiscoveredProvider[],
+): "retry" | "choose" {
+  return providers.length > 1 ? "choose" : "retry";
+}
+
+/** One letter used as an icon stand-in when a wallet ships no usable artwork. */
+export function walletInitial(name: string): string {
+  const first = [...name.trim()][0] ?? "?";
+  return first.toUpperCase();
+}
+
 /** Tooltip for a per-wallet button. Same claim as CONNECT_TITLE, per wallet. */
 export function walletChoiceTitle(name: string): string {
   return `Connect ${name}. Connection only: no sign-in, no account data, no trading.`;
+}
+
+/**
+ * The control while a connection is in a failed state.
+ *
+ * One pill that says what happened, plus exactly one way forward. With a single
+ * wallet installed that is "Retry", because there is nothing else to try. With
+ * more than one, the correct affordance is the picker: the wallet that failed
+ * may not be the one the user meant, and retrying it forever is a dead end.
+ */
+export function WalletErrorControl(props: {
+  message: string;
+  providers: readonly DiscoveredProvider[];
+  menuOpen: boolean;
+  menu: ReactNode;
+  onToggleMenu: () => void;
+  onRetry: () => void;
+  wrapRef?: Ref<HTMLSpanElement>;
+}) {
+  const recovery = walletErrorRecovery(props.providers);
+  return (
+    <span className="wallet-cluster">
+      <span className="pill down wallet-pill" title={props.message} aria-live="polite">
+        Wallet error
+      </span>
+      {recovery === "retry" ? (
+        <button type="button" className="btn sm" onClick={props.onRetry}>
+          Retry
+        </button>
+      ) : (
+        <span className="wallet-picker" ref={props.wrapRef}>
+          <button
+            type="button"
+            className="btn sm wallet-menu-toggle"
+            aria-haspopup="menu"
+            aria-expanded={props.menuOpen}
+            onClick={props.onToggleMenu}
+            title={`${props.message} Choose another wallet.`}
+          >
+            Choose wallet
+            <span className="wallet-menu-caret" aria-hidden="true">
+              ▾
+            </span>
+          </button>
+          {props.menu}
+        </span>
+      )}
+    </span>
+  );
 }
 
 export function WalletButton() {
@@ -121,6 +193,64 @@ export function WalletButton() {
       void connect();
     },
     [choose, connect],
+  );
+
+  /**
+   * The picker's menu. `errorMessage` is carried into the panel so a user who
+   * opens it after a failure still sees why the last attempt failed.
+   */
+  const renderMenu = (errorMessage: string | null) => (
+    <>
+      {/* Phone-only scrim. It dims the page and gives a large, obvious way out;
+          on desktop the panel stays a plain dropdown with no overlay. */}
+      <span
+        className="wallet-scrim"
+        aria-hidden="true"
+        onClick={() => setMenuOpen(false)}
+      />
+      <div className="wallet-menu" role="menu" aria-label="Choose a wallet">
+      <p className="wallet-menu-title">Connect a wallet</p>
+      {errorMessage && (
+        <p className="wallet-menu-error" role="status">
+          {errorMessage}
+        </p>
+      )}
+      <div className="wallet-menu-list" role="group" aria-label="Detected wallets">
+        {providers.map((entry) => (
+          <button
+            key={entry.info.uuid}
+            type="button"
+            role="menuitem"
+            className="wallet-menu-item"
+            onClick={() => pick(entry.info.uuid)}
+            title={walletChoiceTitle(entry.info.name)}
+          >
+            {entry.info.icon ? (
+              <img
+                className="wallet-menu-icon"
+                src={entry.info.icon}
+                alt=""
+                aria-hidden="true"
+                width={24}
+                height={24}
+                loading="lazy"
+                decoding="async"
+              />
+            ) : (
+              <span className="wallet-menu-icon wallet-menu-initial" aria-hidden="true">
+                {walletInitial(entry.info.name)}
+              </span>
+            )}
+            <span className="wallet-menu-name">{entry.info.name}</span>
+            <span className="wallet-menu-tag">Detected</span>
+          </button>
+        ))}
+      </div>
+      <p className="wallet-menu-foot">
+        Connection only — no sign-in, no account data, no trading.
+      </p>
+      </div>
+    </>
   );
 
   if (view.kind === "hidden") return null;
@@ -166,14 +296,15 @@ export function WalletButton() {
 
   if (view.kind === "error") {
     return (
-      <span className="wallet-cluster">
-        <span className="pill down wallet-pill" title={view.message} aria-live="polite">
-          Wallet error
-        </span>
-        <button type="button" className="btn sm" onClick={() => void connect()}>
-          Retry
-        </button>
-      </span>
+      <WalletErrorControl
+        message={view.message}
+        providers={providers}
+        menuOpen={menuOpen}
+        wrapRef={wrapRef}
+        menu={menuOpen ? renderMenu(view.message) : null}
+        onToggleMenu={() => setMenuOpen((open) => !open)}
+        onRetry={() => void connect()}
+      />
     );
   }
 
@@ -213,22 +344,7 @@ export function WalletButton() {
           ▾
         </span>
       </button>
-      {menuOpen && (
-        <div className="wallet-menu" role="menu" aria-label="Choose a wallet">
-          {providers.map((entry) => (
-            <button
-              key={entry.info.uuid}
-              type="button"
-              role="menuitem"
-              className="wallet-menu-item"
-              onClick={() => pick(entry.info.uuid)}
-              title={walletChoiceTitle(entry.info.name)}
-            >
-              {entry.info.name}
-            </button>
-          ))}
-        </div>
-      )}
+      {menuOpen && renderMenu(null)}
     </span>
   );
 }

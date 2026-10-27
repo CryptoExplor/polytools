@@ -8,6 +8,8 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
@@ -426,5 +428,122 @@ describe("Wallet selection — one control, however many wallets", () => {
   it("never opens the menu for a connected wallet", () => {
     const many = Array.from({ length: 8 }, (_, i) => providerEntry(`u${i}`, `Wallet ${i}`));
     assert.equal(button.walletClickAction(many, connectedView()), "connect");
+  });
+});
+
+describe("Wallet error recovery — a failure is not a dead end", () => {
+  const view = () =>
+    button.describeWalletControl({
+      status: "error",
+      address: null,
+      chainId: null,
+      error: "USER_REJECTED",
+      updatedAtMs: 1,
+    });
+  const entry = (uuid, name) => ({
+    info: { uuid, name, rdns: `io.${name.toLowerCase()}`, icon: null },
+    provider: fakeProvider(),
+  });
+
+  it("keeps the choice reachable when the wallet that failed may be the wrong one", () => {
+    assert.equal(button.walletErrorRecovery([entry("a", "Alpha"), entry("b", "Beta")]), "choose");
+    const eight = Array.from({ length: 8 }, (_, i) => entry(`u${i}`, `Wallet ${i}`));
+    assert.equal(button.walletErrorRecovery(eight), "choose");
+  });
+
+  it("falls back to a plain retry when there is nothing else to choose", () => {
+    assert.equal(button.walletErrorRecovery([]), "retry");
+    assert.equal(button.walletErrorRecovery([entry("a", "Alpha")]), "retry");
+  });
+
+  it("renders a wallet chooser in the error state, not only a Retry", () => {
+    // The reported bug: after a failure the control collapsed to
+    // "Wallet error | Retry" and the picker was gone, so a user who wanted a
+    // different wallet had no way back to it.
+    const html = renderToStaticMarkup(
+      React.createElement(button.WalletErrorControl, {
+        message: view().message,
+        providers: [entry("a", "Alpha"), entry("b", "Beta")],
+        menuOpen: false,
+        menu: null,
+        onToggleMenu: () => {},
+        onRetry: () => {},
+      }),
+    );
+    assert.match(html, /Wallet error/);
+    assert.doesNotMatch(html, />Retry</);
+    assert.match(html, /Choose wallet/);
+  });
+
+  it("still shows Retry when only one wallet is installed", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(button.WalletErrorControl, {
+        message: view().message,
+        providers: [entry("a", "Alpha")],
+        menuOpen: false,
+        menu: null,
+        onToggleMenu: () => {},
+        onRetry: () => {},
+      }),
+    );
+    assert.match(html, />Retry</);
+    assert.doesNotMatch(html, /Choose wallet/);
+  });
+});
+
+describe("Wallet icons — third-party artwork, strictly inline", () => {
+  const PNG = "data:image/png;base64,iVBORw0KGgo=";
+  const SVG = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=";
+
+  it("accepts bounded inline base64 images", () => {
+    assert.equal(discovery.sanitizeIcon(PNG), PNG);
+    assert.equal(discovery.sanitizeIcon(SVG), SVG);
+  });
+
+  it("refuses a remote URL, so opening the menu cannot phone home", () => {
+    for (const bad of [
+      "https://example.com/logo.png",
+      "http://example.com/logo.png",
+      "//example.com/logo.png",
+      "/logo.png",
+      "javascript:alert(1)",
+    ]) {
+      assert.equal(discovery.sanitizeIcon(bad), null, bad);
+    }
+  });
+
+  it("refuses raw markup and non-image data URIs", () => {
+    for (const bad of [
+      "data:image/svg+xml,<svg onload=alert(1)>",
+      "data:text/html;base64,PHNjcmlwdD4=",
+      "data:image/png;base64,",
+      "data:image/png;base64,!!!!",
+    ]) {
+      assert.equal(discovery.sanitizeIcon(bad), null, bad);
+    }
+  });
+
+  it("refuses an oversized icon", () => {
+    const huge = `data:image/png;base64,${"A".repeat(20_000)}`;
+    assert.equal(discovery.sanitizeIcon(huge), null);
+  });
+
+  it("carries a usable icon through discovery, and null when absent", () => {
+    const provider = fakeProvider();
+    const parsed = discovery.parseAnnouncement({
+      detail: { info: { uuid: "u1", name: "Alpha", rdns: "io.alpha", icon: SVG }, provider },
+    });
+    assert.equal(parsed.info.icon, SVG);
+
+    const bare = discovery.parseAnnouncement({
+      detail: { info: { uuid: "u2", name: "Beta", rdns: "io.beta", icon: "https://tracker.example/x.png" }, provider },
+    });
+    assert.equal(bare.info.icon, null);
+  });
+
+  it("uses a letter tile when a wallet has no artwork", () => {
+    assert.equal(button.walletInitial("MetaMask"), "M");
+    assert.equal(button.walletInitial("  rabby"), "R");
+    assert.equal(button.walletInitial(""), "?");
   });
 });

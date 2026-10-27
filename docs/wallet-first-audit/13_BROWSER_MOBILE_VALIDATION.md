@@ -393,6 +393,63 @@ only remaining unknowns are the exchange's answers: whether it will issue a
 challenge for our origin (C-1) and what it requires as `smartAccountAddress` for
 an EOA-only wallet.
 
+### 3.1e Wallet picker: a failure is no longer a dead end (2026-10-28)
+
+**The reported bug.** After a connection failed, the control collapsed to
+`Wallet error | Retry` and the picker disappeared. Everyone with more than one
+wallet was stuck: the only offered action was to re-ask the same wallet that had
+just refused. `walletErrorRecovery()` now decides — one wallet keeps `Retry`,
+more than one offers **Choose wallet**, and the reason the last attempt failed
+is repeated inside the menu so the choice has context.
+
+**The picker itself was redrawn** toward the anatomy a hosted wallet modal uses,
+with no dependency added:
+
+| Before | After |
+| --- | --- |
+| bare text rows in a 240 px box | titled panel, 288 px, 12 px radius, `--shadow-lg` |
+| wallet name only | 24 px tile — the wallet's own logo when it ships one, otherwise its initial — plus name and a `Detected` tag |
+| no explanation | the failure reason, when there is one, and a footer that keeps the scope honest: *no sign-in, no account data, no trading* |
+| dropdown at every width | dropdown on desktop; **bottom sheet with a scrim below 680 px** |
+
+**Icons are treated as untrusted input.** A wallet announcement's `icon` is
+accepted only as a bounded inline base64 data URI for an image type
+(`sanitizeIcon`). A remote URL is refused — rendering it would leak a request to
+a third party every time the menu opened — as are raw (non-base64) SVG,
+`javascript:`, and oversized payloads. It reaches `<img src>`, so even SVG
+cannot execute. Legacy `window.ethereum` providers ship no artwork, and no logo
+is guessed for them.
+
+**Two layout defects found while verifying:**
+
+1. **The dropdown ran off a phone.** A 282 px panel anchored to a control near
+   the right edge reached **x = -50** on a 360 px screen. Below 680 px it is now
+   a fixed bottom sheet (`inset: auto 12px 12px 12px`), which cannot overflow at
+   any anchor position.
+2. **The scrim did not dim anything, twice.** A `::before` at `z-index: -1`
+   stays inside the panel's stacking context, so it painted *behind the page*; a
+   spread `box-shadow` was clipped by the topbar. Both looked plausible and both
+   failed. A real `position: fixed` element works. Verified by **sampling
+   pixels**, not by eye: `36,25,8 → 20,13,3` and `25,25,31 → 13,13,17`, exactly
+   ×0.55, which is the 45 % scrim over a near-black theme.
+
+**Verified in a real browser, 23/23** with two injected wallets (a legacy
+`window.ethereum` that rejects, and an EIP-6963-only wallet that accepts):
+one control, titled menu, logo for the wallet that has one, letter tile for the
+wallet that does not, `Detected` tags, honest footer, Escape closes, **the error
+state still offers the picker**, the failure reason appears in the menu,
+**switching wallets clears the error and connects**, desktop keeps a plain
+dropdown with no overlay, the phone sheet fits (12 → 348 px at 360 px) and is
+dimmed by a full-viewport scrim, tapping the scrim closes it, no page overflow,
+no page errors. Plus **16 routes × 4 viewports** clean.
+
+**RainbowKit was considered and measured, not assumed.** `@rainbow-me/rainbowkit`
++ `wagmi` + `viem` + `@tanstack/react-query` is 489 packages; the modal alone
+bundles to **1,435 kB gzip**, against **102 kB gzip for this entire app**
+(`check:performance` budget: 185 kB). It also introduces its own
+`projectId`-based Cloud service. The look was the point of the request, so the
+look was rebuilt in ~90 lines against the app's own tokens instead.
+
 ### 3.2 What the browser pass did *not* establish
 
 - No exchange key was used, so **items 6, 7, 8, 11 and the stale/401/403 half of item 12 remain

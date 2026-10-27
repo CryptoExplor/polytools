@@ -29,6 +29,14 @@ export const DEFAULT_DISCOVERY_MS = 300;
 /** Display names are third-party strings; bound them before they reach the UI. */
 const MAX_NAME_LENGTH = 32;
 
+/**
+ * Wallets ship their logo as an inline data URI in the announcement. Anything
+ * else is someone else's URL: loading it would leak a request to a third party
+ * on page load, so it is refused rather than proxied or rendered.
+ */
+const MAX_ICON_LENGTH = 12_288;
+const ICON_PATTERN = /^data:image\/(?:svg\+xml|png|webp|jpeg|jpg);base64,[A-Za-z0-9+/]+={0,2}$/;
+
 export interface ProviderInfo {
   /** Stable per-announcement id; used as the React key and the selection id. */
   uuid: string;
@@ -36,6 +44,11 @@ export interface ProviderInfo {
   name: string;
   /** Reverse-DNS id, e.g. `io.metamask`. Empty when the wallet omits it. */
   rdns: string;
+  /**
+   * Inline logo as a base64 data URI, or null. Never a remote URL and never raw
+   * markup: it is handed to `<img src>`, so it cannot execute even as SVG.
+   */
+  icon: string | null;
 }
 
 export interface DiscoveredProvider {
@@ -71,6 +84,18 @@ function isProviderLike(value: unknown): value is InjectedProvider {
   return typeof (value as InjectedProvider).request === "function";
 }
 
+/**
+ * Accepts only an inline base64 image, bounded in length. A remote URL, a
+ * `javascript:` payload, raw (non-base64) SVG, or anything oversized returns
+ * null and the menu falls back to a letter tile.
+ */
+export function sanitizeIcon(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_ICON_LENGTH) return null;
+  return ICON_PATTERN.test(trimmed) ? trimmed : null;
+}
+
 /** Control characters and runs of whitespace would break the button label. */
 function sanitizeName(value: unknown, fallback: string): string {
   if (typeof value !== "string") return fallback;
@@ -102,6 +127,7 @@ export function parseAnnouncement(event: unknown): DiscoveredProvider | null {
       uuid: uuid.trim(),
       name: sanitizeName((info as { name?: unknown }).name, "Browser wallet"),
       rdns: typeof rdns === "string" ? rdns.trim().slice(0, 128) : "",
+      icon: sanitizeIcon((info as { icon?: unknown }).icon),
     },
     provider,
   };
@@ -135,6 +161,9 @@ export function legacyProviders(target: unknown): DiscoveredProvider[] {
         uuid: `${named.isMetaMask ? "io.metamask" : "injected"}:${index}`,
         name: legacyName(named),
         rdns: named.isMetaMask ? "io.metamask" : "",
+        // The legacy global exposes no artwork, and guessing a logo would mean
+        // shipping brand assets for wallets we cannot identify reliably.
+        icon: null,
       },
       provider,
     };
