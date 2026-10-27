@@ -64,6 +64,25 @@ Existing coverage: `account-rest` (14), `canonical-request` (14), `account-setup
 | W-10 | Connect/disconnect on MetaMask + Rabby on testnet | **M** |
 | W-11 | Mobile browser with an in-app wallet | **M** |
 
+### Stage 2a status (automated only — `tests/wallet-connection.test.mjs`)
+
+| ID | Status | Evidence |
+|---|---|---|
+| W-01 | **Pass** | `unavailable` state renders a "No wallet" pill; `connect()` returns `NO_PROVIDER` without throwing |
+| W-02 | **Pass** | Subscriber records exactly `connecting → connected` after a `disconnected` start |
+| W-03 | **Pass** | `disconnect()` clears address **and** chain id |
+| W-04 | **Pass** | `accountsChanged` updates the displayed address with a `fetch` spy at 0; state carries no token or signature |
+| W-05 | **N/A by construction** | No exchange session exists yet. Guarded: the module exports no session/token/login surface and state keys are exactly `status, address, chainId, error, updatedAtMs`. **Must become a behavioural test at Stage 2b** |
+| W-06 | **Pass** | `chainChanged` keeps the address, issues no provider request, notifies once for repeated identical events, and leaves exactly one handler per event |
+| W-07 | **Pass** | `fetch` spy at 0 across start, connect, account switch, chain switch and disconnect; provider methods limited to `eth_accounts`, `eth_chainId`, `eth_requestAccounts` |
+| W-08 | **Pass (view level)** | The connected view is exactly `address, chain, kind, short, title` and contains no balance/order/fill/equity/position text. A DOM-level assertion still needs the browser pass |
+| W-09 | **Pass** | `4001` yields a recoverable `USER_REJECTED` error with no phantom address; the same instance retries to `connected` |
+| W-10 | **Blocked** | Needs a real wallet extension |
+| W-11 | **Blocked** | Needs a mobile browser with an in-app wallet |
+
+The 2a gate is therefore **satisfied for every automated criterion** and **still blocked** on W-10/W-11
+and on the DOM-level half of W-08. A green automated run is not browser verification.
+
 ---
 
 ## 4. Exchange authentication (Stage 2b)
@@ -180,7 +199,7 @@ Cannot be automated here; no credentials will be created by this audit.
 |---|---|
 | 0 | Reports published; zero source files modified |
 | 1 | F-07–F-11 record accepted from PR #7 (directory restoration optional, Q2/Q5 closed); docs corrected; suite green |
-| 2a | W-01…W-09 pass; **no** Polyester request made on connect |
+| 2a | W-01…W-09 pass (automated; W-05 N/A — no session exists yet); **no** Polyester request made on connect. W-10/W-11 need a real browser |
 | 2b | S-01…S-11 pass; **G1 licence resolved**; in-memory token confirmed |
 | 3 | D-01…D-19 pass with the flag on **and** off; K-01…K-10 still pass |
 | 4 | A-01…A-08 pass |

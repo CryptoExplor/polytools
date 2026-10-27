@@ -481,6 +481,216 @@ describe("wallet connection — isolation from account state", () => {
   });
 });
 
+describe("Stage 2a gate — 07 §3 W-01…W-09", () => {
+  /** W-01 */
+  it("W-01: no provider degrades the UI instead of crashing", async () => {
+    const { describeWalletControl } = await vite.ssrLoadModule(
+      "/apps/web/src/components/WalletButton.tsx",
+    );
+    const conn = new wallet.WalletConnection({ detect: () => null });
+    conn.start();
+    assert.equal(conn.getSnapshot().status, "unavailable");
+    const view = describeWalletControl(conn.getSnapshot());
+    assert.equal(view.kind, "unavailable");
+    assert.match(view.message, /No browser wallet detected/);
+    // A click on a degraded control must not throw either.
+    assert.equal((await conn.connect()).error, "NO_PROVIDER");
+  });
+
+  /** W-02 */
+  it("W-02: connect() publishes disconnected → connecting → connected in order", async () => {
+    // Not yet authorized: the silent read returns nothing, so the first state
+    // is `disconnected` and the click is what moves it.
+    const provider = fakeProvider({
+      request: (args) => {
+        if (args.method === "eth_accounts") return [];
+        if (args.method === "eth_requestAccounts") return [ADDR];
+        if (args.method === "eth_chainId") return "0x1";
+        throw Object.assign(new Error("unexpected"), { code: -32601 });
+      },
+    });
+    const conn = make(provider);
+    conn.start();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(conn.getSnapshot().status, "disconnected");
+
+    const seen = [];
+    conn.subscribe(() => seen.push(conn.getSnapshot().status));
+    const final = await conn.connect();
+    assert.equal(final.status, "connected");
+    assert.deepEqual(seen, ["connecting", "connected"]);
+  });
+
+  /** W-03 */
+  it("W-03: disconnect() clears both the address and the chain", async () => {
+    const provider = fakeProvider({ accounts: [ADDR], chainId: "0xaa36a7" });
+    const conn = make(provider);
+    const connected = await conn.connect();
+    assert.equal(connected.chainId, "11155111");
+
+    conn.disconnect();
+    const state = conn.getSnapshot();
+    assert.equal(state.status, "disconnected");
+    assert.equal(state.address, null);
+    assert.equal(state.chainId, null, "a stale chain id must not outlive the address");
+  });
+
+  /** W-04 — and the "never authenticates" half: nothing leaves the browser. */
+  it("W-04: accountsChanged updates the display without authenticating", async () => {
+    const provider = fakeProvider({ accounts: [ADDR], chainId: "0x1" });
+    const conn = make(provider);
+    await conn.connect();
+
+    const fetches = withFetchSpy(() => {
+      provider.emit("accountsChanged", [ADDR_2]);
+    });
+    assert.equal(fetches, 0, "an account switch must not call the exchange");
+    assert.equal(conn.getSnapshot().address, ADDR_2);
+    // No token, session or signature is produced anywhere on this path.
+    assert.equal(typeof conn.getSnapshot().token, "undefined");
+    assert.equal(typeof conn.getSnapshot().signature, "undefined");
+  });
+
+  /** W-05 — not applicable until Stage 2b exists, and guarded so it cannot be forgotten. */
+  it("W-05: no exchange session exists yet, so there is nothing to clear", async () => {
+    // When Stage 2b lands, `accountsChanged` must invalidate the exchange
+    // session; this guard must then be replaced by a behavioural test.
+    const mod = await vite.ssrLoadModule("/apps/web/src/lib/walletConnection.ts");
+    assert.deepEqual(Object.keys(mod).sort(), [
+      "INITIAL_WALLET_STATE",
+      "WalletConnection",
+      "chainLabel",
+      "classifyWalletError",
+      "defaultDetect",
+      "getWalletConnection",
+      "normalizeAddress",
+      "normalizeChainId",
+      "shortenAddress",
+      "walletErrorMessage",
+    ], "no session, token or login export may exist before Stage 2b");
+
+    const provider = fakeProvider({ accounts: [ADDR] });
+    const conn = make(provider);
+    await conn.connect();
+    assert.deepEqual(Object.keys(conn.getSnapshot()).sort(), [
+      "address",
+      "chainId",
+      "error",
+      "status",
+      "updatedAtMs",
+    ], "wallet state carries no credential of any kind");
+  });
+
+  /** W-06 */
+  it("W-06: chainChanged neither re-authenticates nor loops", async () => {
+    const provider = fakeProvider({ accounts: [ADDR], chainId: "0x1" });
+    const conn = make(provider);
+    await conn.connect();
+    const before = provider.calls.length;
+
+    let notifications = 0;
+    conn.subscribe(() => { notifications += 1; });
+    provider.emit("chainChanged", "0x89");
+    provider.emit("chainChanged", "0x89");
+
+    assert.equal(conn.getSnapshot().chainId, "137");
+    assert.equal(provider.calls.length, before, "a chain switch must not re-prompt the wallet");
+    assert.equal(notifications, 1, "the second identical event must not re-render");
+    // Three listeners only: a re-registration loop would show up here.
+    for (const [event, handlers] of provider.handlers) {
+      assert.equal(handlers.size, 1, `${event} must have exactly one handler`);
+    }
+  });
+
+  /** W-07 */
+  it("W-07: connection makes no network request to any endpoint", async () => {
+    const provider = fakeProvider({ accounts: [ADDR], chainId: "0x1" });
+    const conn = make(provider);
+    const fetches = await withFetchSpyAsync(async () => {
+      conn.start();
+      await conn.connect();
+      provider.emit("accountsChanged", [ADDR_2]);
+      provider.emit("chainChanged", "0x1");
+      conn.disconnect();
+    });
+    assert.equal(fetches, 0, "no Polyester request may be made on connect, switch or disconnect");
+    // Only provider-local reads, and none of them writes.
+    const methods = new Set(provider.methods());
+    assert.deepEqual([...methods].sort(), ["eth_accounts", "eth_chainId", "eth_requestAccounts"]);
+  });
+
+  /** W-08 */
+  it("W-08: the connected view exposes address, chain and disconnect only", async () => {
+    const { describeWalletControl } = await vite.ssrLoadModule(
+      "/apps/web/src/components/WalletButton.tsx",
+    );
+    const view = describeWalletControl({
+      status: "connected",
+      address: ADDR_LOWER,
+      chainId: "11155111",
+      error: null,
+    });
+    assert.deepEqual(Object.keys(view).sort(), ["address", "chain", "kind", "short", "title"]);
+    const serialized = JSON.stringify(view);
+    for (const forbidden of ["balance", "order", "fill", "equity", "position", "trade"]) {
+      assert.ok(!serialized.toLowerCase().includes(forbidden),
+        `a connected wallet must not surface ${forbidden} data`);
+    }
+  });
+
+  /** W-09 */
+  it("W-09: a 4001 rejection is a recoverable error, not a stuck or crashed state", async () => {
+    let reject = true;
+    const provider = fakeProvider({
+      request: (args) => {
+        if (args.method === "eth_requestAccounts") {
+          if (reject) throw rejected(4001);
+          return [ADDR];
+        }
+        if (args.method === "eth_accounts") return [];
+        if (args.method === "eth_chainId") return "0x1";
+        throw Object.assign(new Error("unexpected"), { code: -32601 });
+      },
+    });
+    const conn = make(provider);
+
+    const denied = await conn.connect();
+    assert.equal(denied.status, "error");
+    assert.equal(denied.error, "USER_REJECTED");
+    assert.equal(denied.address, null, "a rejected request must not leave a phantom address");
+
+    // The error is recoverable: the same instance can be retried and succeed.
+    reject = false;
+    const retried = await conn.connect();
+    assert.equal(retried.status, "connected");
+    assert.equal(retried.error, null);
+    assert.equal(retried.address, ADDR_LOWER);
+  });
+});
+
+/** Count `fetch` calls made while running `fn`. */
+function withFetchSpy(fn) {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (...args) => {
+    calls += 1;
+    return Promise.resolve(new Response("{}"));
+  };
+  try { fn(); } finally { globalThis.fetch = original; }
+  return calls;
+}
+
+async function withFetchSpyAsync(fn) {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (...args) => {
+    calls += 1;
+    return Promise.resolve(new Response("{}"));
+  };
+  try { await fn(); } finally { globalThis.fetch = original; }
+  return calls;
+}
+
 describe("wallet button — presentation rules", () => {
   it("says connection only and never claims sign-in", () => {
     const text = source("apps/web/src/components/WalletButton.tsx");
