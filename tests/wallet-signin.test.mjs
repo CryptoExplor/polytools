@@ -390,6 +390,49 @@ describe("a refusal names the right layer — never the wrong one", () => {
   });
 });
 
+describe("an exchange-side block is not an unreachable endpoint", () => {
+  const responding = (status, payload) => async () =>
+    new Response(typeof payload === "string" ? payload : JSON.stringify(payload), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  const attempt = (fetchImpl) =>
+    sessionModule.login({ provider: fakeWallet(), address: EOA, fetchImpl });
+
+  it("classifies upstream_403 as the exchange refusing, not a missing route", async () => {
+    // The reported bug in the UI: a refusal from the exchange was shown as
+    // "the sign-in endpoint is not reachable", sending the reader to the wrong
+    // layer entirely.
+    try {
+      await attempt(responding(403, { error: "upstream_403", detail: "blocked by a browser challenge · cf-ray=abc-LHR" }));
+      assert.fail("should have thrown");
+    } catch (error) {
+      assert.equal(error.code, "origin_rejected");
+      assert.match(error.detail, /cf-ray=abc-LHR/);
+    }
+  });
+
+  it("keeps a genuine gateway failure as unreachable", async () => {
+    try {
+      await attempt(responding(502, { error: "upstream_unreachable" }));
+      assert.fail("should have thrown");
+    } catch (error) {
+      assert.equal(error.code, "upstream_unreachable");
+    }
+  });
+
+  it("names the edge, not the origin, when the detail says so", async () => {
+    const { sessionErrorMessage } = await vite.ssrLoadModule("/apps/web/src/lib/usePolyesterSession.ts");
+    const edge = sessionErrorMessage("origin_rejected", "blocked by a browser challenge · cf-ray=abc-LHR");
+    assert.match(edge, /edge blocked/i);
+    assert.match(edge, /cf-ray=abc-LHR/);
+
+    const originCase = sessionErrorMessage("origin_rejected", "uri is not permitted");
+    assert.match(originCase, /refused this site's origin/i);
+    assert.equal(/edge blocked/i.test(originCase), false);
+  });
+});
+
 describe("the client honours the deployment's API base", () => {
   it("builds auth URLs from API_BASE rather than a bare relative path", () => {
     // On the documented static deploy the backend is a separate worker, so a

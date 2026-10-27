@@ -165,25 +165,84 @@ function isoFromTimestamp(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+/**
+ * Turns an upstream failure into something a human can act on.
+ *
+ * A refusal from Polyester's own API is JSON (`{code, message}`). A refusal from
+ * Cloudflare *in front of* it is an HTML page, often with a `cf-ray` and a
+ * `cf-mitigated` header. Those two need completely different responses — one is a
+ * conversation with Polyester, the other is a bot-management block on our
+ * server's request — so they must never collapse into one opaque code. The ray ID
+ * in particular is what Polyester's support needs to trace it.
+ */
+export function describeUpstreamFailure(
+  status: number,
+  contentType: string | null,
+  headers: Headers,
+  body: string,
+  parsed: Json | null,
+): { code: string; detail: string } {
+  const upstreamCode = typeof parsed?.code === "string" ? parsed.code : null;
+  const upstreamMessage = typeof parsed?.message === "string" ? parsed.message : null;
+  const code = upstreamCode ?? `upstream_${status}`;
+
+  const ray = headers.get("cf-ray");
+  const mitigated = headers.get("cf-mitigated");
+  const isHtml = (contentType ?? "").includes("text/html") || /^\s*<(!doctype|html)/i.test(body);
+  const suffixes: string[] = [];
+  if (mitigated) suffixes.push(`cf-mitigated=${mitigated}`);
+  if (ray) suffixes.push(`cf-ray=${ray}`);
+
+  if (upstreamMessage) {
+    return { code, detail: [upstreamMessage, ...suffixes].join(" · ") };
+  }
+
+  if (isHtml) {
+    // Never echo the markup. Say what it is, so the block is attributable.
+    const challenge = /just a moment|checking your browser|cf-browser-verification|challenge-platform/i.test(body);
+    const label = challenge
+      ? "blocked by a browser challenge in front of the API"
+      : "returned an HTML page instead of a Connect error";
+    return { code, detail: [label, ...suffixes].join(" · ") };
+  }
+
+  const snippet = body.replace(/\s+/g, " ").trim().slice(0, 200);
+  return { code, detail: [snippet || `HTTP ${status} with an empty body`, ...suffixes].join(" · ") };
+}
+
 async function callConnect(
   origin: string,
   method: string,
   payload: Json,
 ): Promise<{ ok: true; body: Json } | { ok: false; response: Response }> {
-  let res: Response;
-  try {
-    res = await fetch(`${origin}/auth.v1.AuthService/${method}`, {
+  const url = `${origin}/auth.v1.AuthService/${method}`;
+  const request = (headers: Record<string, string>) =>
+    fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Connect-Protocol-Version": "1",
-      },
+      headers,
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
+
+  const baseHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Connect-Protocol-Version": "1",
+    Accept: "application/json",
+  };
+
+  let res: Response;
+  try {
+    // Some runtimes refuse certain request headers. The User-Agent is worth
+    // setting — a request with none is a common trigger for bot management —
+    // but it must never be the reason a login fails, so the fallback is a plain
+    // request rather than an error.
+    res = await request({ ...baseHeaders, "User-Agent": "PolyTools/0.1 (+https://polytools)" });
   } catch {
-    // The message may name the host but never a credential; both are absent here.
-    return { ok: false, response: authError(502, "upstream_unreachable") };
+    try {
+      res = await request(baseHeaders);
+    } catch {
+      return { ok: false, response: authError(502, "upstream_unreachable") };
+    }
   }
 
   const text = await res.text();
@@ -195,16 +254,21 @@ async function callConnect(
   }
 
   if (!res.ok) {
-    // Connect errors are `{code, message}`. Relay the exchange's own words so a
-    // refusal is legible instead of flattened into a generic failure.
-    const upstreamCode = typeof parsed?.code === "string" ? parsed.code : null;
-    const upstreamMessage = typeof parsed?.message === "string" ? parsed.message : null;
+    const described = describeUpstreamFailure(
+      res.status,
+      res.headers.get("content-type"),
+      res.headers,
+      text,
+      parsed,
+    );
     return {
       ok: false,
       response: authError(
+        // A 5xx from the exchange is not the caller's fault; keep it a gateway
+        // error. Everything else keeps its own status so the code stays honest.
         res.status >= 500 ? 502 : res.status,
-        upstreamCode ?? `upstream_${res.status}`,
-        upstreamMessage ?? undefined,
+        described.code,
+        described.detail,
       ),
     };
   }

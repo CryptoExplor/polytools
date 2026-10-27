@@ -482,6 +482,67 @@ describe("upstream origin is constrained, not merely validated", () => {
   });
 });
 
+describe("upstream refusals stay attributable", () => {
+  const describeFn = async () =>
+    (await vite.ssrLoadModule("/backend/src/authProxy.ts")).describeUpstreamFailure;
+
+  it("relays a Connect error as the exchange's own words", async () => {
+    const d = await describeFn();
+    const result = d(
+      403,
+      "application/json",
+      new Headers(),
+      JSON.stringify({ code: "permission_denied", message: "uri is not permitted" }),
+      { code: "permission_denied", message: "uri is not permitted" },
+    );
+    assert.equal(result.code, "permission_denied");
+    assert.equal(result.detail, "uri is not permitted");
+  });
+
+  it("identifies an edge challenge instead of flattening it to upstream_403", async () => {
+    // The reported failure: 403 with an HTML body. Polyester's API speaks
+    // Connect JSON, so an HTML 403 comes from the edge in front of it.
+    const d = await describeFn();
+    const headers = new Headers({ "cf-mitigated": "challenge", "cf-ray": "8f2a1c3d4e5f-LHR" });
+    const result = d(403, "text/html; charset=UTF-8", headers, "<!DOCTYPE html><title>Just a moment...</title>", null);
+    assert.equal(result.code, "upstream_403");
+    assert.match(result.detail, /browser challenge/i);
+    assert.match(result.detail, /cf-ray=8f2a1c3d4e5f-LHR/);
+    // The markup must never be echoed back.
+    assert.equal(/<title>|<!DOCTYPE/i.test(result.detail), false);
+  });
+
+  it("does not echo arbitrary HTML as if it were a message", async () => {
+    const d = await describeFn();
+    const result = d(502, "text/html", new Headers(), "<html><body>Bad gateway</body></html>", null);
+    assert.match(result.detail, /HTML page instead of a Connect error/i);
+    assert.equal(/<body>/.test(result.detail), false);
+  });
+
+  it("passes through a short non-JSON body, capped", async () => {
+    const d = await describeFn();
+    const result = d(400, "text/plain", new Headers(), "x".repeat(900), null);
+    assert.equal(result.detail.length <= 200, true);
+  });
+
+  it("returns the real status and code through the route", async () => {
+    reset();
+    scenario = {
+      reply: { status: 403, body: { code: "permission_denied", message: "uri is not permitted" } },
+    };
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", {
+        body: JSON.stringify({ signerAddress: SIGNER }),
+      }),
+      env(),
+    );
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.equal(body.error, "permission_denied");
+    assert.equal(body.detail, "uri is not permitted");
+  });
+});
+
 describe("surface discipline", () => {
   it("is same-origin only and POST-only", async () => {
     reset();

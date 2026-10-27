@@ -40,8 +40,16 @@ export function sessionErrorMessage(code: LoginFailure, detail?: string): string
     case "malformed_signature":
       return "Your wallet returned a signature this app cannot read.";
     case "origin_rejected":
-      // The honest one. If the exchange will not issue a challenge for this
-      // origin, no amount of retrying changes it.
+      // Three different refusals arrive here and they mean different things, so
+      // the copy names the layer rather than blaming "the exchange" generally.
+      if (detail && /cf-mitigated|browser challenge|cf-ray|challenge-platform/i.test(detail)) {
+        // The API's edge treated our server's request as a bot. This is not
+        // about our origin and not about the user's wallet.
+        return `Polyester's edge blocked the sign-in request before it reached the API (${detail}).`;
+      }
+      if (detail && /^HTTP \d{3}|^upstream_\d{3}$/.test(detail)) {
+        return `Polyester returned an unreadable refusal (${detail}).`;
+      }
       return detail
         ? `Polyester refused this site's origin: ${detail}`
         : "Polyester refused this site's origin. Sign-in cannot work from this deployment.";

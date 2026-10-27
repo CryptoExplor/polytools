@@ -102,13 +102,17 @@ function failureFor(response: Response, body: ChallengeBody): PolyesterLoginErro
     return new PolyesterLoginError("origin_not_allowed", detail ?? code);
   }
 
-  if (response.status === 502 || response.status === 503) {
+  // Genuinely could not complete the round trip.
+  if (code === "upstream_unreachable" || response.status === 502 || response.status === 503) {
     return new PolyesterLoginError("upstream_unreachable", detail ?? code);
   }
 
-  // The exchange's own refusal, relayed verbatim by our proxy. This is the shape
-  // a pinned-origin answer takes, so it must stay legible rather than generic.
-  if (ORIGIN_REFUSAL_CODES.has(code)) {
+  // The exchange — or something in front of it — refused. Our proxy prefixes
+  // these with `upstream_` when the exchange answered without a Connect error
+  // body, which is exactly what an edge block looks like. Never report this as
+  // an unreachable endpoint: the request got an answer, just not the one we
+  // wanted.
+  if (code.startsWith("upstream_") || ORIGIN_REFUSAL_CODES.has(code)) {
     return new PolyesterLoginError("origin_rejected", detail ?? code);
   }
 
