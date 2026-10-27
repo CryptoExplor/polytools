@@ -213,6 +213,53 @@ earlier in this pass):
    unlocks. **No bypass.** (The first failing assertion was my own regex missing "could not be
    unlocked", not a missing message.)
 
+### 3.1a Extension-injected console error — user-reported, reproduced 2026-10-27
+
+You reported on the preview:
+
+```
+evmAsk.js:76 Uncaught TypeError: Cannot redefine property: ethereum
+    at Object.defineProperty (<anonymous>)
+    at t.inject (evmAsk.js:76:5093)
+    at window.addEventListener.once (evmAsk.js:76:9013)
+```
+
+**Not application code.** `evmAsk.js` is not in this repository and is not served by us
+(`grep -rn evmAsk` → nothing). It is the EVM provider bundle of the **Phantom** browser extension,
+which injects into every page it can reach; the same stack trace appears in unrelated projects
+carrying the extension origin `chrome-extension://bfnaelmomeimhlpmgjnjophhpkkoljpa/evmAsk.js`, and
+that ID is Phantom's published Chrome Web Store ID.
+
+**Mechanism.** The first EVM wallet extension to load installs `window.ethereum` as a
+**non-configurable** property. Phantom's `t.inject()` then calls `Object.defineProperty(window,
+"ethereum", …)` and the browser refuses. Reproduced here in the same app build by installing a
+locked provider and having a second actor re-define it: **`TypeError: Cannot redefine property:
+ethereum`** — the identical message, thrown entirely outside application frames.
+
+**Effect on PolyTools: none.** With a non-configurable provider present:
+
+| Check | Result |
+|---|---|
+| App loads and renders | **Pass** |
+| "Connect wallet" → address + chain + Disconnect through the surviving provider | **Pass** (`0xabcd…ef01 / Ethereum / Disconnect`) |
+| Any page error attributable to the app | **None** (0 `pageerror`) |
+| Our read path against a **frozen** provider | **Pass** — `defaultDetect()` is a guarded property read (`walletConnection.ts:362–370`); the app never calls `defineProperty` on `window` |
+
+**The real consequence is which wallet you get.** Our control uses the legacy single-provider
+`window.ethereum`, so when two EVM wallets are installed it can only ever see the one that won the
+property — here, **not** Phantom. Phantom never installed its provider, so it cannot be offered or
+selected. See **F-10**.
+
+**What to do in the meantime:** one EVM wallet extension per browser profile (or disable the other
+and reload). Phantom's own support material documents a *Default App Wallet* preference for
+coexistence with MetaMask; that governs which wallet handles a request, but it does not undo a
+property already locked by another extension, so it is not a dependable fix for this exact error.
+
+**Does this weaken the §3.1 result?** No. "0 app console errors" was measured in a clean profile with
+no extensions. Extension-injected scripts can add console output that no application can prevent or
+suppress; the check's scope is app-origin frames, and the attribution method in §3.1 F already treats
+non-app noise separately.
+
 ### 3.2 What the browser pass did *not* establish
 
 - No exchange key was used, so **items 6, 7, 8, 11 and the stale/401/403 half of item 12 remain
@@ -242,6 +289,7 @@ app-wide CSS convention.
 | **F-07** | Info | Runtime reports `Node v22.22.3; engine >=24: FAIL`. Sandbox-only; every API probe passes. CI uses Node 24. | `npm run check:runtime` | **Verified (environmental)** |
 | **F-08** | Low (pre-existing, app-wide) | **Touch targets are below the repo's own minimum.** Measured in a 360 px viewport: `Disconnect` is **92×24 px**; the app-wide smallest interactive controls are `th-sort-btn` 17 px, `star-btn` 18×21, footer links 17, `row-action-btn` 22, `.btn.sm` 24, `.seg-btn` 24, `.btn.primary` 29, `.burger` 30. `docs/audit/UX_AUDIT.md:23` states a **44 px** minimum for account tabs, and `styles.css` uses `min-height:44px` in three places — but small buttons are consistently 24 px. **The wallet controls follow the existing `.btn.sm` convention, so this is not a regression introduced by wallet work**; it is a pre-existing gap between the documented standard and the stylesheet. | `styles.css` `.btn.sm`; measured geometry in §3.1 | **Measured, not fixed** (see §4.2) |
 | **F-09** | Low (copy) | **The in-app SDK guide prints a host that does not resolve.** `SdkGuide.tsx` shows `api-testnet.polyester.com` (lines 182, 183, 395); SDK 0.31.0 declares `apiUrl: "https://api.testnet.polyester.com"` and every other document uses the dotted name. `getent hosts api-testnet.polyester.com` → **no DNS record**; the dotted name resolves. Integrators copying the guide hit a dead host. | `apps/web/src/pages/SdkGuide.tsx`; DNS check 2026-10-27 | **Recorded, not fixed** (C-6) |
+| **F-10** | Low (enhancement) | **One wallet at a time.** The control reads a single legacy `window.ethereum` (`defaultDetect()`), so with two or more EVM extensions installed the app offers whichever extension won the property, and the other cannot be chosen — including when that other wallet failed to inject at all (Phantom, `evmAsk.js`, §3.1a). Standard remedy is **EIP-6963** multi-provider discovery (`eip6963:announceProvider`), which lets the user pick among announced wallets instead of trusting one global. | `walletConnection.ts:362–370`; no `eip6963` handling in `apps/web/src`; §3.1a | **Recorded, not implemented** (C-8) |
 
 ### 4.1 Correction — F-02 and F-03 are retracted (2026-10-27, post-commit review)
 
