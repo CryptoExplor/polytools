@@ -175,7 +175,7 @@ Legend: **V** verified · **F** failed · **B** blocked · **NT** not tested.
 | 20 | Wire-sample provenance banner visible | **B** | No browser |
 | 21 | Order placement, signing, mutations | **NT by design** | Out of scope; none attempted |
 
-**Totals: 5 verified, 0 failed, 15 blocked, 1 not tested.**
+**Totals: 5 verified, 0 failed, 15 blocked, 1 not tested** (findings: 4 verified, 2 retracted, 2 inspected-only).
 
 ---
 
@@ -187,16 +187,70 @@ No functional defect is asserted. Every finding below is either a tooling/enviro
 | ID | Severity | Finding | Evidence | Status |
 |---|---|---|---|---|
 | **F-01** | Low | `check:performance` exits **1** when `apps/web/dist` is absent ("run npm run build first"). It is a build-ordering dependency, not a perf regression, but a fresh checkout run out of order shows a red gate. | `npm run check:performance` → `exit=1` with no `dist`; `exit=0` after `npm run build` | **Verified** |
-| **F-02** | Medium *(hypothesis)* | **Horizontal overflow risk on narrow viewports.** Only 2 `overflow-x: auto` rules guard a set of tables with up to 11 columns (orders, executions, transfers, equity series). At 360 px, `.table-wrap` may not be applied on every table. | `grep -c "overflow-x" styles.css` → 2; `AccountAnalytics.tsx:308,376,470,1014,1041,1056` | **Unverified** — needs a browser at 360 px |
-| **F-03** | Low *(hypothesis)* | `.sidebar` is fixed at `232px / flex: 0 0 232px`. Collapse behaviour at ≤680 px exists in CSS but its actual result is untested. | `styles.css:225–227`; media queries at 1080/960/680 | **Unverified** |
+| ~~**F-02**~~ | ~~Medium~~ → **retracted** | ~~Horizontal overflow risk: only 2 `overflow-x` rules for tables up to 11 columns~~ **Retracted — see §4.1.** The rule count was the wrong metric: one reusable `.table-wrap { overflow-x: auto }` class is applied to **all 21 tables in the app (21/21)**. | `styles.css:1097–1098`; per-file counts in §4.1 | **Hypothesis retracted** — Low residual, §4.1 |
+| ~~**F-03**~~ | ~~Low~~ → **retracted** | ~~`.sidebar` fixed at 232px; collapse at ≤680 px untested; may overlay content~~ **Retracted — see §4.1.** The drawer breakpoint is **960 px**, not 680; a complete off-canvas drawer with backdrop, transform, `overscroll-behavior: contain` and real JS focus/scroll-lock management already exists. | `styles.css:2054–2090`; `Layout.tsx:164–280,382,486` | **Hypothesis retracted** — see §4.1 |
 | **F-04** | Info | **Dev server sends no CSP or security headers**; they are produced by `apps/web/public/_headers` at the Pages layer. CSP therefore cannot be validated in dev — only on a Pages preview. | `curl -D -` → no `content-security-policy` | **Verified** |
 | **F-05** | Info | **Dev public data is synthetic** (wire samples), `apiEnv: "testnet"`. Any data-accuracy conclusion drawn from a preview is invalid. | `/api/markets` → `{"apiEnv":"testnet",…}` from `docs/wire-samples` | **Verified** |
 | **F-06** | Info | 13 account error codes each map to a distinct, specific user sentence — including `CORS_BLOCKED` ("No proxy or public-data fallback was used") and `ACCOUNT_STALE`. This is inspection evidence only; **no live 401/403 was exercised**. | `AccountAnalytics.tsx:55–69` | **Inspected, not exercised** |
 | **F-07** | Info | Runtime reports `Node v22.22.3; engine >=24: FAIL`. Sandbox-only; every API probe passes. CI uses Node 24. | `npm run check:runtime` | **Verified (environmental)** |
 
+### 4.1 Correction — F-02 and F-03 are retracted (2026-10-27, post-commit review)
+
+Both were raised as **unverified hypotheses**. On re-inspection against the source, **both are
+contradicted by evidence**, so they are withdrawn rather than left standing. Recording the mechanism of
+the error, because the same mistake is easy to repeat.
+
+**F-02 — wrong metric.** I counted `grep -c "overflow-x" styles.css` → **2** and inferred sparse
+coverage. But 2 is the number of *rules*, not the number of *guarded tables*. The relevant rule is a
+single reusable class:
+
+```css
+.table-wrap { overflow-x: auto; border: 1px solid var(--border-subtle); … }
+```
+
+and it is applied to **every table in the application**:
+
+| File | `<table>` | `table-wrap` wrappers |
+|---|---|---|
+| `AccountAnalytics.tsx` | 10 | 10 |
+| `AccountCostBasis.tsx` | 2 | 2 |
+| `Zipper.tsx` | 3 | 3 |
+| `SdkGuide.tsx` | 2 | 2 |
+| `Compare.tsx` / `Dashboard.tsx` / `Heatmap.tsx` / `Portfolio.tsx` | 1 each | 1 each |
+| **Total** | **21** | **21** |
+
+21 tables, 21 wrappers, **100 % correspondence**. The wide-table overflow risk I described is **not
+supported by the source**. A residual risk remains — whether `overflow-x: auto` on `.table-wrap` is
+sufficient *within* a flex/grid parent that itself lacks `min-width: 0` is a real CSS subtlety, and only
+a 360 px render can settle it. That residual is **Low**, not Medium.
+
+**F-03 — wrong breakpoint, and the feature exists.** I asserted the sidebar "collapses at ≤680 px" and
+that its behaviour was untested. Both parts were wrong:
+
+- The drawer breakpoint is **960 px** (`@media (max-width: 960px)`), not 680. The 680 px block only
+  changes `.grid` column counts.
+- Inside that block the sidebar becomes a proper off-canvas drawer: `position: fixed`,
+  `transform: translateX(-100%)` → `translateX(0)` on `.open`, a `.sidebar-backdrop.open` overlay,
+  `overscroll-behavior: contain`, and `height: auto; max-height: 100%` with a comment explaining it
+  avoids overshooting phones whose browser toolbar collapses.
+- The JS beside it is more careful than my hypothesis assumed: focus moves into the opened drawer and
+  is handed off on close; the closed drawer is hidden from focus **and** assistive technology;
+  `document.body.style.overflow` is locked while open and restored afterwards; resizing out of the
+  mobile layout does not strand focus in a subtree about to become inert. A `.burger` button exists at
+  `Layout.tsx:382,486`.
+
+So there is **no evidence** that the sidebar overlays content or lacks mobile handling. What remains
+untested is whether the *rendered result* matches the intent — a browser question, not a code question.
+
+**Net effect:** the browser pass should **not** go hunting for these two bugs. Priority shifts to
+confirming that the (already-implemented) drawer opens and that `table-wrap` scrolls at 360 px. If
+either fails, that is a genuine finding — with the source above as the expected behaviour.
+
 ---
 
 ## 5. What is needed to clear the blocked checks
+
+> **The executable version of this section is [`14_MANUAL_BROWSER_PASS_RUNSHEET.md`](./14_MANUAL_BROWSER_PASS_RUNSHEET.md)** — URL, startup command, and a tick-box checklist.
 
 **To unblock the browser pass — either works:**
 
@@ -253,8 +307,8 @@ Offered as separate recommendations, per the brief's instruction to report rathe
 | For | Proposal |
 |---|---|
 | F-01 | Make `check-build-performance.mjs` emit a clear *"prerequisite: run build first"* skip rather than exit 1, or have the npm script depend on `build`. Low risk, tooling only. |
-| F-02 | Add `overflow-x: auto` to `.table-wrap` variants and wrap the remaining wide tables; verify at 360 px before/after. |
-| F-03 | Verify sidebar collapse at 680 px; if it overlays content, add a drawer with a focus trap (reuse `dialogFocus.ts`). |
+| ~~F-02~~ | **No fix proposed** — the guard already covers 21/21 tables. Only test whether `.table-wrap` scrolls inside its parent at 360 px. |
+| ~~F-03~~ | **No fix proposed** — a complete drawer with focus management already exists at ≤960 px. Only verify it renders as intended. |
 | F-04 | Note in the validation guide that CSP is Pages-only; validate on the Pages preview URL, not `vite dev`. |
 | F-06 | When a key is available, add one recorded read-only 401 fixture from the exchange to lock the error mapping to reality rather than to our assumption of it. |
 
