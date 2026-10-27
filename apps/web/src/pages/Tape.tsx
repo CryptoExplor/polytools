@@ -278,7 +278,7 @@ export default function Tape() {
       <PageHeader
         title={`Trades · ${symbol}`}
         badge={<Pill kind="accent">{rows.length} recent trades</Pill>}
-        subtitle="Every trade on this market, newest first. Public data — not your fills."
+        subtitle="Recent public trades on this market, newest first. Public data — not your fills."
         actions={
           <div className="row-flex">
             <DataFreshness

@@ -166,9 +166,13 @@ describe("P2-10 Compare provenance and empty states", () => {
 
   it("renders distinct zero-match, empty-overview, and unavailable-feed states", () => {
     const zeroMatch = emptyState({ allRowsCount: 3, overviewReceived: true });
-    assert.ok(zeroMatch.includes("No matches right now"));
+    assert.ok(zeroMatch.includes("No comparable prices right now"));
     assert.ok(zeroMatch.includes("Show All Listed"));
     assert.ok(zeroMatch.includes("never matches"));
+    // Rows can be unmatched because Polyester has no price; do not blame CoinGecko alone.
+    assert.ok(zeroMatch.includes("Polyester"));
+    assert.ok(zeroMatch.includes("CoinGecko"));
+    assert.ok(!zeroMatch.includes("No usable CoinGecko USD price"));
     assert.ok(!zeroMatch.includes("No comparison data available"));
 
     const emptyOverview = emptyState({ allRowsCount: 0, overviewReceived: true });

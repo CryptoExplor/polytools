@@ -59,10 +59,20 @@ const VALID_SIDES = new Set<string>(["buy", "sell"]);
 const VALID_COMPARE_BY = new Set<string>(["networkFee", "depositMinAmount"]);
 const VALID_LOOKUP_KIND = new Set<string>(["source", "any"]);
 
-/** Resolve the primary endpoint, honoring a mainnet-only deployment override. */
+/**
+ * Resolve the primary endpoint, honoring a mainnet-only deployment override.
+ *
+ * A blank value must count as absent. `??` alone selects an empty `MCP_URL`
+ * (a common way to leave a var "declared but unset" in wrangler.toml), which
+ * then resolves to the testnet default and silently wins over a valid
+ * `MCP_URL_MAINNET` — so the deployment would keep serving testnet data.
+ */
 export function resolveBackendMcpUrl(env?: Record<string, string | undefined>): string {
-  return resolveMcpUrl("testnet", env?.MCP_URL ?? env?.MCP_URL_MAINNET) ||
-    resolveMcpUrl("mainnet", env?.MCP_URL_MAINNET);
+  const primary = env?.MCP_URL?.trim();
+  if (primary) return resolveMcpUrl("testnet", primary);
+  const mainnet = env?.MCP_URL_MAINNET?.trim();
+  if (mainnet) return resolveMcpUrl("mainnet", mainnet);
+  return resolveMcpUrl("testnet");
 }
 
 class ValidationError extends Error {

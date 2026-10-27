@@ -316,6 +316,32 @@ describe("3. Backend handler allowlists, Node adapter path fix, and bounded TTL 
       "https://primary.example.com/mcp",
     );
   });
+
+  it("treats a blank MCP_URL as absent so a mainnet override still applies", () => {
+    // `MCP_URL = ""` is a common "declared but unset" wrangler.toml value.
+    // With `??` it selected the empty string, resolved to the testnet default,
+    // and the mainnet fallback was unreachable — serving testnet data.
+    for (const blank of ["", "   "]) {
+      assert.equal(
+        handlerMod.resolveBackendMcpUrl({
+          MCP_URL: blank,
+          MCP_URL_MAINNET: "https://mainnet.example.com/mcp",
+        }),
+        "https://mainnet.example.com/mcp",
+        `blank MCP_URL (${JSON.stringify(blank)}) must fall through to mainnet`,
+      );
+    }
+    // Both blank: unchanged testnet default, never an empty endpoint.
+    assert.equal(
+      handlerMod.resolveBackendMcpUrl({ MCP_URL: "", MCP_URL_MAINNET: "  " }),
+      core.NETWORKS.testnet.mcpUrl,
+    );
+    // A blank primary must not beat a valid primary-looking value either.
+    assert.equal(
+      handlerMod.resolveBackendMcpUrl({ MCP_URL: "https://primary.example.com/mcp" }),
+      "https://primary.example.com/mcp",
+    );
+  });
 });
 
 describe("4. Shared canonical-request primitives (SEC-01, SEC-07)", () => {
