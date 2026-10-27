@@ -442,6 +442,23 @@ accepts it** — established by a real challenge request recording the exact `ur
 (NBA-6). **If no non-production origin is accepted, Stage 2b stops**: production is not a test
 environment. An "allowlist including preview and staging" is therefore **not** approved.
 
+**Feasibility check 2026-10-27 — gate REMAINS UNVERIFIED, decision unchanged.** A declaration and
+documentation study was run without requesting a challenge (`07` §4.1). It found **no allowlist, no
+origin-registration step and no origin-related error code** anywhere in SDK 0.31.0, the generated
+`auth.v1` proto, or the official auth / wallet-login / client-configuration pages. The `uri` is a
+per-request string that the backend **binds into** the EIP-4361 message; the SDK's own token storage
+explicitly supports loopback, `.localhost` and RFC1918 origins. That makes an allowlist *unlikely*
+but **not disproved** — nothing published states acceptance either way, so this question still
+cannot be closed without one real call. Two further facts change the cost of closing it:
+
+- The call is **cheap and credential-free**: `createWalletChallenge` is public and takes two
+  syntactically valid addresses, so acceptance can be established with **no wallet, no key, no
+  deployment and no account**.
+- The **agent cannot run it**: sandbox egress resets TLS to `api.testnet.polyester.com`
+  (`SSL_ERROR_SYSCALL`). It must be run from your browser, at the approved origin.
+
+Approving the origin is therefore the only thing standing between this question and an answer.
+
 ### Q30. Do you accept EOA-only wallet support for launch? — **DECIDED 2026-10-27 (NBA-4.2)**
 
 **Evidence.** `AccountSigner.signMessage` must return the **owner EOA's raw 65-byte EIP-191
@@ -477,6 +494,8 @@ are not reopened by accident:
 | **NBA-4.4** API-key preservation | API-key path stays fully functional. Cache isolation defined in `07` §13 (AUTH-01…AUTH-12); parity must be **measurable** before removal is proposed |
 
 **Still unverified** (must not be assumed): whether the exchange allowlists `uri` or merely binds it
-into the message; whether any specific wallet produces a raw signature in practice; whether the two
-auth forms return identical response shapes; whether any non-testnet environment exists. See `12` §9.7.
+into the message — *narrowed 2026-10-27: no allowlist, registration step or origin error code exists
+in any public declaration, but acceptance itself is still unproved (`07` §4.1)*; whether any specific
+wallet produces a raw signature in practice; whether the two auth forms return identical response
+shapes; whether any non-testnet environment exists. See `12` §9.7.
 

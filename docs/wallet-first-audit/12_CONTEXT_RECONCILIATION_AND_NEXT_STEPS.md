@@ -197,6 +197,7 @@ stated where a step has a hard prerequisite.
 | **NBA-4** | **Answer the four pre-Stage-2a questions** (below). | **You** | Four written answers | Stage 2a; and it decides whether B is even feasible |
 | **NBA-5** | **Stage 2a: wallet connection only.** Address display, network guard, no exchange call, no private data. | Me, after NBA-4 | Fails safe with no wallet; no network call on connect; contrast/whitespace/tests green | The wallet-first shell |
 | **NBA-6** | **Verify SIWE feasibility on a real origin** — one challenge/response against testnet from an actual deployment origin, with one injected wallet. | Me + you (needs a wallet and a live origin) | Recorded request/response, including the `uri` used and the resulting `sessionLevel` | Stage 2b. **Not** a private-data read |
+| | ↳ **feasibility investigated 2026-10-27 — gate REMAINS UNVERIFIED; no challenge was called.** No allowlist, origin-registration step or origin error code exists in SDK 0.31.0, the `auth.v1` proto or the official auth/wallet-login/client-configuration pages; `uri` is a per-request value bound into the message, and SDK token storage explicitly supports loopback/LAN origins. | Not provable from declarations, and not executable here (sandbox TLS egress is reset). Needs one approved origin + one browser; no wallet, key or deployment required. [`07` §4.1–4.2](./07_ACCEPTANCE_TEST_MATRIX.md) | Stage 2b, once the origin is accepted | the origin question itself |
 | **NBA-7** | **Decide the wallet support matrix** (Q7) using §4.3 findings — EOA-only wallets work; wrapped-signature smart wallets fail login. | **You** | Named list, with the reason each is in or out | Stage 2b scoping, CSP changes (R-06) |
 | **NBA-8** | **Settle the licence record** (B1) to whatever standard you accept: the chat statement is recorded and sufficient, or a written agreement is pursued. | **You** | Recorded decision | Bundling the SDK at all |
 | **NBA-9** | **Resolve API compatibility** before any "live-compatible" claim: one authenticated read against a known-good API key, with the exchange's **exact error code and body** captured on failure. | Me + you (needs a key) | A recorded request/response pair | Stage 3; the whole reliability story |
@@ -408,3 +409,18 @@ merging, or any fee or financial action.
 **NBA-5** (wallet connection only), then **NBA-6** (SIWE feasibility on a real origin — which is the
 first step that could invalidate Stage 2b entirely).
 
+---
+
+## 10. Carry-forward register (2026-10-27)
+
+Tracked so nothing in this handoff is silently dropped. None of these is closed by this turn.
+
+| # | Item | State | Owner | Where |
+|---|---|---|---|---|
+| **C-1** | **Stage 2b origin gate (NBA-6)** | **Unverified** — needs one approved origin + one browser; no challenge called | You approve, then one call | `07` §4.1–4.2 |
+| **C-2** | **Authorised live API-key tests** (items 6, 7, 8, 11, and stale/401/403 of 12) | **Blocked** — needs an authorised testnet key entered by you through the app's own UI | You | `13` §3, §3.2 |
+| **C-3** | **Pages-level CSP as served** (item 19) | **Blocked** — dev server emits no CSP; needs a Pages preview | Deploy authorisation (not granted) | `13` §3 |
+| **C-4** | **Outstanding browser sub-checks** — A3, A6, B8, C3, D3, D6, D8, E2, E5, B6-inner-scroll | **Not run** — honest gaps, none needs a key or wallet | Either of us, ~10 min total | `14` §4 |
+| **C-5** | **44 px touch targets (F-08)** | **Measured, deliberately not fixed** — a **separate UX task**; no global styling change during this investigation | UX, separately | `13` §4.2 |
+| **C-6** | **F-09 — SDK guide shows a host with no DNS record** | **New, recorded only.** `SdkGuide.tsx` prints `api-testnet.polyester.com` (3 places); the SDK and every other document use `api.testnet.polyester.com`, and the hyphenated name returns **no DNS record**. Awaits your go-ahead for a 3-string copy fix | You authorise | `13` §4 |
+| **C-7** | **SDK not yet a web dependency** | Stage 2b would add `@polyester/sdk` to `apps/web` (currently only sits in example strings); licensing record NBA-8 still stands | Decision at Stage 2b start | `05` |

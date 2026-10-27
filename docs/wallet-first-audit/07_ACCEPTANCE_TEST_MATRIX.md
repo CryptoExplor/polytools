@@ -103,6 +103,48 @@ and on the DOM-level half of W-08. A green automated run is not browser verifica
 | S-12 | Real sign-in from a testnet browser origin | **M** |
 | S-13 | A denied/permission-limited session read is recorded as a valid result | **M** |
 
+### 4.1 Stage 2b origin gate — feasibility investigation (NBA-6), 2026-10-27
+
+**Verdict: the gate remains unverified.** No challenge was requested — this is a documentation and
+declaration study only. Everything below was established **without** calling the exchange.
+
+| # | Question | Evidence | Result |
+|---|---|---|---|
+| 1 | Is `uri` caller-supplied or registered in advance? | `CreateWalletChallengeInput` is a strict object of exactly `smartAccountAddress`, `signerAddress`, `uri` — SDK 0.31.0 `dist/services/auth/auth.d.ts` | **Caller-supplied, per request** |
+| 2 | Is there a client-side allowlist? | `WalletChallengeUriSchema` (`wallet-challenge.schemas.js`): max 2048, regex `^https?://[^/?#\s\\]+$`, rejects userinfo. No other check | **Syntax only** |
+| 3 | Does the environment object carry an origin? | `POLYESTER_TESTNET_ENVIRONMENT` = `name, apiUrl, websocketUrl, rpcUrl, chain, accountAbstraction, contracts` (`environment.js:182`). No web-host field | **No origin config exists** |
+| 4 | Is there a declared origin-rejection error? | All 46 `AuthErrorCode` values (`0`–`45`) enumerated from `dist/gen/auth/v1/auth_pb.d.ts`. None is origin, URI or domain related; nearest is `AUTH_INVALID_REQUEST = 6` | **None declared** |
+| 5 | What does the public contract call `uri`? | proto: *"Browser origin URI requesting the signature, including scheme and optional port but no path, query, fragment, or user information."* Guide: *"The challenge binds the requesting origin, owner EOA, …"* | **Bound into the message**, not checked against a list |
+| 6 | Is a non-production origin an expected case? | Client config: *"Browser storage scopes the bearer and display-session cookies by port on loopback, `.localhost`, and RFC1918 private IPv4 hosts"* | **Yes — local/LAN origins are a supported scenario** |
+| 7 | Does our own CSP already permit the call? | `apps/web/public/_headers` → `connect-src … https://api.testnet.polyester.com` | **Already permitted**; no CSP change needed for the API host |
+| 8 | Can the agent's sandbox execute the test? | DNS resolves (`api.testnet.polyester.com`); TCP 443 opens; TLS handshake fails `SSL_ERROR_SYSCALL` (egress proxy resets). Docs are readable only through a separate reader | **No — must run in your browser** |
+
+**What this narrows.** The gate is **not** an origin-registration, allowlist-application or
+deployment-authorisation process: no such step appears in any official declaration, and the SDK
+explicitly accommodates loopback and LAN origins for session storage. What remains genuinely unknown
+is narrower than the record previously assumed — two things, both answered by the **same single
+public call**:
+
+1. whether the backend accepts `uri` set to a non-production origin, and
+2. whether CORS permits a browser at that origin to read the response.
+
+**What the gate needs.** One approved origin value (`07` §4.2) and one ordinary browser. **No
+deployment, wallet, API key or exchange account is required for this step**: `createWalletChallenge`
+is public (`auth: public` in the SDK reference) and takes any two syntactically valid addresses, so
+the acceptance question is settled before any signature exists. The *later* S-12 step — signature →
+JWT → `sessionLevel` — is separate and does need a real wallet.
+
+### 4.2 The one origin to approve
+
+| Candidate | Non-production? | Real HTTPS? | Notes |
+|---|---|---|---|
+| Existing Pages preview `https://5b3de73c.polytools-cc8.pages.dev` | Yes (preview deployment) | Yes | Represents a real deployed origin; already exists, needs no new deploy |
+| `http://localhost:5199` | Yes | No (loopback, schema-valid) | The origin actually used by every check in `13` §3.1 |
+
+Recommendation: approve the **Pages preview** as the single documented non-production origin, and
+treat `localhost` as a development convenience only if the preview origin is also accepted. Do not
+approve both as "production" claims.
+
 ---
 
 ## 5. Unified data layer (Stage 3) — the safeguard matrix
