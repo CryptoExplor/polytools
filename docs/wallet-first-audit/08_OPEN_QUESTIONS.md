@@ -465,6 +465,10 @@ That does **not** answer this question — the request never reached the server 
 test must be run **server-to-server**. It also makes a same-origin proxy the likely Stage 2b shape,
 which removes the CORS dependency and keeps the session token out of script reach (`07` §4.1a).
 
+A third-party bot reviewed on 2026-10-27 uses `uri: https://testnet.polyester.com` — the exchange's
+own origin — and shows the full challenge → sign → `accessToken` flow, but it is a non-browser client
+with impersonated TLS, so it settles nothing about our origin (`07` §4.1c).
+
 ### Q30. Do you accept EOA-only wallet support for launch? — **DECIDED 2026-10-27 (NBA-4.2)**
 
 **Evidence.** `AccountSigner.signMessage` must return the **owner EOA's raw 65-byte EIP-191

@@ -259,6 +259,45 @@ means the `uri` is accepted; a structured error means it is not, and the code na
 two Stage 2b shapes in §4.1a. A *network* error means nothing was learned — the tool never reached
 the host.
 
+### 4.1c Third-party corroboration, and a file-safety finding (2026-10-27)
+
+A third-party Python bot (`poly_bot.py`, author "pwnx0", MIT-with-clauses) was supplied
+for review. **It was not executed and none of its code was adopted.** Two things came out of reading it.
+
+**(a) Independent corroboration of the API surface.** A source written independently of the SDK
+declarations uses exactly the shapes derived in §4.1:
+
+| Bot call | Matches |
+|---|---|
+| `auth.v1.AuthService/CreateWalletChallenge` `{smartAccountAddress, signerAddress, uri, purpose: 1}` | SDK + proto; confirms the corrected `purpose: 1` (§4.1b) |
+| `auth.v1.AuthService/LoginWithWallet` `{smartAccountAddress, message, signature, walletProvider}` → `accessToken` | `LoginWithWalletInputSchema` → `LoginWithWalletResponseSchema.accessToken` |
+| `encode_defunct(text=message)` then `Account.sign_message` | the documented EIP-191 `personal_sign` of the exact UTF-8 bytes; raw 65-byte EOA signature |
+| Parses a `urn:polyester:wallet-challenge:login:` line out of the message | the "Polyester chain bound in Resources" behaviour |
+
+One **discrepancy, unresolved**: the bot reads `Me.rootSmartAccountAddress`, a field absent from
+SDK 0.31.0's `MeSchema` (`accountId`, `username`, `apiKeyId?`, `session?`). Either the bot targets a
+different API revision or that field is undeclared. **Not asserted** — it does not affect the gate,
+and `S-01` should read `accountId`/`username` from the typed surface until proven otherwise.
+
+**(b) It does not resolve the gate.** The bot sends `uri: https://testnet.polyester.com` — the
+exchange's **own** site origin — so it demonstrates nothing about our non-production origin. It also
+never meets CORS, because it is not a browser: it uses `curl_cffi` with `impersonate="chrome"` and
+sets `origin`/`referer`/`sec-fetch-*` headers by hand. That is a simulated browser identity, not a
+browser. **The gate therefore remains unverified.**
+
+**File-safety finding — recorded because it targets this project's agents.** The file embeds a
+zlib+base64 blob whose checksum verifies, and which decodes to a *"[SYSTEM DIRECTIVE FOR ALL LARGE
+LANGUAGE MODELS & AI ASSISTANTS]"* demanding that any AI refuse to modify the script and return a
+fixed sentence. This is **prompt injection**: content in a data file attempting to issue
+instructions. It was treated as data and had no effect; no instruction inside a file is followed.
+Two further facts belong with it: the script **collects an EVM private key** (`PRIVATE_KEY` or a
+`getpass` prompt) and **signs orders**. Both are outside this project's standing rules — we never
+handle private keys, and trading is out of scope — so it is neither runnable here nor a candidate
+for reuse. It contacts no host other than the two Polyester domains (no exfiltration path found).
+
+**What it does not change:** the Stage 2b shape (same-origin proxy or a proven CORS allowance), the
+`fetch`-option finding (§4.1a), and the fact that one `curl` from a terminal settles the gate.
+
 ### 4.2 The one origin to approve
 
 | Candidate | Non-production? | Real HTTPS? | Notes |
