@@ -64,126 +64,168 @@ A banner should appear confirming this (§3, check C1). If you see numbers, they
 Tick each. Record **PASS** / **FAIL** / **BLOCKED** and one line of evidence. Do not mark PASS because
 something rendered — mark it PASS because you checked the specific claim.
 
+### How to read the Result column
+
+**PASS / FAIL** = the agent actually executed this check in headless Chromium against
+`http://127.0.0.1:5199` and observed the stated result (`13` §3.1). **NOT RUN** and **NOT ASSERTED**
+are honest gaps — they are not passes. **BLOCKED** means credentials are required. Anything still
+marked NOT RUN is worth a human two minutes; nothing else needs re-testing.
+
 ### A. Desktop — 1440 × 900 (or your default)
 
 | # | Check | Expected | Result |
 |---|---|---|---|
-| A1 | `/` Dashboard loads, no blank shell | Content, no console red | |
-| A2 | `/book`, `/tape`, `/charts`, `/heatmap`, `/compare`, `/zipper` each render | Tables/charts populated from fixtures | |
-| A3 | `/calc` calculators accept input and update | Numbers recompute on type | |
-| A4 | `/sdk`, `/brand-kit` render | Content present | |
-| A5 | `/account` while locked | Shows **"Account locked"**, key-setup entry, **no** account rows | |
-| A6 | `/account` → "Load account data" while locked | Refuses, explains unlock needed, **no** private network request | |
+| A1 | `/` Dashboard loads, no blank shell | Content, no console red | **PASS** — 17/17 routes render, 0 app console errors |
+| A2 | `/book`, `/tape`, `/charts`, `/heatmap`, `/compare`, `/zipper` each render | Tables/charts populated from fixtures | **PASS** — all render |
+| A3 | `/calc` calculators accept input and update | Numbers recompute on type | **NOT RUN** — input not exercised |
+| A4 | `/sdk`, `/brand-kit` render | Content present | **PASS** — render; prose not reviewed |
+| A5 | `/account` while locked | Shows **"Account locked"**, key-setup entry, **no** account rows | **PASS** — locked copy on `/account`, `/trade`, `/orders`, `/pnl`, `/transactions`; **0 data rows** in all five |
+| A6 | `/account` → "Load account data" while locked | Refuses, explains, **no** private request | **NOT RUN** — no key held, button not clicked. The locked *view* is asserted (A5) |
 
 ### B. Mobile — 360 × 640 (primary), then 390 × 844
 
-DevTools → toggle device toolbar → **iPhone SE / 360×640**. This is the priority viewport.
-
 | # | Check | Expected | Result |
 |---|---|---|---|
-| B1 | **No horizontal page scroll** — `document.documentElement.scrollWidth <= window.innerWidth` | True; if false, record which element overflows | |
-| B2 | **Sidebar becomes a drawer** (breakpoint is **960 px**, not 680) | Sidebar off-canvas by default | |
-| B3 | **Burger button opens the drawer**; backdrop dims the page | Drawer slides in; backdrop visible | |
-| B4 | **Drawer scroll lock** — page behind does not scroll while open | Body fixed | |
-| B5 | **Drawer closes** via backdrop tap / nav link / Escape | Returns to content; focus not lost | |
-| B6 | **Wide tables scroll inside their container** — `/account`, `/zipper`, `/compare` | Table scrolls horizontally **within** `.table-wrap`; the page does not | |
-| B7 | **Tap targets ≥ ~40 px** on primary nav and buttons | Comfortable; note any cramped ones | |
-| B8 | Text legible at 360 px; no clipped labels | No truncation without ellipsis | |
-| B9 | Rotate to landscape (640 × 360) | Layout holds; no overlap | |
-
-> **B1/B6 note.** F-02 was **retracted**: all 21 tables use `.table-wrap { overflow-x: auto }`. The only
-> open question is whether that wrapper scrolls correctly *inside* its parent at 360 px. If a table
-> pushes the whole page wide, that is a **genuine Low finding** — capture the element.
-> Likewise F-03 was retracted: the drawer exists with focus management
-> (`styles.css:2054–2090`, `Layout.tsx:164–280`). B2–B5 test *the rendered result*, not a missing feature.
+| B1 | **No horizontal page scroll** — `scrollWidth <= innerWidth` | True | **PASS** — exactly equal at 360, 390, 768, 1440 |
+| B2 | **Sidebar becomes a drawer** (breakpoint **960 px**) | Off-canvas by default | **PASS** — closed drawer at `x = -232` |
+| B3 | **Burger opens the drawer**; backdrop dims | Slides in; backdrop visible | **PASS** — opens to `x = 0`, backdrop present |
+| B4 | **Drawer scroll lock** | Body fixed | **PASS** — `body.overflow = hidden` |
+| B5 | **Drawer closes**; focus not lost | Returns to content | **PASS** — Escape → `x = -232`, focus returns to the burger, lock released |
+| B6 | **Wide tables scroll inside `.table-wrap`** | Table scrolls within; page does not | **PASS (page-level)** — every table is wrapped and the page never exceeds the viewport. The *inner* scroll of an oversized table was not exercised (one table per route at 360 px) |
+| B7 | **Tap targets ≥ ~40 px** | Comfortable | **FAIL → F-08** — `Disconnect` is **92×24**; app-wide smallest 17–30 px vs the repo's 44 px standard |
+| B8 | Text legible at 360 px; no clipped labels | No silent truncation | **NOT RUN** |
+| B9 | Rotate to landscape | Layout holds | **PASS** — 390×844 → 844×390, no overflow, burger reachable |
 
 ### C. Provenance banner
 
 | # | Check | Expected | Result |
 |---|---|---|---|
-| C1 | Banner appears after the first public response | *"Development wire samples used in this session."* with `role="note"` | |
-| C2 | Banner persists when navigating between tools | Still visible on other routes | |
-| C3 | Banner **not** shown before any public fetch | Absent on first paint | |
-| C4 | Private/account reads do not *use or trigger* wire-sample data | Account figures are not fixtures. The banner may **remain visible** from an earlier public fetch — `WireSampleNotice` states it "remains visible across tools", so a persisting banner is **not** a failure here; do not assert that it disappears | |
+| C1 | Banner appears after the first public response | *"Development wire samples used in this session."* with `role="note"` | **PASS** — exact copy observed |
+| C2 | Banner persists when navigating between tools | Still visible on other routes | **PASS (partial)** — present on each data route loaded directly; in-page navigation not separately asserted |
+| C3 | Banner **not** shown before any public fetch | Absent on first paint | **NOT RUN** |
+| C4 | Private reads do not use wire-sample data | Account figures are not fixtures | **BLOCKED** — needs a key |
 
 ### D. Keyboard navigation
 
-Unplug the mouse (or ignore it).
-
 | # | Check | Expected | Result |
 |---|---|---|---|
-| D1 | First `Tab` reveals **"Skip to main content"** | Visible on focus, jumps to `#main-workspace` | |
-| D2 | Tab through the full nav — every item focusable | Visible focus ring throughout | |
-| D3 | Focus order matches visual order | Left→right, top→bottom | |
-| D4 | No keyboard trap outside the drawer | Can always tab out | |
-| D5 | Drawer **is** a managed region (mobile): focus moves in, Escape closes, focus returns | Focus enters on open, returns to burger on close | |
-| D6 | Closed drawer is unreachable by Tab and hidden from AT | Skipped entirely | |
-| D7 | All interactive controls reachable and operable with `Enter`/`Space` | Buttons, toggles, period selectors | |
-| D8 | Visible focus indicator on every control | Not suppressed | |
+| D1 | First `Tab` reveals **"Skip to main content"** | Visible on focus, jumps to `#main-workspace` | **PASS** — `top 8px`, `outline 2px`; Enter moves focus to `MAIN` |
+| D2 | Tab through the full nav — every item focusable | Focus ring throughout | **PASS** — 21 Tabs to "Connect wallet" at 1440, 3 at 390 |
+| D3 | Focus order matches visual order | Left→right, top→bottom | **NOT ASSERTED** — order not compared against geometry |
+| D4 | No keyboard trap outside the drawer | Can always tab out | **PASS** — **0 repeated identities** across the sweep |
+| D5 | Drawer is a managed region | Focus in, Escape closes, focus returns | **PASS** |
+| D6 | Closed drawer unreachable by Tab / hidden from AT | Skipped entirely | **NOT ASSERTED** — closed-drawer links never entered the tab set, but this was not probed directly |
+| D7 | Controls operable with `Enter`/`Space` | Buttons, toggles, selectors | **PASS (partial)** — Enter verified on the skip link and wallet Connect; not every control |
+| D8 | Visible focus indicator everywhere | Not suppressed | **PASS (partial)** — verified on the skip link only |
+
+> **Note on the earlier "60 tabs, never reaches the wallet button" result: withdrawn.** It was a
+> harness artefact — the sweep identified controls by `classList[0]`, and the wallet button's first
+> class is not `.wallet-connect`. With class membership + stamped identity there is **no focus trap
+> and no tab-order defect** (`13` §3.1).
 
 ### E. Console and network
 
-Open DevTools → Console **and** Network before loading. Keep them open for all of §3.
+| # | Check | Expected | Result |
+|---|---|---|---|
+| E1 | **Zero console errors** on a clean load | No red | **PASS** — 17 routes |
+| E2 | No React warnings | No yellow React noise | **NOT ASSERTED** — only `error`-type messages were captured |
+| E3 | **No failed requests** except expected noise | All `/api/*` → 200 | **PASS** — every failure attributed: `assets.polyester.com` (blocked in sandbox) and `api.coingecko.com` (blocked on purpose). 0 app-origin failures |
+| E4 | No account/private endpoint while locked | Only public routes | **PASS** — **0 `/v1/` requests** through the whole vault flow |
+| E5 | No request carries credentials/tokens/signatures | Headers clean | **NOT ASSERTED** — request headers not captured |
+
+> **E3 addendum — `api.coingecko.com` is expected, not a defect.** `#/compare` fetches reference
+> prices from the free CoinGecko API (`apps/web/src/lib/coingecko.ts`), documented in `README.md:47`.
+> When blocked it degrades correctly: page renders, `role="alert"` reads *"Cannot reach the market data
+> service. CoinGecko reference feed: Failed to fetch"*, **no page error**.
+
+### G. Wallet connection — NEW (the phase under test)
+
+Synthetic EIP-1193 provider injected before load; every state below is the rendered result.
 
 | # | Check | Expected | Result |
 |---|---|---|---|
-| E1 | **Zero console errors** on a clean load | No red | |
-| E2 | No React warnings (keys, controlled inputs, hydration) | No yellow React noise | |
-| E3 | **No failed requests** except the dev-only HMR socket (see note) | All `/api/*` → 200 | |
-| E4 | No request to any account/private endpoint while locked | Only `/api/*` public routes | |
-| E5 | No request carries credentials, tokens, or signatures | Headers clean | |
+| G1 | No provider installed | "No wallet", no crash | **PASS** |
+| G2 | Idle with provider | "Connect wallet" | **PASS** |
+| G3 | Connect | address + chain + Disconnect | **PASS** — `0xabcd…ef01 / Ethereum / Disconnect` |
+| G4 | `accountsChanged` | Displayed address updates | **PASS** |
+| G5 | `chainChanged` | Chain badge updates | **PASS** — → Sepolia |
+| G6 | Accounts revoked (`accountsChanged: []`) | Returns to "Connect" | **PASS** |
+| G7 | Disconnect control | Returns to "Connect" | **PASS** |
+| G8 | **Rejected connection** (`4001`) | Error state + Retry, no uncaught error | **PASS** — title "Connection request was declined in your wallet." |
+| G9 | **Wallet already pending** (`-32002`) | Error state + Retry | **PASS** — title "Your wallet already has a pending request. Open it and finish that first." |
+| G10 | Keyboard: Tab → Enter connects (390 px) | Works | **PASS** — 3 tabs |
 
-> **E3 note — expected noise, not a defect.** Vite's HMR client opens a WebSocket. Through the preview
-> proxy it may fail and log one `WebSocket connection failed` message. That is the **dev server**, not
-> the app. **Ignore exactly that one**; anything else is a finding. If it makes E1/E3 hard to judge, say
-> so — a production build served statically has no HMR socket, but it also loses the fixture data that
-> makes populated tables testable, so the dev server is the right tool here.
+> **Not in this pass:** a *real* wallet extension. You reported that a real wallet connected in the
+> preview; that stays **user-reported** evidence for W-10/W-11, not agent-verified (`07`).
 
-### F. Private API-key flow — **BLOCKED, do not run yet**
+### F. Private API-key flow
 
-Keep blocked until you have an authorized testnet key. When you do, use the app's **own onboarding
-form** in the browser. **Never paste the key into chat, a commit, a screenshot, or a log.**
-
-| # | Check | Status | To be run when |
+| # | Check | Status | Note |
 |---|---|---|---|
-| F1 | Create vault entry (passphrase ≥ 12 chars, confirmation must match) | **BLOCKED** | Key available |
-| F2 | Unlock → one private read succeeds | **BLOCKED** | Key available |
-| F3 | Exact sanitized error on a bad key (record code + one-line message, no key material) | **BLOCKED** | Key available |
-| F4 | Refresh: manual bypasses the 2-minute gate; visibility refresh respects it | **BLOCKED** | Key available |
-| F5 | Lock → no further private requests; cached data not served | **BLOCKED** | Key available |
-| F6 | Stale marker appears after the freshness window | **BLOCKED** | Key available |
+| F1 | Create vault entry (passphrase ≥ 12 chars, confirmation must match) | **PASS (local key)** | Created with a locally generated key; **exchange** key still blocked |
+| F2 | Unlock → one private read succeeds | **BLOCKED** | Needs an exchange key. Local encryption/unlock verified |
+| F3 | Exact sanitized error on a bad key | **BLOCKED** | Needs an exchange key |
+| F4 | Refresh gate / visibility refresh | **BLOCKED** | Needs a key |
+| F5 | Lock → no further private requests; cache not served | **PASS (local)** | **0 `/v1/`** while locked |
+| F6 | Stale marker after the freshness window | **BLOCKED** | Needs a key |
+
+### H. Vault behaviour on a local key — NEW
+
+| # | Check | Expected | Result |
+|---|---|---|---|
+| H1 | Create + encrypt | Entry listed, unlocked in memory | **PASS** — heading "Unlocked: probe-key" |
+| H2 | Plaintext passphrase never rendered | Absent from the DOM text | **PASS** |
+| H3 | Lock | Back to "Vault locked" | **PASS** |
+| H4 | **Wrong passphrase** | Does **not** unlock | **PASS** — stays "Vault locked" |
+| H5 | Wrong passphrase feedback | A clear error | **PASS** — `role="alert"`: "The entry could not be unlocked. The passphrase may be wrong or the encrypted record may have changed." |
+| H6 | Wrong passphrase clears the field | Field empty | **PASS** |
+| H7 | Correct passphrase | Unlocks | **PASS** |
+| H8 | No private request during create/lock/unlock | 0 `/v1/` | **PASS** |
+| H9 | Delete requires confirmation | Dialog | **PASS** — "Delete encrypted entry?" |
+| H10 | Entry removed | Gone from the list | **PASS** |
+
+> **Correction to an earlier claim in this pass.** A freshly created entry is **unlocked in memory
+> immediately**, so probing a wrong passphrase right after creation proves nothing. The "unlocks
+> without the passphrase" observation was that state, not a bypass. Locked first, the wrong
+> passphrase fails — **no vulnerability**.
 
 ---
 
-## 4. What to send back
+## 4. What is still worth a human pass
 
-For each **FAIL**, this is the minimum that makes it actionable:
+Most of §3 is now executed. Only these remain, and none needs a wallet or an exchange key:
 
-1. Check ID (e.g. `B6`)
-2. Viewport (e.g. `360×640`)
-3. What you saw vs what §3 says to expect
-4. The overflowing/misbehaving element — DevTools → right-click → *Copy → Copy selector*
-5. Console/network line **with any query string or header values from a private request removed**
+| Check | Why it is still open | Effort |
+|---|---|---|
+| A3 | Calculator input/recompute never exercised | ~1 min |
+| A6 | "Load account data" while locked — no key held | ~1 min |
+| B6 (inner scroll) | Only one table per route at 360 px, so the *inner* scroll of a wide table was never forced | ~2 min on `#/account` with data |
+| B8 | Text clipping at 360 px not measured | ~1 min |
+| C3 | Banner absence before the first fetch | ~30 s |
+| D3, D6, D8 | Focus *order* vs geometry, closed-drawer reachability, focus ring on every control | ~3 min |
+| E2, E5 | Console **warnings**, request **headers** | ~2 min |
 
-For **PASS** rows, the check IDs alone are enough (`A1–A6, B1–B9, C1–C4, D1–D8, E1–E5 pass`).
+Everything else in §3 carries a result. For a FAIL, give the check ID, the viewport, and the
+misbehaving selector (DevTools → *Copy → Copy selector*), with any private header or query value
+removed.
 
 ---
 
 ## 5. What this pass can and cannot establish
 
-| After a clean pass, you may claim | You still may **not** claim |
+| Now supported by executed evidence | Still **not** established |
 |---|---|
-| The app renders correctly at 360 px and desktop | That live exchange behaviour is correct |
-| The drawer opens, closes, and manages focus | That API-key onboarding works against the exchange |
-| Tables scroll inside their containers | That error states behave correctly on a real failure |
-| Keyboard traversal is complete | That the app is release-ready |
-| No console errors at runtime | That wallet-first work can build on a verified UI baseline |
+| The app renders at 360, 390, 768, 1280, 1440, 1920 px with no horizontal overflow | That live exchange behaviour is correct |
+| The drawer opens, closes, locks scroll, and manages focus | That API-key onboarding works against the exchange |
+| Tables are wrapped and the page never overflows | That stale/401/403 states behave on a real failure |
+| Keyboard traversal is complete and untrapped (21/3 tabs, no repeats) | That touch targets meet the repo's own 44 px standard — they **do not** (F-08) |
+| Wallet connect/disconnect/`accountsChanged`/`chainChanged`/rejection/pending all render correctly | That a real wallet extension behaves identically (user-reported only) |
+| The local vault encrypts, locks, rejects a wrong passphrase with an alert, and deletes | That a real exchange key unlocks one private read |
+| No app-origin console or page errors on 17 routes | That the app is release-ready, or that CSP is correct as served |
 
-A clean pass clears checklist items **13–18 and 20** in `13` §3. Item **19 (CSP/security headers as
-served) is not clearable from a Vite dev server** — it needs a Pages preview or the
-`deployment-security.test.mjs` source check. A clean pass plus item 19 moves the verdict from
-**BLOCKED** to **pass with limitations**, with the private path still blocked. It does not make the
-product release-ready.
+A clean pass clears items **5, 9, 10, 13–17 and 20** in `13` §3. It **cannot** clear item 19 (CSP is
+applied at the Pages layer, not by the dev server) and it cannot clear the credential-bound items
+6, 7, 8, 11 and part of 12. Touch targets are now a **measured defect (F-08)**, not a pass.
 
 ---
 
@@ -191,10 +233,12 @@ product release-ready.
 
 | | |
 |---|---|
-| Validation verdict | **BLOCKED**, unchanged (`13`) |
-| Hypotheses retracted | **F-02, F-03** — source contradicts both (`13` §4.1) |
+| Validation verdict | **BLOCKED** — reduced to credentials + CSP, not tooling (`13` §5) |
+| Browser pass | **executed** — 35/35 checks, plus 7 vault and 6 layout checks (`13` §3.1) |
+| Hypotheses retracted | **F-02, F-03** — source contradicts both; the 360 px render confirms it (`13` §4.1) |
 | Findings verified | F-01, F-04, F-05, F-07 |
+| Findings measured | **F-08** — touch targets, pre-existing and app-wide (`13` §4.2) |
 | Findings inspected-only | F-06 |
-| NBA-5 | **on hold** pending this pass |
+| NBA-5 | wallet connection **works**; real-wallet evidence is user-reported only |
 | PR #8 | open, unmerged; this runsheet is documentation |
-| Source / dependencies | unchanged |
+| Source / dependencies | unchanged by this pass |

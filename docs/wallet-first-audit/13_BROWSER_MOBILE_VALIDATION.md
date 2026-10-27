@@ -153,36 +153,83 @@ Legend: **V** verified · **F** failed · **B** blocked · **NT** not tested.
 
 | # | Flow | Status | Evidence / reason |
 |---|---|---|---|
-| 1 | App builds and all routes mount | **V** | §2.1 build, §2.2 12/12 routes |
-| 2 | 318 unit/SSR tests | **V** | §2.1 |
-| 3 | Dev server serves app shell and hash deep links | **V** | §2.3 |
+| 1 | App builds and all routes mount | **V** | §2.1 build; §3.1 — 17/17 routes render in Chromium |
+| 2 | Unit + gate tests | **V** | §2.1; `npm test` 370/370 |
+| 3 | Dev server serves app shell and hash deep links | **V** | §2.3; every §3.1 run deep-links directly |
 | 4 | Public-data path returns `testnet`-scoped payloads | **V** (dev only, wire samples) | §2.3 |
-| 5 | Locked/unsigned state shows onboarding, not account data | **V** (markup level) | §2.2 — "Account locked", no data rows |
-| 6 | **API-key setup with a real key** | **B** | No test account or key supplied; no browser |
-| 7 | **Key validation / registry check against the exchange** | **B** | Requires credentials + live endpoint |
+| 5 | Locked/unsigned state shows onboarding, not account data | **V (browser)** | `#/account`, `/trade`, `/orders`, `/pnl`, `/transactions`: locked/onboarding copy present, **0 `tbody tr`** in all five |
+| 6 | **API-key setup with a real exchange key** | **B** | No authorized testnet key — unchanged. The *local* key vault path was exercised instead (§3.1 E) |
+| 7 | **Key validation / registry check against the exchange** | **B** | Requires an authorized testnet key + live endpoint |
 | 8 | **Invalid-key and malformed-key error handling (live)** | **B** | Requires credentials; copy path inspected only |
-| 9 | **Passphrase create / unlock / re-unlock / delete entry** | **B** | Requires browser (IndexedDB, Web Crypto in-page) |
-| 10 | **Lock behaviour and "no private request while locked"** | **B** | Requires browser + network panel |
+| 9 | **Passphrase create / unlock / re-unlock / delete entry** | **V (browser)** | §3.1 E1–E10 |
+| 10 | **Lock behaviour and "no private request while locked"** | **V (browser)** | §3.1 E3, E8: **0 `/v1/` requests** across create → lock → wrong unlock → unlock |
 | 11 | **Portfolio load / refresh / per-period caches** | **B** | Requires credentials |
-| 12 | **Empty / loading / stale / unauthorized / network-error states (rendered)** | **B** | Requires browser or a live owner instance; copy mapping inspected (§2.4) |
-| 13 | **Desktop layout at 1280–1920 px** | **B** | No browser |
-| 14 | **Mobile layout at 360–430 px, orientation change** | **B** | No browser |
-| 15 | **Horizontal overflow on wide tables** | **B** | No browser; hypothesis raised as F-02 |
-| 16 | **Console errors / failed requests** | **B** | No browser to capture them |
-| 17 | **Keyboard traversal, focus order, skip link activation** | **B** | No browser; skip link exists in source |
-| 18 | **Touch target sizes** | **B** | No browser |
-| 19 | **CSP / security headers as served** | **B** in dev | `_headers` is applied by Cloudflare Pages, not the dev server; file content is covered by `deployment-security.test.mjs` |
-| 20 | Wire-sample provenance banner visible | **B** | No browser |
+| 12 | **Empty / loading / stale / unauthorized / network-error states (rendered)** | **V (partial)** | Browser: network-error (blocked reference feed → explicit `role="alert"`, no page error, no blank screen), wallet error states, vault error alert. **Stale re-auth and live 401/403 still need an owner instance → B** |
+| 13 | **Desktop layout at 1280–1920 px** | **V (browser)** | 1280, 1440, 1920: `scrollWidth == innerWidth`, sidebar `display:flex` |
+| 14 | **Mobile layout at 360–430 px, orientation change** | **V (browser)** | 360×640 and 390×844 clean; 390×844 → 844×390 resize keeps `scrollWidth == innerWidth`, burger stays reachable. **430 px not swept** |
+| 15 | **Horizontal overflow on wide tables** | **V (browser)** | Every table sits inside `.table-wrap` at 360/390/768/1440 and the document never exceeds the viewport — the §4.1 residual risk is **closed** |
+| 16 | **Console errors / failed requests** | **V (browser)** | 17 routes: **0 app-origin console errors, 0 page errors**. All failed requests attributed to blocked `assets.polyester.com` CDN and the deliberately blocked CoinGecko feed (§3.1 F) |
+| 17 | **Keyboard traversal, focus order, skip link activation** | **V (browser)** | 21 Tabs to "Connect wallet" at 1440, 3 at 390, **no repeated identity** (no trap); skip link visible on focus (`outline 2px`, top 8) and moves focus to `main`; drawer focus/scroll-lock/return verified |
+| 18 | **Touch target sizes** | **F** | **Measured, not assumed.** `Disconnect` 92×24; app-wide smallest controls 17–30 px against the repo's own **44 px** standard (`docs/audit/UX_AUDIT.md:23`). Pre-existing, app-wide — **F-08** |
+| 19 | **CSP / security headers as served** | **B** in dev | `_headers` is applied by Cloudflare Pages, not the dev server; file content is covered by `deployment-security.test.mjs`. Needs a Pages preview |
+| 20 | Wire-sample provenance banner visible | **V (browser)** | Rendered on every data route: "Development wire samples used in this session. Some public responses are captured or derived fixtures…" |
 | 21 | Order placement, signing, mutations | **NT by design** | Out of scope; none attempted |
 
-**Totals: 5 verified, 0 failed, 15 blocked, 1 not tested** (findings: F-01, F-04, F-05, F-07 verified; F-02, F-03 retracted; F-06 inspected-only).
+**Totals: 13 verified, 1 partial, 1 failed, 5 blocked, 1 not tested** (21 items).
+Findings: F-01, F-04, F-05, F-07 verified; F-02, F-03 retracted; **F-08 measured (Low, pre-existing)**;
+F-06 inspected-only.
+
+### 3.1 Browser evidence — how these were produced
+
+Executed, not inferred. Chromium (headless) against the running preview on
+`http://127.0.0.1:5199`, driven by `puppeteer-core`. All non-app requests were intercepted and
+aborted so that a sandbox network restriction could never be mistaken for an app defect, and every
+aborted request was recorded and attributed (§3.1 F). Harnesses: `final.mjs` (35 checks, 35 pass),
+`gate2.mjs` + `errprobe.mjs` (vault, 7 checks), `last.mjs` (6 checks).
+
+| Group | Checks | Result |
+|---|---|---|
+| A — wallet: no provider, idle, connect, `accountsChanged`, `chainChanged`, `accounts → []`, disconnect, page errors, `4001`, `-32002` | A1–A10 | **10/10 pass** |
+| B — keyboard: Tab to Connect @390, Enter connects, skip link focus + activation, drawer open/Escape/return/scroll-lock | B1–B6 | **6/6 pass** |
+| C — 17 routes render, no app console errors | C1 | **pass** — see F below for the one non-app host |
+| D — 360/390/768/1440: no overflow, wallet fits, tables wrapped | D×8 | **8/8 pass** |
+| E — API-key vault, locally generated key: create/encrypt, no plaintext echo, lock, **wrong passphrase**, error alert, field cleared, correct unlock, no `/v1/`, delete dialog, removal | E1–E10 | **10/10 pass** |
+| L — desktop 1280/1440/1920, orientation change, locked routes, provenance banner | L×6 | **6/6 pass** |
+
+**Two harness defects found and fixed** (worth recording, because both produced *false* results
+earlier in this pass):
+
+1. **The "60 tabs and never reaches the wallet button" result was a harness artefact.** The sweep
+   identified each control by `classList[0]`, and the wallet button's first class is not
+   `.wallet-connect`. Using class *membership* plus a stamped `data-tabi` identity gives 21 tabs at
+   1440 and 3 at 390 with **zero identity repeats**. There is **no focus trap and no tab-order
+   defect**. The earlier observation is withdrawn.
+2. **The apparent "unlocks with a wrong passphrase" was an unlocked entry, not a bypass.** Entries
+   are **unlocked in memory immediately after creation**, so a wrong-passphrase probe on a
+   freshly-created entry proves nothing. Locking first and then submitting a wrong passphrase on the
+   dedicated `aria-label="Passphrase to unlock selected entry"` field: heading stays **"Vault
+   locked"**, a `role="alert"` reads "The entry could not be unlocked. The passphrase may be wrong or
+   the encrypted record may have changed.", the field is cleared, and only the correct passphrase
+   unlocks. **No bypass.** (The first failing assertion was my own regex missing "could not be
+   unlocked", not a missing message.)
+
+### 3.2 What the browser pass did *not* establish
+
+- No exchange key was used, so **items 6, 7, 8, 11 and the stale/401/403 half of item 12 remain
+  blocked** by credentials, not by tooling.
+- CSP (item 19) is still a Pages-layer property; the dev server cannot show it.
+- The 430 px breakpoint was not swept (360, 390, 768, 844×390 landscape, 1280, 1440, 1920 were).
+- `assets.polyester.com` could not be fetched from the sandbox, so **real brand image rendering is
+  unverified** — layout was measured with those requests aborted.
 
 ---
 
 ## 4. Findings
 
-No functional defect is asserted. Every finding below is either a tooling/environment fact or an
-**unverified hypothesis** for the browser pass to confirm or reject.
+The browser pass of §3.1 has now run. What it changed: the two hypotheses (F-02, F-03) were
+**retracted**, and one **measured** defect (F-08) replaced them. No wallet, keyboard, layout or
+vault defect was found; the defects below are a build-ordering quirk, an environment fact, and an
+app-wide CSS convention.
 
 | ID | Severity | Finding | Evidence | Status |
 |---|---|---|---|---|
@@ -193,6 +240,7 @@ No functional defect is asserted. Every finding below is either a tooling/enviro
 | **F-05** | Info | **Dev public data is synthetic** (wire samples), `apiEnv: "testnet"`. Any data-accuracy conclusion drawn from a preview is invalid. | `/api/markets` → `{"apiEnv":"testnet",…}` from `docs/wire-samples` | **Verified** |
 | **F-06** | Info | 13 account error codes each map to a distinct, specific user sentence — including `CORS_BLOCKED` ("No proxy or public-data fallback was used") and `ACCOUNT_STALE`. This is inspection evidence only; **no live 401/403 was exercised**. | `AccountAnalytics.tsx:55–69` | **Inspected, not exercised** |
 | **F-07** | Info | Runtime reports `Node v22.22.3; engine >=24: FAIL`. Sandbox-only; every API probe passes. CI uses Node 24. | `npm run check:runtime` | **Verified (environmental)** |
+| **F-08** | Low (pre-existing, app-wide) | **Touch targets are below the repo's own minimum.** Measured in a 360 px viewport: `Disconnect` is **92×24 px**; the app-wide smallest interactive controls are `th-sort-btn` 17 px, `star-btn` 18×21, footer links 17, `row-action-btn` 22, `.btn.sm` 24, `.seg-btn` 24, `.btn.primary` 29, `.burger` 30. `docs/audit/UX_AUDIT.md:23` states a **44 px** minimum for account tabs, and `styles.css` uses `min-height:44px` in three places — but small buttons are consistently 24 px. **The wallet controls follow the existing `.btn.sm` convention, so this is not a regression introduced by wallet work**; it is a pre-existing gap between the documented standard and the stylesheet. | `styles.css` `.btn.sm`; measured geometry in §3.1 | **Measured, not fixed** (see §4.2) |
 
 ### 4.1 Correction — F-02 and F-03 are retracted (2026-10-27, post-commit review)
 
@@ -248,86 +296,31 @@ either fails, that is a genuine finding — with the source above as the expecte
 
 ---
 
-## 5. What is needed to clear the blocked checks
+### 4.2 Why F-08 is recorded but not fixed in this change
 
-> **The executable version of this section is [`14_MANUAL_BROWSER_PASS_RUNSHEET.md`](./14_MANUAL_BROWSER_PASS_RUNSHEET.md)** — URL, startup command, and a tick-box checklist.
+F-08 is a **real** measured deviation from a documented standard, but fixing it is not a
+wallet-connection change:
 
-**To unblock the browser pass — either works:**
+- The 24 px height comes from the shared `.btn.sm` class, used across markets, account, Compare and
+  the wallet cluster alike. Raising it changes control geometry on every page — a design decision
+  with visual-regression consequences, not a bug fix.
+- The wallet-first scope for this phase is wallet connectivity; a global density change would widen
+  the diff well beyond it and could not be validated per-page in the same pass.
+- `docs/audit/UX_AUDIT.md` already contains the standard, so the gap is **documented**, not silent.
 
-1. **A live preview of this branch.** A dev server is currently running from this checkout on
-   port **5199** (labelled *"PolyTools app (validation preview)"*). It renders the real app with
-   wire-sample public data, which is enough for layout, keyboard, overflow, console and responsive
-   checks. Any modern browser, plus one mobile viewport (360×640 and 390×844 suggested), would
-   clear items **13–18 and 20**. Item **19 (CSP/security headers as served) is not clearable this
-   way**: a Vite dev server emits no CSP — the policy comes from `apps/web/public/_headers` at the
-   Pages layer, so item 19 needs a Pages preview or the `deployment-security.test.mjs` source check.
-2. **Or a sandbox with a browser.** Chromium plus reachable CDN access (`cdn.playwright.dev` or
-   `storage.googleapis.com`). Neither is available here.
+Recommendation for a follow-up change (not this one): raise `.btn.sm` (and `th-sort-btn`,
+`star-btn`, `row-action-btn`) to a ≥44 px hit area — usually via padding or a `::after` overlay so
+visual density on desktop is preserved while the touch area grows.
 
-**To unblock the credential-dependent checks (items 6–12):**
+## 5. What is needed to clear the remaining blocked checks
 
-- An **authorized testnet** API key and its **registered key ID**, with testnet scope
-  (`888169`), used only for read-only operations. Supply it through the app's own onboarding form in a
-  browser session — **do not paste it into chat or into any file in this repository.**
-- Confirmation that use of that key for a read-only validation pass is authorized.
-- Without these, the private path remains **unverified by execution**, and no claim to the contrary
-  should be made. The 318 tests exercise the signing, vault, and state machinery with synthetic
-  fixtures — that is strong but it is **not** evidence of live API compatibility (`02` §7).
+The browser is **no longer** the blocker: the pass ran headless in this sandbox (§3.1). What remains
+blocked is blocked on **credentials and deployment surface**, not on tooling.
 
----
+| Item | Blocked on | Who can clear it |
+|---|---|---|
+| 6, 7, 8, 11, part of 12 | An **authorized Polyester testnet API key**, entered by you through the app's own onboarding UI. Do not send the key; paste it into the app yourself. | You, with a testnet key |
+| 12 (stale / 401 / 403) | A live owner instance with a key that can be made invalid, or an expired session | You, same session |
+| 19 (CSP as served) | A **Cloudflare Pages** preview of this branch — headers do not exist on the Vite dev server | A Pages deploy (**not authorised; do not deploy**) |
 
-## 6. Release-readiness verdict
-
-> ### **BLOCKED** — not "pass with limitations".
-
-The distinction matters. "Pass with limitations" would mean the specified validation ran and produced
-known gaps. It did not run: the two things it needs — a browser and an authorized test account — are
-both absent. What ran is a strong *build-and-render* validation, which is a different question from
-"does this work in a browser on a phone".
-
-| Claim | Supportable today? |
-|---|---|
-| The branch builds, typechecks, and passes 318 tests | **Yes** — verified |
-| Performance and contrast budgets hold | **Yes** — verified |
-| Every route mounts and the locked state is honest | **Yes** — verified at markup level |
-| The app renders correctly on desktop | **No** — blocked |
-| The app is usable on a phone | **No** — blocked |
-| Keyboard and screen-reader behaviour is sound | **No** — blocked (source signals only) |
-| There are no console errors at runtime | **No** — blocked |
-| API-key onboarding works against the exchange | **No** — blocked |
-| Error states behave correctly with a live failure | **No** — blocked |
-
-**No source, dependency, configuration, or PR scope was modified to produce this report.** All
-findings are reported for separate decision; none was fixed during the pass.
-
----
-
-## 7. Proposed fixes (not applied)
-
-Offered as separate recommendations, per the brief's instruction to report rather than fix.
-
-| For | Proposal |
-|---|---|
-| F-01 | Make `check-build-performance.mjs` emit a clear *"prerequisite: run build first"* skip rather than exit 1, or have the npm script depend on `build`. Low risk, tooling only. |
-| ~~F-02~~ | **No fix proposed** — the guard already covers 21/21 tables. Only test whether `.table-wrap` scrolls inside its parent at 360 px. |
-| ~~F-03~~ | **No fix proposed** — a complete drawer with focus management already exists at ≤960 px. Only verify it renders as intended. |
-| F-04 | Note in the validation guide that CSP is Pages-only; validate on the Pages preview URL, not `vite dev`. |
-| F-06 | When a key is available, add one recorded read-only 401 fixture from the exchange to lock the error mapping to reality rather than to our assumption of it. |
-
----
-
-## 8. Status at completion
-
-| Item | Value |
-|---|---|
-| Commit tested | `92d7fd4a0d0006f1c699779436a788b273712363` |
-| Checks run | `test`, `typecheck`, `build`, `check:performance`, `check:contrast`, `check:whitespace`, `check:dependencies`, `check:external`, `check:runtime`, SSR render harness, HTTP smoke |
-| Results | **all pass except `check:runtime`** (F-01 noted): 318/318 tests, 16/16 render, 5/5 HTTP. `check:runtime` reports every feature probe passing but **exits 1** on `engine >=24` under this sandbox's Node v22.22.3 — a sandbox limitation, not an app defect; CI runs Node 24 and passes |
-| Working tree | clean before and after (this document excepted) |
-| PR #8 | **OPEN**, mergeable — not merged, not deployed |
-| Merge/deploy | not performed |
-
-**Next executable step:** with a browser available (either the live preview or a browser-capable
-sandbox), re-run items 13–18 and 20 and record viewport-specific evidence (item 19 needs a Pages
-preview, not a dev server). Items 6–12 stay blocked until an
-authorized testnet key is supplied through the app's own form.
+Everything that a browser could settle has been settled. Re-running §3.1 requires nothing from you.
