@@ -303,6 +303,39 @@ selection). Suite total **392 pass**.
 **Still true:** a wallet that neither injects nor announces (disabled, or crashed before announcing)
 is undetectable by any dapp — the user must enable it. Discovery cannot fix a wallet that stays silent.
 
+### 3.1c Verified API surface + app-wide overflow fixes (2026-10-27)
+
+**New in the app:** the SDK guide now ends with a **Verified API surface** panel — 22 Connect RPC
+methods, each row declared by the installed SDK *and* observed working in an independent non-SDK
+client. It is filterable, groups by service, separates read from write, and prints the four field
+encodings that are easy to get wrong (`referencePriceScale` not a fixed 1e9, `baseQuantityScale`,
+u128 `{hi, lo}` amounts, numeric `symbolId`).
+
+The panel is **self-verifying**: `tests/api-surface.test.mjs` parses
+`node_modules/@polyester/sdk/dist/gen/**/*.d.ts` and fails if any listed RPC is not declared there.
+It also asserts that **no write RPC is referenced by application code**, so the page cannot drift
+into describing a read-only app as something that places orders. Auth requirements are stated only
+where the official reference states them; everything else reads *"not documented"* rather than
+being guessed.
+
+**Mobile defects found and fixed while verifying it (F-11).** The new panel overflowed at 360 px, and
+bisecting the DOM exposed the same class of bug on routes that predate this work:
+
+| Route | Before | After | Cause |
+|---|---|---|---|
+| `#/sdk` | 523 → 396 | **360** | `<select>` min-content = widest option; unbounded `1fr` track |
+| `#/book` | 421 | **360** | `.pill` label could not wrap or truncate |
+| `#/hub` | 371 | **360** | `.btn` call-to-action label exceeded the viewport |
+
+Fixes: `min-width: 0` on grid children, `max-width: 100%` on inputs/selects, `.pill` truncation,
+wrapping header-action buttons, and a scoped `overflow-wrap: anywhere` for dotted proto identifiers.
+**Re-verified across all 17 routes at 360 / 390 / 768 / 1440: no overflow anywhere, no console or
+page errors.**
+
+Note on §4.1: the earlier "21 tables, 21 wrappers, 100 %" count was about the *static* source and
+remains true. What it did not cover was elements that are not tables — pills, buttons, selects and
+long unbreakable identifiers — which is exactly where the real overflow was.
+
 ### 3.2 What the browser pass did *not* establish
 
 - No exchange key was used, so **items 6, 7, 8, 11 and the stale/401/403 half of item 12 remain
@@ -331,6 +364,8 @@ app-wide CSS convention.
 | **F-06** | Info | 13 account error codes each map to a distinct, specific user sentence — including `CORS_BLOCKED` ("No proxy or public-data fallback was used") and `ACCOUNT_STALE`. This is inspection evidence only; **no live 401/403 was exercised**. | `AccountAnalytics.tsx:55–69` | **Inspected, not exercised** |
 | **F-07** | Info | Runtime reports `Node v22.22.3; engine >=24: FAIL`. Sandbox-only; every API probe passes. CI uses Node 24. | `npm run check:runtime` | **Verified (environmental)** |
 | **F-08** | Low (pre-existing, app-wide) | **Touch targets are below the repo's own minimum.** Measured in a 360 px viewport: `Disconnect` is **92×24 px**; the app-wide smallest interactive controls are `th-sort-btn` 17 px, `star-btn` 18×21, footer links 17, `row-action-btn` 22, `.btn.sm` 24, `.seg-btn` 24, `.btn.primary` 29, `.burger` 30. `docs/audit/UX_AUDIT.md:23` states a **44 px** minimum for account tabs, and `styles.css` uses `min-height:44px` in three places — but small buttons are consistently 24 px. **The wallet controls follow the existing `.btn.sm` convention, so this is not a regression introduced by wallet work**; it is a pre-existing gap between the documented standard and the stylesheet. | `styles.css` `.btn.sm`; measured geometry in §3.1 | **Measured, not fixed** (see §4.2) |
+| **F-11** | Medium (pre-existing) — **fixed** | **Three routes overflowed a phone screen.** At 360 px, `#/book` reached **421 px**, `#/hub` **371 px**, `#/sdk` **523 px**; at 390 px, `#/book` still reached 421 and `#/sdk` 396. Four distinct causes: (1) a `<select>`'s min-content width is its **widest option**, so a long pair/provider name set a `1fr` grid track to 488 px; (2) a long dotted service heading (`auth.v1.SocialVerificationService`) has no break opportunity; (3) a `.pill` label ("▲ BID WALL @ 81,902.7 · …") could not wrap; (4) a `.btn` call-to-action label exceeded the viewport. | Measured per route/viewport; causes isolated by DOM bisection | **Fixed** — all 17 routes now report `scrollWidth === innerWidth` at 360, 390, 768, 1440 |
+
 | **F-09** | Low (copy) — **fixed** | **The in-app SDK guide printed a host that does not resolve.** `SdkGuide.tsx` showed `api-testnet.polyester.com` (lines 182, 183, 395); SDK 0.31.0 declares `apiUrl: "https://api.testnet.polyester.com"` and every other document uses the dotted name. `getent hosts api-testnet.polyester.com` → **no DNS record**; the dotted name resolves. Integrators copying the guide hit a dead host. | `apps/web/src/pages/SdkGuide.tsx`; DNS check 2026-10-27 | **Fixed** — canonical host in all 3 places, browser-verified |
 | **F-10** | Low (enhancement) — **implemented** | **Only one wallet could be offered.** The control read a single legacy `window.ethereum` (`defaultDetect()`), so with two or more EVM extensions the app offered whichever won the property and the other could not be chosen — including a wallet that failed to inject at all (Phantom, `evmAsk.js`, §3.1a). Now resolved by **EIP-6963** discovery: each announced wallet is a separate button, the selected provider is the one used, and the previous provider is detached. | `walletDiscovery.ts`, `WalletButton.tsx`, `walletConnection.ts:setProvider`; §3.1b | **Implemented** — 22 tests, 18/18 browser checks |
 

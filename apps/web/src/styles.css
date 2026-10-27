@@ -436,6 +436,13 @@ a:hover {
   flex-wrap: wrap;
 }
 
+/* A long call-to-action label ("Open SDK quickstart (TypeScript · Python ·
+   Rust)") cannot shrink below its nowrap width and overflowed small screens. */
+.page-header-actions .btn {
+  white-space: normal;
+  text-align: center;
+}
+
 .content {
   flex: 1;
   padding: 24px 32px 40px;
@@ -774,6 +781,13 @@ a:hover {
   display: grid;
   gap: 14px;
 }
+/* A grid track with `1fr` still floors at the item's min-content width, and a
+   <select>'s min-content width is its widest option. One long pair or provider
+   name could therefore push a 360px page to 523px. Let grid children shrink. */
+.grid > * {
+  min-width: 0;
+}
+
 .grid.cols-2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -837,6 +851,13 @@ a:hover {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  /* A pill carrying a long label ("▲ BID WALL @ 81,902.7 · …") used to widen a
+     360px page to 421px. Truncate instead of pushing the layout. */
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 2px 8px;
   border-radius: var(--radius-xs);
   font-size: 11.5px;
@@ -895,6 +916,13 @@ a:hover {
 /* Wallet chooser. The topbar keeps ONE control no matter how many wallets are
    installed; the list only appears on demand, so eight extensions cannot turn
    the header into a wall of buttons. */
+/* Long dotted proto identifiers ("auth.v1.SocialVerificationService") have no
+   break opportunity, so they widened a 360px page instead of wrapping. */
+.api-surface h3,
+.api-surface .mono {
+  overflow-wrap: anywhere;
+}
+
 .wallet-picker {
   position: relative;
   display: inline-flex;
@@ -1103,6 +1131,7 @@ a:hover {
 .input,
 .select {
   width: 100%;
+  max-width: 100%;
   background: var(--bg-shell);
   border: 1px solid var(--border-default);
   color: var(--text-primary);
