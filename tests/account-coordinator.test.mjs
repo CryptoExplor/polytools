@@ -1,5 +1,6 @@
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createServer } from "vite";
 import { fileURLToPath } from "node:url";
 
@@ -269,6 +270,75 @@ describe("Account data coordinator (synthetic authenticated transport)", () => {
     assert.equal(calls.every(({ init }) => init.method === "GET" && init.body === undefined), true);
     const fillCall = calls.find(({ url }) => new URL(url).pathname === "/v1/spot/trades");
     assert.match(fillCall.url, /startTime=2026-01-01T00%3A00%3A00.000Z/);
+  });
+
+  it("keeps the activation disclosure aligned with the actual broad read bundle", async () => {
+    const vault = await connected();
+    const catalogCalls = [];
+    const pair = { symbolId: 1, symbol: "BTC-USDT", baseAsset: "BTC", quoteAsset: "USDT" };
+    const catalog = await account.fetchOfficialSpotCatalog({
+      fetchImpl: async (url, init) => {
+        catalogCalls.push({ url, init });
+        return jsonResponse({ tsSec: "1767225600", assets: [], pairs: [pair] });
+      },
+    });
+    const restCalls = [];
+    const { coordinator } = makeCoordinator(vault, successRouter(restCalls));
+    const options = { range: "7d", markets: catalog.markets };
+    await Promise.all([
+      coordinator.loadAll(options),
+      coordinator.loadBalanceHistory(options),
+      coordinator.loadOpenOrders(options),
+    ]);
+
+    const actualPaths = [...new Set(restCalls.map(({ url }) => new URL(url).pathname))].sort();
+    assert.deepEqual(actualPaths, [
+      "/v1/balances",
+      "/v1/balances/history",
+      "/v1/equity/history/series",
+      "/v1/orders/history",
+      "/v1/orders/open",
+      "/v1/spot/fee-rates",
+      "/v1/spot/trades",
+      "/v1/transfers",
+    ].sort());
+    assert.equal(catalogCalls.length, 1);
+    assert.equal(new URL(catalogCalls[0].url).pathname, "/v1/spot/config");
+    assert.equal(catalogCalls[0].init.method, "GET");
+    assert.equal(restCalls.every(({ init }) => init.method === "GET" && init.body === undefined), true);
+
+    const source = await readFile(new URL("../apps/web/src/components/AccountAnalytics.tsx", import.meta.url), "utf8");
+    const disclosureStart = source.indexOf("<strong>Before loading account data:</strong>");
+    assert.notEqual(disclosureStart, -1, "the read scope remains disclosed before the activation controls");
+    const disclosureEnd = source.indexOf("</div>", disclosureStart);
+    const disclosure = source.slice(disclosureStart, disclosureEnd);
+    for (const label of [
+      "official spot-market catalog",
+      "balances",
+      "equity history",
+      "order history",
+      "fills",
+      "transfers",
+      "fee rates",
+      "balance history",
+      "open orders",
+      "document becomes visible",
+    ]) {
+      assert.ok(disclosure.includes(label), `disclosure should name ${label}`);
+    }
+
+    const owner = await readFile(new URL("../apps/web/src/lib/accountSessionOwner.ts", import.meta.url), "utf8");
+    assert.match(owner, /this\.fetchCatalog\(\{ signal: request\.controller\.signal \}\)/);
+    assert.match(owner, /this\.coordinator\.loadAll\(options\)/);
+    assert.match(owner, /this\.coordinator\.loadBalanceHistory\(options\)/);
+    assert.match(owner, /this\.coordinator\.loadOpenOrders\(options\)/);
+    assert.match(owner, /if \(!options\.explicit && !this\.state\.activated\) return Promise\.resolve\(\)/);
+    assert.match(owner, /this\.inFlight\?\.key === key/);
+
+    const portfolio = await readFile(new URL("../apps/web/src/pages/Portfolio.tsx", import.meta.url), "utf8");
+    assert.match(portfolio, /document\.addEventListener\("visibilitychange", onVisibility\)/);
+    assert.match(portfolio, /refreshIfActivated/);
+    assert.match(portfolio, /privateAnalyticsActive/);
   });
 
   it("loads typed open orders independently, including an omitted exhausted cursor", async () => {

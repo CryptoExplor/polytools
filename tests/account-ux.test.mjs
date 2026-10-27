@@ -104,16 +104,17 @@ describe("Account UX source and cache isolation", () => {
 
     assert.ok(!portfolio.includes("<Tape"));
     assert.ok(!portfolio.includes("<Book"));
-    assert.ok(portfolio.includes('view="trades"'));
-    assert.ok(portfolio.includes('view="orders"'));
-    assert.ok(portfolio.includes('view="transfers"'));
+    assert.ok(portfolio.includes('section === "trade"\n    ? "trades"'));
+    assert.ok(portfolio.includes('section === "orders"\n      ? "orders"'));
+    assert.ok(portfolio.includes('section === "transactions"\n          ? "transfers"'));
+    assert.ok(portfolio.includes('<AccountAnalytics owner={accountDataOwner} session={session} view={analyticsView} active={privateAnalyticsActive} />'));
     assert.ok(!analytics.includes("api.trades"));
     assert.ok(!analytics.includes("/api/trades"));
     assert.ok(!analytics.includes("../lib/api"));
     assert.ok(app.includes('path="book" element={<Book />}'));
     assert.ok(app.includes('path="tape" element={<Tape />}'));
     assert.ok(tape.includes("api.trades(symbol, 50)"));
-    assert.ok(tape.includes("No account key is used"));
+    assert.ok(tape.includes("Public data — not your fills"));
   });
 
   it("keeps the public trades request free of account authentication headers", async () => {
@@ -167,49 +168,82 @@ describe("Account UX source and cache isolation", () => {
     assert.ok(rest.includes('redirect: "error"'));
   });
 
-  it("wires private transfers separately from the explicit public Flow lookup", () => {
+  it("wires private transfers to the shared owner and keeps public Flow lookup credential-free", () => {
     const portfolio = source("apps/web/src/pages/Portfolio.tsx");
     assert.ok(portfolio.includes('scope === "mine"'));
-    assert.ok(portfolio.includes('<AccountAnalytics accountVault={accountVault} session={session} view="transfers" />'));
-    assert.ok(portfolio.includes(") : <Flow embedded />}"));
+    assert.ok(portfolio.includes('scope === "all" ? <Flow embedded />'));
+    assert.ok(portfolio.includes('section === "transactions" && movementScope === "mine"'));
+    assert.ok(portfolio.includes("accountDataOwner.setActive(privateAnalyticsActive)"));
+    assert.ok(portfolio.includes('<AccountAnalytics owner={accountDataOwner} session={session} view={analyticsView} active={privateAnalyticsActive} />'));
     assert.ok(portfolio.includes("Public transaction lookup"));
-    assert.ok(portfolio.includes("not a feed of every transaction"));
+    assert.ok(portfolio.includes("Single lookup, not a feed."));
+  });
+
+  it("gates refresh and private rendering to active private Account views", () => {
+    const portfolio = source("apps/web/src/pages/Portfolio.tsx");
+    const analytics = source("apps/web/src/components/AccountAnalytics.tsx");
+    assert.ok(portfolio.includes("if (!privateAnalyticsActive) return"));
+    assert.ok(portfolio.includes("privateAnalyticsActiveRef.current && document.visibilityState === \"visible\""));
+    assert.ok(analytics.includes("owner?.setRange(range)"));
+    assert.ok(!analytics.includes("refreshIfActivated"), "tab changes select cached data without auto-refreshing");
+    assert.ok(analytics.includes("if (!active) return null;"));
+    assert.ok(analytics.includes("return owner.load({ explicit, secureContext, range })"));
+    assert.equal(render(React.createElement(AccountAnalytics, { session: null, active: false })), "");
+  });
+
+  it("keeps periods local to each view, caches them in the owner, and scopes errors to relevant datasets", () => {
+    const analytics = source("apps/web/src/components/AccountAnalytics.tsx");
+    const owner = source("apps/web/src/lib/accountSessionOwner.ts");
+    assert.ok(analytics.includes("const [rangesByView, setRangesByView] = useState(DEFAULT_VIEW_RANGES)"));
+    assert.ok(analytics.includes("const range = rangesByView[view]"));
+    assert.ok(analytics.includes("ownerState.periods[range] ?? EMPTY_RANGE_STATE"));
+    assert.ok(analytics.includes("rangeErrors.balanceHistory ? [rangeErrors.balanceHistory] : []"));
+    assert.ok(analytics.includes("view === \"orders\" && rangeErrors.openOrders"));
+    assert.ok(analytics.includes("account-session-status__controls"));
+    assert.ok(!analytics.includes('className="account-view-controls'));
+    assert.ok(owner.includes("ACCOUNT_DATA_FRESHNESS_MS = 2 * 60 * 1000"));
+    assert.ok(owner.includes("periods: { ...this.state.periods, [range]: next }"));
+    assert.ok(owner.includes("mergeImportedHistory(\n    identity: AccountSessionIdentity"));
   });
 });
 
 describe("Account per-view rendering and empty states", () => {
+  it("keeps page titles at the route level instead of repeating them in the analytics panel", () => {
+    const portfolio = source("apps/web/src/pages/Portfolio.tsx");
+    const analytics = source("apps/web/src/components/AccountAnalytics.tsx");
+    assert.ok(portfolio.includes("<PageHeader"));
+    assert.ok(portfolio.includes("title={header.title}"));
+    assert.ok(!analytics.includes("title={copy.title}"));
+    assert.ok(!analytics.includes("subtitle={copy.subtitle}"));
+  });
+
   const cases = [
     {
       view: "overview",
-      title: "Account overview",
       empty: "No account data loaded",
       load: "Load account data",
       forbidden: ["Your Trades and Actual Fees", "Order history", "Money Movements"],
     },
     {
       view: "trades",
-      title: "Your Trades",
       empty: "Your Trades are not loaded",
       load: "Load account data",
       forbidden: ["Current balances", "Order history", "Money Movements", "Current fee rates"],
     },
     {
       view: "orders",
-      title: "Your Orders",
       empty: "Your Orders are not loaded",
       load: "Load account data",
       forbidden: ["Your Trades and Actual Fees", "Current balances", "Money Movements"],
     },
     {
       view: "transfers",
-      title: "Money Movements",
       empty: "Your money movements are not loaded",
       load: "Load account data",
       forbidden: ["Your Trades and Actual Fees", "Order history", "Current balances"],
     },
     {
       view: "pnl",
-      title: "Profit and Loss",
       empty: "Profit and loss inputs are not loaded",
       load: "Load account data",
       forbidden: ["Your Trades and Actual Fees", "Order history", "Current balances", "Money Movements"],
@@ -219,7 +253,6 @@ describe("Account per-view rendering and empty states", () => {
   for (const testCase of cases) {
     it(`renders only the ${testCase.view} initial view and its own empty copy`, () => {
       const html = renderAccount(testCase.view);
-      assert.ok(html.includes(testCase.title));
       assert.ok(html.includes(testCase.empty));
       assert.ok(html.includes(testCase.load));
       for (const forbidden of testCase.forbidden) assert.ok(!html.includes(forbidden), forbidden);
@@ -232,8 +265,8 @@ describe("Account per-view rendering and empty states", () => {
 
   it("uses the session-aware empty description instead of the locked copy after unlock", () => {
     const html = renderAccount("trades", { generation: "synthetic-generation", registeredKeyId: "ak_synthetic" });
-    assert.ok(html.includes("Choose Load account data"));
-    assert.ok(!html.includes("Unlock a registered read-only key, then choose Load account data"));
+    assert.ok(html.includes("Load account data"));
+    assert.ok(!html.includes("Set up or unlock a read-only key in API setup"));
   });
 
   it("renders the locked private transfers state with public lookup as a separate choice", () => {
@@ -244,10 +277,10 @@ describe("Account per-view rendering and empty states", () => {
         React.createElement(Portfolio),
       ),
     );
-    assert.ok(html.includes("Unlock an account to view your transfers"));
-    assert.ok(html.includes("No private request is made while locked"));
+    assert.ok(html.includes("Unlock to view your transfers"));
+    assert.ok(html.includes("No private request while locked"));
     assert.ok(html.includes("Public transaction lookup"));
-    assert.ok(html.includes("credential-free search"));
+    assert.ok(html.includes("Set up a key or use public lookup"));
     assert.ok(!html.includes("Public flow lookup results"));
   });
 

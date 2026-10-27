@@ -14,6 +14,7 @@ import { dec, fmtNum, price, splitSymbol } from "@poly/core";
 import { api } from "../lib/api";
 import { formatCompactQuoteNotional } from "../lib/format";
 import { decodeHeatmapBuckets, HEATMAP_PRICE_BINS, inspectHeatmapCell } from "../lib/heatmap";
+import { heatmapForRequest } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -138,6 +139,11 @@ export function HeatmapPage() {
       6000,
       [symbol, interval, depth, windowSec],
     );
+  const currentData = heatmapForRequest(data, symbol, interval, depth);
+  const requestIdentityError = data && !currentData
+    ? "Heatmap response did not match the selected symbol, interval, or depth; it was not displayed."
+    : null;
+  const displayError = requestIdentityError ?? error;
 
   // Resize observer for responsive canvas
   useEffect(() => {
@@ -158,8 +164,8 @@ export function HeatmapPage() {
   }, []);
 
   const decoded = useMemo(
-    () => decodeHeatmapBuckets(data?.buckets ?? []),
-    [data],
+    () => decodeHeatmapBuckets(currentData?.buckets ?? []),
+    [currentData],
   );
 
   // Draw 2D canvas heatmap
@@ -319,9 +325,9 @@ export function HeatmapPage() {
         badge={<Pill kind="accent">{symbol}</Pill>}
         actions={
           <DataFreshness
-            updatedAt={updatedAt}
+            updatedAt={currentData ? updatedAt : null}
             refreshing={refreshing}
-            error={error}
+            error={displayError}
             intervalSec={6}
             paused={paused}
             onTogglePause={() => setPaused(!paused)}
@@ -377,16 +383,16 @@ export function HeatmapPage() {
         </div>
       </div>
 
-      <ErrorBox error={error} onRetry={refresh} hasStaleData={Boolean(data)} />
-      {loading && !data && <Loading lines={7} />}
+      <ErrorBox error={displayError} onRetry={refresh} hasStaleData={Boolean(currentData)} />
+      {loading && !currentData && <Loading lines={7} />}
 
-      {data && decoded && (
+      {currentData && decoded && (
         <>
           <MetricStrip>
             <MetricCell
               label="Time Buckets"
-              value={<span className="mono">{data.bucketCount ?? decoded.buckets.length}</span>}
-              sub={`${data.interval} buckets · quantityMode: ${data.quantityMode ?? "close"}`}
+              value={<span className="mono">{currentData.bucketCount ?? decoded.buckets.length}</span>}
+              sub={`${currentData.interval} buckets · quantityMode: ${currentData.quantityMode ?? "close"}`}
             />
             <MetricCell
               label={
@@ -426,8 +432,8 @@ export function HeatmapPage() {
               label="Last Persisted Snapshot"
               value={
                 <span className="mono">
-                  {data.lastPersistedTsSec
-                    ? new Date(data.lastPersistedTsSec * 1000)
+                  {currentData.lastPersistedTsSec
+                    ? new Date(currentData.lastPersistedTsSec * 1000)
                         .toISOString()
                         .slice(11, 19) + " UTC"
                     : "—"}
@@ -439,7 +445,7 @@ export function HeatmapPage() {
 
           <Card
             title={`Resting Liquidity Density (${symbol} · ${interval})`}
-            subtitle="Green = resting bid depth · Red = resting ask depth · Lines trace best bid & best ask"
+            subtitle="Green = bid depth · Red = ask depth · Lines trace best bid/ask"
             actions={
               hoverCell ? (
                 <span className="mono" style={{ fontSize: 12 }}>
@@ -471,7 +477,7 @@ export function HeatmapPage() {
           <div className="mt-3">
             <Card
               title="Most Persistent Liquidity Price Bands"
-              subtitle="Price bands holding the largest cumulative resting order book volume across the window"
+              subtitle="Price bands with the most cumulative resting volume in the window"
               flush
             >
               <div className="table-wrap">
@@ -511,11 +517,11 @@ export function HeatmapPage() {
         </>
       )}
 
-      {data && !decoded && !loading && (
+      {currentData && !decoded && !loading && (
         <Card>
           <EmptyState
             title="No resting orders in this window"
-            description="The response had no levels, or every level had zero size. Try a longer window or another market."
+            description="No levels, or every level had zero size. Try a longer window or another market."
           />
         </Card>
       )}

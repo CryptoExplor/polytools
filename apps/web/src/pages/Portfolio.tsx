@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink, useLocation, useSearchParams } from "react-router-dom";
+import { Link, NavLink, useLocation, useOutletContext, useSearchParams } from "react-router-dom";
 import { NETWORKS, vault } from "@poly/core";
 import {
   Card,
@@ -29,6 +29,8 @@ import {
   IconVault,
 } from "../components/icons";
 import { AccountAnalytics } from "../components/AccountAnalytics";
+import type { AccountHeaderRegistration } from "../components/Layout";
+import { AccountSessionOwner } from "../lib/accountSessionOwner";
 import Flow from "./Flow";
 import {
   moneyMovementScope,
@@ -47,6 +49,7 @@ type SignedOutput = vault.SignedRequestResult & {
 };
 
 type AccountSection = "overview" | "api" | "trade" | "orders" | "pnl" | "transactions";
+const NOOP_ACCOUNT_HEADER_REGISTRATION: AccountHeaderRegistration = () => {};
 
 // Short labels so all six tabs fit a phone width; the page headings keep the
 // full names. Routes are unchanged.
@@ -59,30 +62,28 @@ const ACCOUNT_TABS: Array<{ to: string; section: AccountSection; label: string }
   { to: "/account/transactions", section: "transactions", label: "Deposits" },
 ];
 
-const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle: string }> = {
+const ACCOUNT_HEADERS: Record<AccountSection, { title: string; subtitle?: string }> = {
   overview: {
     title: "Account overview",
-    subtitle: "Your balances, orders, trades, money movements, and current fee rates. Each section reports its own loading, permission, and data-coverage status.",
   },
   api: {
     title: "API setup",
-    subtitle: "Connect a registered read-only account key. Your key is encrypted in this browser and can sign only approved read requests.",
   },
   trade: {
     title: "Your Trades",
-    subtitle: "Only executions belonging to your connected account. Public market trades are available under Market Data → Trades.",
+    subtitle: "Your fills. Public trades: Market Data → Trades.",
   },
   orders: {
     title: "Your Orders",
-    subtitle: "Open and completed orders from your connected account. This is not the public order book.",
+    subtitle: "Your open and completed orders, not the public book.",
   },
   pnl: {
     title: "Profit and Loss",
-    subtitle: "User-assisted cost-basis estimates require complete fills, opening basis, resolved flows, and method provenance. Realized P&L does not require a current mark; unrealized and total P&L also require a fresh labeled valuation.",
+    subtitle: "Complete inputs required. Realized P&L needs no current mark.",
   },
   transactions: {
     title: "Money Movements",
-    subtitle: "Review deposits, withdrawals, and transfers from your account, or look up a public transaction by its exact ID.",
+    subtitle: "Private transfers or a single public lookup.",
   },
 };
 
@@ -127,60 +128,45 @@ function AccountTabs() {
 function AccountTransactions({
   accountVault,
   session,
+  scope,
+  onSelectScope,
 }: {
   accountVault: vault.AccountVault | null;
   session: vault.VaultSessionInfo | null;
+  scope: MoneyMovementScope;
+  onSelectScope: (scope: MoneyMovementScope) => void;
 }) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const scope = moneyMovementScope(searchParams);
-  const selectScope = (next: MoneyMovementScope) => {
-    setSearchParams(withMoneyMovementScope(searchParams, next), { replace: true });
-  };
   return (
     <>
       {/* One decision, one control. The description beside the choice says what
           the current view does, so a second notice would only repeat it. */}
       <Card
-        title="Money movements"
-        subtitle={
-          scope === "mine"
-            ? "Signed private reads. Nothing loads until you choose Load account data, and missing data is never shown as an empty history."
-            : "Lookup by transaction hash or flow ID. It is not a feed of every transaction and never requires your account key."
-        }
         actions={
           <div className="seg-group" role="group" aria-label="Money movement view">
-            <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} aria-pressed={scope === "mine"} onClick={() => selectScope("mine")}>
+            <button type="button" className={`seg-btn ${scope === "mine" ? "active" : ""}`} aria-pressed={scope === "mine"} onClick={() => onSelectScope("mine")}>
               My account
             </button>
-            <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} aria-pressed={scope === "all"} onClick={() => selectScope("all")}>
+            <button type="button" className={`seg-btn ${scope === "all" ? "active" : ""}`} aria-pressed={scope === "all"} onClick={() => onSelectScope("all")}>
               Public transaction lookup
             </button>
           </div>
         }
       >
-        <p className="faint mb-0">
-          {scope === "mine"
-            ? "Your transfers come from signed reads on this device. Public lookup is a separate, credential-free search."
-            : "Nothing about your account is read in this view."}
-        </p>
+        {scope === "all" && <p className="faint mb-0">Single lookup, not a feed. No account key.</p>}
       </Card>
-      {scope === "mine" ? (
-        session && accountVault ? (
-          <AccountAnalytics accountVault={accountVault} session={session} view="transfers" />
-        ) : (
-          <Card title="Your money movements" actions={<Pill kind="info">Account locked</Pill>}>
-            <EmptyState
-              icon={<IconFlow size={22} />}
-              title="Unlock an account to view your transfers"
-              description="No private request is made while locked. Set up or unlock an encrypted read-only key in API setup, or choose Public transaction lookup for a credential-free search."
-            />
-            <div className="row-flex mt-3" style={{ gap: 8 }}>
-              <Link to="/account/api" className="btn sm primary">Open API setup</Link>
-              <button type="button" className="btn sm" onClick={() => selectScope("all")}>Use public lookup</button>
-            </div>
-          </Card>
-        )
-      ) : <Flow embedded />}
+      {scope === "all" ? <Flow embedded /> : !(session && accountVault) ? (
+        <Card>
+          <EmptyState
+            icon={<IconFlow size={22} />}
+            title="Unlock to view your transfers"
+            description="No private request while locked. Set up a key or use public lookup."
+          />
+          <div className="row-flex mt-3" style={{ gap: 8 }}>
+            <Link to="/account/api" className="btn sm primary">Open API setup</Link>
+            <button type="button" className="btn sm" onClick={() => onSelectScope("all")}>Use public lookup</button>
+          </div>
+        </Card>
+      ) : null}
     </>
   );
 }
@@ -190,6 +176,7 @@ const PASSPHRASE_HELP =
 
 export default function Portfolio() {
   const [accountVault, setAccountVault] = useState<vault.AccountVault | null>(null);
+  const [sessionOwner, setSessionOwner] = useState<{ vault: vault.AccountVault; owner: AccountSessionOwner } | null>(null);
   const [entries, setEntries] = useState<vault.VaultEntrySummary[]>([]);
   const [legacy, setLegacy] = useState<vault.LegacyVaultStatus>({
     present: false,
@@ -221,8 +208,30 @@ export default function Portfolio() {
 
   const supported = vault.ed25519Supported();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const section = accountSection(location.pathname);
   const header = ACCOUNT_HEADERS[section];
+  const movementScope = moneyMovementScope(searchParams);
+  const selectMovementScope = useCallback((scope: MoneyMovementScope) => {
+    setSearchParams(withMoneyMovementScope(searchParams, scope), { replace: true });
+  }, [searchParams, setSearchParams]);
+  const accountDataOwner = sessionOwner?.vault === accountVault ? sessionOwner.owner : null;
+  const analyticsView = section === "trade"
+    ? "trades"
+    : section === "orders"
+      ? "orders"
+      : section === "pnl"
+        ? "pnl"
+        : section === "transactions"
+          ? "transfers"
+          : "overview";
+  const privateAnalyticsActive =
+    section === "overview" || section === "trade" || section === "orders" || section === "pnl" ||
+    (section === "transactions" && movementScope === "mine" && Boolean(session && accountVault));
+  const privateAnalyticsActiveRef = useRef(privateAnalyticsActive);
+  privateAnalyticsActiveRef.current = privateAnalyticsActive;
+  const registerAccountHeader =
+    useOutletContext<AccountHeaderRegistration | null>() ?? NOOP_ACCOUNT_HEADER_REGISTRATION;
 
   // Construct in an effect so React StrictMode's development setup/cleanup
   // cycle cannot reuse a disposed BroadcastChannel or vault session.
@@ -231,6 +240,29 @@ export default function Portfolio() {
     setAccountVault(instance);
     return () => instance.dispose();
   }, []);
+
+  useEffect(() => {
+    if (!accountVault) return;
+    const owner = new AccountSessionOwner({ vault: accountVault });
+    setSessionOwner({ vault: accountVault, owner });
+    return () => owner.dispose();
+  }, [accountVault]);
+
+  useEffect(() => {
+    if (!accountDataOwner) return;
+    accountDataOwner.setActive(privateAnalyticsActive);
+    if (!privateAnalyticsActive) return () => accountDataOwner.setActive(false);
+    const onVisibility = () => {
+      if (privateAnalyticsActiveRef.current && document.visibilityState === "visible") {
+        void accountDataOwner.refreshIfActivated(typeof window !== "undefined" && window.isSecureContext);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      accountDataOwner.setActive(false);
+    };
+  }, [accountDataOwner, privateAnalyticsActive]);
 
   const refresh = useCallback(async () => {
     if (!accountVault) return;
@@ -259,6 +291,9 @@ export default function Portfolio() {
       setSession(accountVault.getSessionInfo());
       if (event.type !== "UNLOCK") {
         setSignedOutput(null);
+        setPrivateKeyInput("");
+        setPassphrase("");
+        setConfirmPassphrase("");
         setUnlockPassphrase("");
         setUpdatePassphrase("");
       }
@@ -303,7 +338,7 @@ export default function Portfolio() {
     [operation],
   );
 
-  const run = async (action: () => Promise<void>) => {
+  const run = useCallback(async (action: () => Promise<void>) => {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -314,13 +349,20 @@ export default function Portfolio() {
     } finally {
       setBusy(false);
     }
-  };
+  }, []);
 
   const clearCreationSecrets = () => {
     setPassphrase("");
     setConfirmPassphrase("");
     setPrivateKeyInput("");
   };
+
+  useEffect(() => {
+    if (section === "api") return;
+    setPrivateKeyInput("");
+    setPassphrase("");
+    setConfirmPassphrase("");
+  }, [section]);
 
   const createKey = () =>
     run(async () => {
@@ -372,13 +414,28 @@ export default function Portfolio() {
       }
     });
 
-  const lock = () =>
+  const lock = useCallback(() =>
     run(async () => {
       if (!accountVault) return;
       await accountVault.lock();
       setSignedOutput(null);
       setNotice("Locked. Signing stopped and the in-memory session was discarded.");
-    });
+    }),
+    [accountVault, run],
+  );
+
+  useEffect(() => {
+    registerAccountHeader(
+      !supported ? "unavailable" : session ? "unlocked" : "locked",
+      session && accountVault ? lock : null,
+      busy,
+    );
+  }, [accountVault, busy, lock, registerAccountHeader, session, supported]);
+
+  useEffect(
+    () => () => registerAccountHeader("locked", null, false),
+    [registerAccountHeader],
+  );
 
   const saveRegisteredId = () =>
     run(async () => {
@@ -426,25 +483,9 @@ export default function Portfolio() {
       <AccountTabs />
       <PageHeader
         title={header.title}
-        badge={
-          <Pill kind={section === "transactions" ? "accent" : session ? "up" : supported ? "warn" : "down"}>
-            {section === "transactions"
-              ? "Scoped · Read-only"
-              : session
-                ? "Unlocked · Memory Only"
-                : supported
-                  ? "Locked"
-                  : "WebCrypto Unavailable"}
-          </Pill>
-        }
         subtitle={header.subtitle}
-        actions={
+        actions={section === "api" ? (
           <div className="row-flex" style={{ gap: 8 }}>
-            {session && (
-              <button type="button" className="btn sm" onClick={() => void lock()} disabled={busy}>
-                Lock now
-              </button>
-            )}
             <a
               href={vault.POLYESTER_API_KEYS_URL}
               target="_blank"
@@ -459,7 +500,7 @@ export default function Portfolio() {
               <span>SDK Quickstart</span>
             </Link>
           </div>
-        }
+        ) : undefined}
       />
 
       {section === "api" && (
@@ -467,10 +508,7 @@ export default function Portfolio() {
       <div className="notice warn" role="note">
         <div>
           <strong>Use real account keys only in a deployment you control.</strong>{" "}
-          Do not enter a real key in a development server or shared preview. Account reads
-          happen only after an explicit click. Browser security settings, service access,
-          and the key's read permissions still determine whether a request succeeds. The
-          signature inspector below never sends a request.
+          Reads start only on click; the inspector sends none.
         </div>
       </div>
 
@@ -478,36 +516,27 @@ export default function Portfolio() {
         <MetricCell
           label="Saved account keys"
           value={entries.length}
-          sub="Encrypted in this browser · labels are private"
-          tooltip="A saved key is an encrypted local entry. It is not a live account balance or a connection to another user."
-        />
-        <MetricCell
-          label="Connection"
-          value={session ? "Unlocked" : "Locked"}
-          sub={session ? "Key available only in this tab's memory" : "New tabs start locked"}
-          tooltip="Unlocking allows approved read requests. Locking removes the session and clears private account snapshots."
+          sub="Encrypted · labels private"
+          tooltip="An encrypted local entry, not a live connection."
         />
         <MetricCell
           label="Key storage"
           value="Encrypted browser storage"
-          sub="Your passphrase is required to unlock"
-          tooltip="The app uses AES-GCM encryption and PBKDF2 passphrase stretching. These protect stored keys; they do not grant account permissions."
+          sub="Passphrase unlocks"
+          tooltip="AES-GCM and PBKDF2 protect stored keys, not account permissions."
         />
         <MetricCell
           label="Request permissions"
           value="Read-only requests"
-          sub="No trading, cancellation, or money movement"
-          tooltip="Only approved GET requests can be signed. Each request uses a fresh timestamp and cannot place or change orders."
+          sub="Approved GETs only"
+          tooltip="Fresh timestamps; no order or money-moving actions."
         />
       </MetricStrip>
         </>
       )}
 
-      {section === "overview" && <AccountAnalytics accountVault={accountVault} session={session} view="overview" />}
-      {section === "trade" && <AccountAnalytics accountVault={accountVault} session={session} view="trades" />}
-      {section === "orders" && <AccountAnalytics accountVault={accountVault} session={session} view="orders" />}
-      {section === "pnl" && <AccountAnalytics accountVault={accountVault} session={session} view="pnl" />}
-      {section === "transactions" && <AccountTransactions accountVault={accountVault} session={session} />}
+      {section === "transactions" && <AccountTransactions accountVault={accountVault} session={session} scope={movementScope} onSelectScope={selectMovementScope} />}
+      <AccountAnalytics owner={accountDataOwner} session={session} view={analyticsView} active={privateAnalyticsActive} />
 
       {section === "api" && (
         <>
@@ -577,7 +606,7 @@ export default function Portfolio() {
 
       <Card
         title="Create an Encrypted Key Entry"
-        subtitle="Generate a new Ed25519 pair or import a raw 32-byte seed with its matching public key. Private material is exported only transiently for authenticated encryption, then imported as nonextractable."
+        subtitle="Generate an Ed25519 pair or import a 32-byte seed and matching public key. Private bytes are exported only to encrypt, then re-imported as nonextractable."
         actions={
           <div className="seg-group" role="group" aria-label="Key creation mode">
             <button
@@ -707,7 +736,7 @@ export default function Portfolio() {
 
       <Card
         title="Encrypted Vault Entries"
-        subtitle="While locked, only random local references and KDF parameters are visible. Labels, public keys, registered IDs, and private material remain inside authenticated ciphertext."
+        subtitle="Random references and KDF parameters remain visible; labels, IDs, and key material stay encrypted."
         actions={
           (entries.length > 0 || legacy.present) && (
             <button
@@ -725,7 +754,7 @@ export default function Portfolio() {
           <EmptyState
             icon={<IconVault size={22} />}
             title="No encrypted entries"
-            description="Create or explicitly migrate a key above. An empty vault is not an account connection and shows no balances."
+            description="Create or migrate a key above. An empty vault is not a connection."
           />
         ) : (
           <>
@@ -812,7 +841,7 @@ export default function Portfolio() {
       {session && (
         <Card
           title={`Unlocked: ${session.label}`}
-          subtitle="This metadata is in memory only. Locking aborts the session signal and invalidates late work."
+          subtitle="In-memory only. Locking invalidates late work."
           actions={<Pill kind="up">Private Key Extractable: {String(session.privateKeyExtractable)}</Pill>}
         >
           <div className="kv">
@@ -869,13 +898,13 @@ export default function Portfolio() {
 
       <Card
         title="Read-only Canonical Request Signer"
-        subtitle="Fixed operation registry only. This creates a local signature for inspection; it does not execute fetch, retry, or authenticate an account."
+        subtitle="Fixed operation registry. A local signature for inspection only — no fetch, retry, or auth."
         actions={<Pill kind="info">GET · {operationDefinition.path}</Pill>}
       >
         {!session ? (
           <EmptyState
             title="Vault locked"
-            description="Unlock an encrypted entry to sign. Locked, denied, or unavailable states never become account metrics or a successful connection."
+            description="Unlock an entry to sign. A locked or denied state is never an account metric."
           />
         ) : (
           <>
@@ -964,17 +993,17 @@ export default function Portfolio() {
       </Card>
 
       <div className="grid cols-2">
-        <Card title="Registration & Permission Boundary" subtitle="Key creation and policy attachment remain in Polyester's official UI.">
-          <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
-            <li>Generate locally and copy only the public key into official “Bring your own key”.</li>
-            <li>Attach only verified read policies; never add trading, transfer, or withdrawal writes for analytics.</li>
-            <li>Save the resulting server-issued ak_... ID here with the entry passphrase.</li>
-            <li>Lock clears local use; revoke a compromised key in the official UI.</li>
-          </ol>
+        <Card title="Registration & Permission Boundary" subtitle="Key creation and policy attachment stay in Polyester's official UI.">
+          <details className="disclosure">
+            <summary>Four rules</summary>
+            <ol style={{ margin: "6px 0 0", paddingLeft: 18, lineHeight: 1.7 }}>
+              <li>Generate locally and copy only the public key into official “Bring your own key”.</li>
+              <li>Attach read policies only — never trading, transfer, or withdrawal writes.</li>
+              <li>Save the server-issued ak_... ID here with the entry passphrase.</li>
+              <li>Lock clears local use; revoke a compromised key in the official UI.</li>
+            </ol>
+          </details>
           <div className="row-flex mt-2" style={{ gap: 8 }}>
-            <a href={vault.POLYESTER_API_KEYS_URL} target="_blank" rel="noreferrer" className="btn sm primary">
-              Official Key UI <IconExternal size={11} />
-            </a>
             <a
               href={`${NETWORKS.testnet.docsUrl}/developer-docs/authentication-security/ed25519-api-keys`}
               target="_blank"
@@ -986,19 +1015,20 @@ export default function Portfolio() {
           </div>
         </Card>
         <Card title="Residual Browser Limits" subtitle="AEAD and nonextractable keys reduce exposure; they do not make XSS or a compromised device safe.">
+          <details className="disclosure" style={{ marginBottom: 10 }}>
+            <summary>Memory limits</summary>
+            <p>JavaScript cannot guarantee erasure of every immutable string or garbage-collected copy. Mutable key/passphrase buffers are overwritten where possible; no perfect memory-wiping claim is made.</p>
+          </details>
           <div className="kv"><span className="k">Idle lock</span><span className="v">15 minutes of deliberate inactivity</span></div>
           <div className="kv"><span className="k">Cross-tab control</span><span className="v">Random event/generation IDs only</span></div>
           <div className="kv"><span className="k">Private responses</span><span className="v">Memory-only after explicit live-read opt-in; never persisted</span></div>
-          <p className="faint">
-            JavaScript cannot guarantee erasure of every immutable string or garbage-collected copy. Mutable key/passphrase buffers are overwritten where possible; no perfect memory-wiping claim is made.
-          </p>
         </Card>
       </div>
 
       <ConfirmDialog
         open={pendingConfirm?.kind === "delete"}
         title="Delete encrypted entry?"
-        message="This deletes the selected encrypted private-key record. There is no passphrase recovery or server backup. Other entries and public preferences are untouched."
+        message="Deletes this encrypted key record. No passphrase recovery, no server backup. Other entries stay."
         confirmLabel="Delete Encrypted Entry"
         onCancel={() => setPendingConfirm(null)}
         onConfirm={() => {
@@ -1015,7 +1045,7 @@ export default function Portfolio() {
       <ConfirmDialog
         open={pendingConfirm?.kind === "wipe"}
         title="Forget all local vault data?"
-        message="This locks every tab, deletes all encrypted entries and any quarantined legacy vault, and clears displayed signatures. It does not revoke keys at Polyester; revoke compromised keys in the official UI."
+        message="Locks every tab, deletes all encrypted entries and the quarantined legacy vault, and clears signatures. It does not revoke keys at Polyester — do that in the official UI."
         confirmLabel="Forget All Local Keys"
         onCancel={() => setPendingConfirm(null)}
         onConfirm={() => {
@@ -1030,7 +1060,7 @@ export default function Portfolio() {
       <ConfirmDialog
         open={pendingConfirm?.kind === "legacy-delete"}
         title="Delete quarantined plaintext record?"
-        message="This permanently deletes poly-tools:vault:v1 without migrating it. Other local preferences and encrypted entries are not removed."
+        message="Permanently deletes poly-tools:vault:v1 without migrating it. Other preferences and encrypted entries stay."
         confirmLabel="Delete Legacy Plaintext"
         onCancel={() => setPendingConfirm(null)}
         onConfirm={() => {

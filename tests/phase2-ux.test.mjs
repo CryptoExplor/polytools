@@ -95,27 +95,31 @@ function normalDecoded() {
 }
 
 describe("Phase 2 P2-5 account copy and lock consistency", () => {
-  it("renders the shared header on Trades and Orders and retains the session lock action", () => {
+  it("keeps key links on API setup and routes account locking through the global header", () => {
     const trades = renderPortfolio("/account/trade");
     const orders = renderPortfolio("/account/orders");
-    assert.ok(trades.includes("Only executions belonging to your connected account"));
-    assert.ok(orders.includes("Open and completed orders from your connected account"));
-    for (const html of [trades, orders]) {
-      assert.ok(html.includes("Official API Keys"));
-      assert.ok(html.includes("SDK Quickstart"));
-    }
+    const apiSetup = renderPortfolio("/account/api");
+    assert.ok(trades.includes("Your fills. Public trades: Market Data → Trades."));
+    assert.ok(orders.includes("Your open and completed orders, not the public book."));
+    assert.ok(!trades.includes("Official API Keys"));
+    assert.ok(!orders.includes("SDK Quickstart"));
+    assert.ok(apiSetup.includes("Official API Keys"));
+    assert.ok(apiSetup.includes("SDK Quickstart"));
+    assert.ok(!source("apps/web/src/pages/Portfolio.tsx").includes('label="Connection"'));
 
     const portfolio = source("apps/web/src/pages/Portfolio.tsx");
-    assert.ok(!portfolio.includes('section !== "trade" && section !== "orders"'));
-    assert.ok(portfolio.includes("{session && ("));
-    assert.ok(portfolio.includes("Lock now"));
+    const layout = source("apps/web/src/components/Layout.tsx");
+    assert.ok(portfolio.includes("registerAccountHeader"));
+    assert.ok(!portfolio.includes("Lock now"));
+    assert.ok(layout.includes('aria-label="Lock account"'));
   });
 
   it("separates realized mark independence from unrealized/total requirements", () => {
     const html = renderPortfolio("/account/pnl");
-    assert.ok(html.includes("Realized P&amp;L does not require a current mark"));
-    assert.ok(html.includes("unrealized and total P&amp;L also require a fresh labeled valuation"));
-    assert.ok(html.includes("complete fills, opening basis, resolved flows, and method provenance"));
+    const costBasis = source("apps/web/src/components/AccountCostBasis.tsx");
+    assert.ok(html.includes("Realized P&amp;L needs no current mark"));
+    assert.ok(costBasis.includes("Required for unrealized/total P&L, not realized"));
+    assert.ok(costBasis.includes("Complete fills, opening basis, and resolved flows required"));
   });
 
   it("describes authenticated read-only scope and the experimental R3 path honestly", () => {
@@ -158,7 +162,7 @@ describe("Phase 2 P2-6 cancellation and section lifecycle", () => {
     assert.ok(analytics.includes('{importNotice && <div className="notice info" role="status"'));
   });
 
-  it("discloses intentional section disposal instead of adding private persistence", () => {
+  it("discloses unlocked-session memory without adding private persistence", () => {
     const html = render(
       React.createElement(AccountAnalytics, {
         accountVault: null,
@@ -166,13 +170,15 @@ describe("Phase 2 P2-6 cancellation and section lifecycle", () => {
         view: "pnl",
       }),
     );
-    assert.ok(html.includes("Section-scoped memory"));
-    assert.ok(html.includes("Changing account sections intentionally discards"));
-    assert.ok(html.includes("cursor imports, and manual P&amp;L inputs"));
-    assert.ok(html.includes("no private data is persisted to retain them"));
+    assert.ok(html.includes("Unlocked-session memory"));
+    assert.ok(html.includes("shared across Account views in memory only"));
+    assert.ok(html.includes("Locking, changing, importing, or wiping the vault clears them"));
+    assert.ok(html.includes("No private response is persisted"));
 
     const portfolio = source("apps/web/src/pages/Portfolio.tsx");
-    assert.ok(portfolio.includes('{section === "pnl" && <AccountAnalytics'));
+    assert.ok(portfolio.includes('<AccountAnalytics owner={accountDataOwner} session={session} view={analyticsView} active={privateAnalyticsActive} />'));
+    assert.equal((portfolio.match(/<AccountAnalytics/g) ?? []).length, 1, "Portfolio keeps one stable account-data observer");
+    assert.ok(!portfolio.includes('{section === "pnl" && <AccountAnalytics'));
     const costBasis = source("apps/web/src/components/AccountCostBasis.tsx");
     for (const forbidden of ["localStorage", "sessionStorage", "indexedDB"]) {
       assert.ok(!costBasis.includes(forbidden), forbidden);

@@ -178,7 +178,9 @@ describe("P2-8 session-persistent sample provenance", () => {
 
     const layout = source("apps/web/src/components/Layout.tsx");
     assert.ok(layout.includes("{wireSampleUsed && <WireSampleNotice />}"));
-    assert.ok(layout.indexOf("{wireSampleUsed && <WireSampleNotice />}") < layout.indexOf("<Outlet />"));
+    const outlet = "<Outlet context={registerAccountHeader} />";
+    assert.ok(layout.includes(outlet));
+    assert.ok(layout.indexOf("{wireSampleUsed && <WireSampleNotice />}") < layout.indexOf(outlet));
 
     const store = source("apps/web/src/lib/store.tsx");
     assert.ok(store.includes("useState(hasUsedWireSamples)"));

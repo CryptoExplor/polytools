@@ -98,53 +98,53 @@ const CHECKLIST: CheckItem[] = [
     id: "account",
     phase: "Step 1 · Setup",
     title: "Create a Polyester testnet account",
-    hint: "Return with the same sign-in method each session — it controls your non-custodial account.",
+    hint: "Use the same sign-in method each session.",
     url: APP,
   },
   {
     id: "social",
     phase: "Step 2 · Verification",
     title: "Link X (Twitter) and Discord in Account Settings",
-    hint: "Required in the official app to unlock the daily Paper Assets reward claim.",
+    hint: "Needed for the daily paper-asset claim.",
   },
   {
     id: "claim",
     phase: "Step 3 · Daily Reward",
     title: "Claim today's Paper Assets allocation",
-    hint: "Resets every day at 00:00 UTC — use the countdown timer above to track the next window.",
+    hint: "Resets daily at 00:00 UTC.",
     url: APP,
   },
   {
     id: "trade",
     phase: "Step 4 · Execution",
     title: "Place your first spot order",
-    hint: "Try placing a limit order on BTC-USDT or ETH-USDC, then experiment with a TP/SL order.",
+    hint: "Place a limit order on BTC-USDT, then try a TP/SL.",
     url: `${APP}/trade/spot/BTC-USDT`,
   },
   {
     id: "faucet",
     phase: "Step 5 · External Faucet",
     title: "Request external testnet coins from a public faucet",
-    hint: "External testnet coins (tBTC, tETH…) are used to test cross-chain Zipper bridge deposits.",
+    hint: "tBTC and tETH test cross-chain Zipper deposits.",
     url: `${DOCS}/user-docs/reference/testnet-faucets`,
   },
   {
     id: "deposit",
     phase: "Step 6 · Bridge In",
     title: "Test a cross-chain deposit over Zipper",
-    hint: "Deposit test assets from a supported testnet chain and inspect the trace in the Account Tx Explorer (/#/account/transactions).",
+    hint: "Deposit from a testnet chain, then read the trace in Account Tx Explorer.",
   },
   {
     id: "withdraw",
     phase: "Step 7 · Bridge Out",
     title: "Test a cross-chain withdrawal",
-    hint: "Withdraw a supported test asset to an external testnet address to verify the full round-trip.",
+    hint: "Withdraw to an external testnet address to close the loop.",
   },
   {
     id: "competition",
     phase: "Step 8 · Community",
     title: "Follow testnet competitions & feedback channels",
-    hint: "Check the official Discord for scheduled trading competitions and promotional events.",
+    hint: "Competitions and events are announced in Discord.",
     url: "https://discord.gg/polyester",
   },
 ];
@@ -160,7 +160,6 @@ function nextReset(nowMs = Date.now()): number {
 export default function Hub() {
   const now = useNow(1000);
   const {
-    apiEnv,
     dataSource,
     envInfo,
     marketsError,
@@ -204,14 +203,6 @@ export default function Hub() {
   const pct = Math.round((done.size / CHECKLIST.length) * 100);
   const metadataAvailable = marketsUpdatedAt !== null;
   const metadataPending = !metadataAvailable && marketsLoading;
-  const environmentLabel = metadataAvailable
-    ? apiEnv.toUpperCase()
-    : metadataPending
-      ? "PENDING"
-      : "UNKNOWN";
-  const environmentTelemetry = metadataAvailable
-    ? apiEnv
-    : telemetryFallback(metadataPending);
   const metadataStale = marketsCacheStatus ? now >= marketsCacheStatus.freshUntil : false;
   const dataSourceLabel = metadataAvailable
     ? marketsCacheStatus
@@ -226,8 +217,6 @@ export default function Hub() {
     <div className="page-stack">
       <PageHeader
         title="Start on testnet"
-        badge={<Pill kind="warn">ENV: {environmentLabel}</Pill>}
-        subtitle="A checklist to get started on Polyester testnet, plus the daily reset time and official links."
         actions={
           <div className="row-flex">
             <Link to="/sdk" className="btn sm primary">
@@ -243,20 +232,6 @@ export default function Hub() {
 
       <MetricStrip>
         <MetricCell
-          label="Active Environment"
-          trend="warn"
-          value={environmentLabel}
-          sub={
-            metadataAvailable
-              ? marketsCacheStatus
-                ? "Validated cached public catalog"
-                : "Read-only MCP data source"
-              : metadataPending
-                ? "Waiting for market metadata"
-                : "Market metadata unavailable"
-          }
-        />
-        <MetricCell
           label="Daily Claim Reset"
           value="00:00 UTC"
           sub={`Current time: ${fmtTimeUTC(now)} UTC`}
@@ -268,7 +243,7 @@ export default function Hub() {
           sub="Saved locally in this browser"
         />
         <MetricCell
-          label="Listed Testnet Markets"
+          label="Listed markets"
           value={
             metadataAvailable
               ? `${pairs.length} pairs`
@@ -299,7 +274,7 @@ export default function Hub() {
         >
           <Countdown
             to={nextReset(now)}
-            label="Time remaining until the next 00:00 UTC daily reset window:"
+            label="Until the next 00:00 UTC reset:"
           />
           <div className="row-flex mt-3" style={{ justifyContent: "space-between" }}>
             <a
@@ -319,7 +294,7 @@ export default function Hub() {
 
         <Card
           title={`Local Onboarding Progress · ${pct}%`}
-          subtitle="Track your personal walkthrough of core Polyester testnet capabilities."
+          subtitle="Your walkthrough of the testnet basics."
           actions={
             done.size > 0 ? (
               <button type="button" className="btn sm ghost" onClick={resetAll}>
@@ -414,7 +389,7 @@ export default function Hub() {
       {/* Connection & Environment Diagnostics (FEAT-11) */}
       <Card
         title="Connection details"
-        subtitle="Telemetry from /api/env and /api/markets. Missing values are labeled, never guessed."
+        subtitle="From /api/env and /api/markets. Missing values are labeled, never guessed."
         actions={
           <button type="button" className="btn sm ghost" onClick={refreshMarkets}>
             Refresh
@@ -438,10 +413,6 @@ export default function Hub() {
                   {connectionStatus.toUpperCase()}
                 </Pill>
               </span>
-            </div>
-            <div className="kv">
-              <span className="k">Serving Environment (apiEnv)</span>
-              <span className="v mono">{environmentTelemetry}</span>
             </div>
             <div className="kv">
               <span className="k">Data Source</span>
@@ -503,7 +474,7 @@ export default function Hub() {
       {/* Official Faucet & Documentation Directory */}
       <Card
         title="Official Faucets, Documentation & Community Directory"
-        subtitle="Verified external links for Polyester testnet participants and developers."
+        subtitle="Official links for testnet participants and developers."
       >
         <div className="grid cols-3">
           {LINKS.map((l) => (

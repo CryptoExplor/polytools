@@ -8,6 +8,7 @@
 import { useMemo, useState } from "react";
 import { fmtNum } from "@poly/core";
 import { api } from "../lib/api";
+import { zipperCompareForRequest } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -98,6 +99,11 @@ export default function Zipper() {
     60_000,
     [asset, compareBy, chainFilter],
   );
+  const currentCmp = zipperCompareForRequest(cmp, asset, compareBy, chainFilter);
+  const comparisonIdentityError = cmp && !currentCmp
+    ? "Bridge comparison response did not match the selected asset or filters; it was not displayed."
+    : null;
+  const displayCmpError = comparisonIdentityError ?? cmpError;
 
   const cfgAssets = useMemo(() => cfg?.assets ?? [], [cfg]);
 
@@ -120,7 +126,7 @@ export default function Zipper() {
 
   // Preserve the backend/MCP route ranking order while computing explicit ranking rationale
   const rankedRoutes = useMemo(() => {
-    const rawRoutes = cmp?.routes ?? [];
+    const rawRoutes = currentCmp?.routes ?? [];
     if (!rawRoutes.length) return [];
 
     const cheapestFeeVal = Math.min(...rawRoutes.map((r) => Number(r.networkFee)));
@@ -171,7 +177,7 @@ export default function Zipper() {
         estNetAfterFee,
       };
     });
-  }, [cmp, compareBy, chainById, estAmount]);
+  }, [currentCmp, compareBy, chainById, estAmount]);
 
   const filteredChains = useMemo(() => {
     const list = cfg?.chains ?? [];
@@ -189,17 +195,12 @@ export default function Zipper() {
     <div className="page-stack">
       <PageHeader
         title="Bridge routes"
-        badge={
-          cfg?.apiEnv ? (
-            <Pill kind={cfg.apiEnv === "testnet" ? "warn" : "up"}>{cfg.apiEnv}</Pill>
-          ) : null
-        }
-        subtitle="Compare deposit routes for each token: network fee, minimum amount, and confirmation time. No deposit address is created here."
+        subtitle="Compare routes per token: fee, minimum, and confirmation time. No address is created here."
         actions={
           <DataFreshness
-            updatedAt={cmpAt ?? cfgAt}
+            updatedAt={(currentCmp ? cmpAt : null) ?? cfgAt}
             refreshing={cmpRefreshing || cfgRefreshing}
-            error={cmpError ?? cfgError}
+            error={displayCmpError ?? cfgError}
             intervalSec={60}
             onRefresh={() => {
               refreshCfg();
@@ -228,39 +229,39 @@ export default function Zipper() {
           label="Cheapest Network Fee"
           trend="up"
           value={
-            cmp?.cheapestByNetworkFee
-              ? `${fmtNum(Number(cmp.cheapestByNetworkFee.networkFee))} ${asset}`
+            currentCmp?.cheapestByNetworkFee
+              ? `${fmtNum(Number(currentCmp.cheapestByNetworkFee.networkFee))} ${asset}`
               : "—"
           }
           sub={
-            cmp?.cheapestByNetworkFee
-              ? `via ${cmp.cheapestByNetworkFee.chain}`
+            currentCmp?.cheapestByNetworkFee
+              ? `via ${currentCmp.cheapestByNetworkFee.chain}`
               : "Select an asset"
           }
         />
         <MetricCell
           label="Lowest Deposit Minimum"
           value={
-            cmp?.cheapestByDepositMin
-              ? `${fmtNum(Number(cmp.cheapestByDepositMin.depositMinAmount))} ${asset}`
+            currentCmp?.cheapestByDepositMin
+              ? `${fmtNum(Number(currentCmp.cheapestByDepositMin.depositMinAmount))} ${asset}`
               : "—"
           }
           sub={
-            cmp?.cheapestByDepositMin
-              ? `via ${cmp.cheapestByDepositMin.chain}`
+            currentCmp?.cheapestByDepositMin
+              ? `via ${currentCmp.cheapestByDepositMin.chain}`
               : "Select an asset"
           }
         />
       </MetricStrip>
 
       <ErrorBox error={cfgError} onRetry={refreshCfg} hasStaleData={Boolean(cfg)} />
-      <ErrorBox error={cmpError} onRetry={refreshCmp} hasStaleData={Boolean(cmp)} />
+      <ErrorBox error={displayCmpError} onRetry={refreshCmp} hasStaleData={Boolean(currentCmp)} />
 
       {/* Route Comparator & Fee Estimator */}
       <Card
         flush
         title={`Asset Route Comparison · ${asset}`}
-        subtitle="Ranked by the column you chose. Inventory, time, and testnet resets are not included."
+        subtitle="Ranked by the chosen column. Inventory and testnet resets are excluded."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             <div className="row-flex" style={{ gap: 6 }}>
@@ -348,14 +349,14 @@ export default function Zipper() {
           </>
         }
       >
-        {cmpLoading && !cmp ? (
+        {cmpLoading && !currentCmp ? (
           <div style={{ padding: 16 }}>
             <Loading lines={5} />
           </div>
         ) : rankedRoutes.length === 0 ? (
           <EmptyState
             title={`No routes returned for ${asset}`}
-            description="This asset has no active Zipper deposit/withdrawal routes configured right now. Try USDT, USDC, ETH, BTC, or tETH."
+            description="No active Zipper routes for this asset. Try USDT, USDC, ETH, BTC, or tETH."
             action={
               <div className="row-flex">
                 {["USDT", "ETH", "BTC", "tETH"].map((a) => (
@@ -495,7 +496,7 @@ export default function Zipper() {
         ) : filteredChains.length === 0 ? (
           <EmptyState
             title="No networks match your filter"
-            description="Clear the search filter to view all supported Zipper networks."
+            description="Clear the filter to see every supported network."
           />
         ) : (
           <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
@@ -549,7 +550,7 @@ export default function Zipper() {
         <Card
           flush
           title={`Zipper Protocol Smart Contracts (${cfgContracts.length})`}
-          subtitle="Addresses returned by the loaded public get_deposit_withdraw_config response; not independently verified by PolyTools"
+          subtitle="From the loaded public config; not independently verified by PolyTools"
         >
           <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
             <table className="data">

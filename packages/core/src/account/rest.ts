@@ -12,8 +12,13 @@ import { AccountVaultError, type AccountVault } from "./vault";
 export const POLYESTER_TESTNET_REST_ORIGIN = "https://api.testnet.polyester.com";
 export const ACCOUNT_CONTRACT_VERSION = "friendly-rest@b34853cb14366c9a64d53a20f6b09496a3c09fc4";
 
+const DEFAULT_ACCOUNT_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_ACCOUNT_REQUEST_TIMEOUT_MS = 120_000;
+const ACCOUNT_REQUEST_TIMEOUT_REASON = Symbol("account-request-timeout");
+
 export type AccountErrorCode =
   | "ABORTED"
+  | "TIMEOUT"
   | "ACCOUNT_STALE"
   | "CORS_BLOCKED"
   | "NETWORK"
@@ -110,6 +115,8 @@ export interface AccountRestClientOptions {
   baseUrl?: string;
   maxRetries?: number;
   retryBaseDelayMs?: number;
+  /** Per-attempt deadline covering signing, fetch, and response-body reading. */
+  requestTimeoutMs?: number;
   sleepImpl?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   now?: () => number;
 }
@@ -403,20 +410,58 @@ export function buildReadRequest(
   };
 }
 
-function combineSignals(first: AbortSignal, second?: AbortSignal): { signal: AbortSignal; cleanup: () => void } {
-  if (!second) return { signal: first, cleanup: () => undefined };
+function combineSignals(
+  ...inputSignals: Array<AbortSignal | undefined>
+): { signal: AbortSignal; cleanup: () => void } {
+  const signals = inputSignals.filter((signal): signal is AbortSignal => Boolean(signal));
+  if (signals.length === 1) return { signal: signals[0], cleanup: () => undefined };
   const controller = new AbortController();
-  const abort = () => controller.abort();
-  if (first.aborted || second.aborted) controller.abort();
-  first.addEventListener("abort", abort, { once: true });
-  second.addEventListener("abort", abort, { once: true });
+  const listeners = signals.map((signal) => {
+    const abort = () => {
+      if (!controller.signal.aborted) controller.abort(signal.reason);
+    };
+    if (signal.aborted) abort();
+    signal.addEventListener("abort", abort, { once: true });
+    return { signal, abort };
+  });
   return {
     signal: controller.signal,
     cleanup: () => {
-      first.removeEventListener("abort", abort);
-      second.removeEventListener("abort", abort);
+      for (const { signal, abort } of listeners) signal.removeEventListener("abort", abort);
     },
   };
+}
+
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("Aborted", "AbortError");
+}
+
+/** Race an asynchronous request stage against cancellation, including test transports
+ * or body readers that do not themselves observe AbortSignal. */
+function withAbort<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      callback();
+    };
+    const onAbort = () => finish(() => reject(abortError(signal)));
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    void Promise.resolve()
+      .then(() => settled ? undefined : operation())
+      .then(
+        (value) => finish(() => resolve(value as T)),
+        (error) => finish(() => reject(error)),
+      );
+  });
 }
 
 function retryAfter(response: Response): number | undefined {
@@ -465,6 +510,7 @@ function safeMessage(code: AccountErrorCode): string {
     case "SCHEMA_INCOMPATIBLE": return "This response version is not supported by the current account parser.";
     case "ACCOUNT_STALE": return "The account session changed; the late response was discarded.";
     case "ABORTED": return "The account request was aborted.";
+    case "TIMEOUT": return "The account request exceeded its time limit.";
     default: return "The account read failed safely; no private response was retained.";
   }
 }
@@ -528,6 +574,7 @@ export class AccountRestClient {
   private readonly baseUrl: string;
   private readonly maxRetries: number;
   private readonly retryBaseDelayMs: number;
+  private readonly requestTimeoutMs: number;
   private readonly sleepImpl: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   private readonly now: () => number;
 
@@ -542,6 +589,10 @@ export class AccountRestClient {
     }
     this.maxRetries = Math.max(0, Math.min(2, Math.floor(options.maxRetries ?? 0)));
     this.retryBaseDelayMs = Math.max(0, Math.min(5_000, Math.floor(options.retryBaseDelayMs ?? 250)));
+    const requestedTimeout = options.requestTimeoutMs ?? DEFAULT_ACCOUNT_REQUEST_TIMEOUT_MS;
+    this.requestTimeoutMs = Number.isFinite(requestedTimeout)
+      ? Math.max(1, Math.min(MAX_ACCOUNT_REQUEST_TIMEOUT_MS, Math.floor(requestedTimeout)))
+      : DEFAULT_ACCOUNT_REQUEST_TIMEOUT_MS;
     this.sleepImpl = options.sleepImpl ?? defaultSleep;
     this.now = options.now ?? Date.now;
   }
@@ -559,14 +610,39 @@ export class AccountRestClient {
         localCorrelationId: correlationId(),
       });
       const generation = session.generation;
-      const combined = combineSignals(session.signal, options.signal);
+      const timeoutController = new AbortController();
+      const timeoutId = setTimeout(
+        () => timeoutController.abort(ACCOUNT_REQUEST_TIMEOUT_REASON),
+        this.requestTimeoutMs,
+      );
+      const combined = combineSignals(session.signal, options.signal, timeoutController.signal);
+      const assertRequestActive = () => {
+        if (combined.signal.reason === ACCOUNT_REQUEST_TIMEOUT_REASON) {
+          throw new AccountRestError("TIMEOUT", operation, safeMessage("TIMEOUT"), {
+            localCorrelationId: correlationId(),
+          });
+        }
+        if (session.signal.aborted || this.vault.getSessionInfo()?.generation !== generation) {
+          throw new AccountRestError("ACCOUNT_STALE", operation, safeMessage("ACCOUNT_STALE"), {
+            localCorrelationId: correlationId(),
+          });
+        }
+        if (combined.signal.aborted) {
+          throw new AccountRestError("ABORTED", operation, safeMessage("ABORTED"), {
+            localCorrelationId: correlationId(),
+          });
+        }
+      };
       try {
         const built = buildReadRequest(operation, params, this.baseUrl);
-        const signed = await this.vault.signReadRequest({
-          operation,
-          path: built.path,
-          query: built.canonicalQuery,
-        });
+        const signed = await withAbort(
+          () => this.vault.signReadRequest({
+            operation,
+            path: built.path,
+            query: built.canonicalQuery,
+          }),
+          combined.signal,
+        );
         const canonicalLines = signed.canonicalString.split("\n");
         const signedPath = canonicalLines[2];
         const signedQuery = canonicalLines[3];
@@ -575,22 +651,21 @@ export class AccountRestClient {
             localCorrelationId: correlationId(),
           });
         }
-        const response = await this.fetchImpl(built.url, {
-          method: "GET",
-          headers: signed.headers,
-          credentials: "omit",
-          cache: "no-store",
-          redirect: "error",
-          referrerPolicy: "no-referrer",
-          mode: "cors",
-          signal: combined.signal,
-        });
-        if (this.vault.getSessionInfo()?.generation !== generation || combined.signal.aborted) {
-          throw new AccountRestError("ACCOUNT_STALE", operation, safeMessage("ACCOUNT_STALE"), {
-            localCorrelationId: correlationId(),
-          });
-        }
-        const body = await response.text();
+        const response = await withAbort(
+          () => this.fetchImpl(built.url, {
+            method: "GET",
+            headers: signed.headers,
+            credentials: "omit",
+            cache: "no-store",
+            redirect: "error",
+            referrerPolicy: "no-referrer",
+            mode: "cors",
+            signal: combined.signal,
+          }),
+          combined.signal,
+        );
+        assertRequestActive();
+        const body = await withAbort(() => response.text(), combined.signal);
         if (!response.ok) {
           const code = mapHttpStatus(response.status, body);
           throw new AccountRestError(code, operation, safeMessage(code), {
@@ -625,11 +700,7 @@ export class AccountRestClient {
             httpStatus: response.status,
           });
         }
-        if (this.vault.getSessionInfo()?.generation !== generation || combined.signal.aborted) {
-          throw new AccountRestError("ACCOUNT_STALE", operation, safeMessage("ACCOUNT_STALE"), {
-            localCorrelationId: correlationId(),
-          });
-        }
+        assertRequestActive();
         return {
           data,
           operation,
@@ -637,10 +708,15 @@ export class AccountRestClient {
           retrievedAtMs: this.now(),
         };
       } catch (error) {
-        const mapped = mapError(error, operation);
+        const mapped = combined.signal.reason === ACCOUNT_REQUEST_TIMEOUT_REASON
+          ? new AccountRestError("TIMEOUT", operation, safeMessage("TIMEOUT"), {
+            localCorrelationId: correlationId(),
+          })
+          : mapError(error, operation);
         if (attempt < this.maxRetries && retryable(mapped.code) && !combined.signal.aborted) {
           const delay = mapped.details.retryAfterMs ?? Math.min(5_000, this.retryBaseDelayMs * 2 ** attempt);
           attempt += 1;
+          clearTimeout(timeoutId);
           try {
             await this.sleepImpl(delay, combined.signal);
           } catch (sleepError) {
@@ -650,6 +726,7 @@ export class AccountRestClient {
         }
         throw mapped;
       } finally {
+        clearTimeout(timeoutId);
         combined.cleanup();
       }
     }

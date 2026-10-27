@@ -18,6 +18,7 @@ import {
 } from "@poly/core";
 import { api } from "../lib/api";
 import { formatCompactQuoteNotional } from "../lib/format";
+import { marketForSymbol, orderbookForRequest } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -50,8 +51,13 @@ export default function Book() {
     refresh,
   } = usePollData(() => api.orderbook(symbol, depth), 2000, [symbol, depth]);
 
+  const currentData = orderbookForRequest(data, symbol, depth);
+  const requestIdentityError = data && !currentData
+    ? "Order-book response did not match the selected symbol or depth; it was not displayed."
+    : null;
+  const displayError = requestIdentityError ?? error;
   const { data: ov } = usePollData(() => api.overview([symbol]), 4000, [symbol]);
-  const stats = ov?.markets?.[0];
+  const stats = marketForSymbol(ov?.markets, symbol);
 
   const [base, quote] = splitSymbol(symbol);
   const baseAsset = assetByCode.get(base);
@@ -59,15 +65,15 @@ export default function Book() {
   const qtyDecimals = baseAsset?.quantityDisplayDecimals ?? 5;
 
   const book = useMemo(() => {
-    if (!data) return null;
-    const bids = (data.bids ?? [])
+    if (!currentData) return null;
+    const bids = (currentData.bids ?? [])
       .map((l) => ({
         rawPrice: l.price,
         price: price(l.price),
         qty: dec(l.qty),
       }))
       .sort((a, b) => b.price - a.price);
-    const asks = (data.asks ?? [])
+    const asks = (currentData.asks ?? [])
       .map((l) => ({
         rawPrice: l.price,
         price: price(l.price),
@@ -120,10 +126,10 @@ export default function Book() {
       totalAskNotional,
       bidSharePct,
     };
-  }, [data, wallMult]);
+  }, [currentData, wallMult]);
 
-  const bid = data?.bestBid ? price(data.bestBid.price) : NaN;
-  const ask = data?.bestAsk ? price(data.bestAsk.price) : NaN;
+  const bid = currentData?.bestBid ? price(currentData.bestBid.price) : NaN;
+  const ask = currentData?.bestAsk ? price(currentData.bestAsk.price) : NaN;
   const mid = isFinite(bid) && isFinite(ask) ? (bid + ask) / 2 : NaN;
   const spBps = spreadBps(bid, ask);
 
@@ -139,7 +145,7 @@ export default function Book() {
             </Pill>
           ) : null
         }
-        subtitle="Bids (buy orders) and asks (sell orders) waiting to be matched. No account key is used; these orders are not yours."
+        subtitle="Resting bids and asks waiting to match. Public data — not your orders."
         actions={
           <div className="row-flex">
             <div className="seg-group" role="group" aria-label="Order book depth levels">
@@ -157,9 +163,9 @@ export default function Book() {
               )}
             </div>
             <DataFreshness
-              updatedAt={updatedAt}
+              updatedAt={currentData ? updatedAt : null}
               refreshing={refreshing}
-              error={error}
+              error={displayError}
               intervalSec={2}
               paused={paused}
               onTogglePause={() => setPaused(!paused)}
@@ -175,8 +181,8 @@ export default function Book() {
           trend="up"
           value={isFinite(bid) ? fmtNum(bid) : "—"}
           sub={
-            data?.bestBid
-              ? `Qty: ${fmtNum(dec(data.bestBid.qty), qtyDecimals)} ${base}`
+            currentData?.bestBid
+              ? `Qty: ${fmtNum(dec(currentData.bestBid.qty), qtyDecimals)} ${base}`
               : "Top buying level"
           }
         />
@@ -185,8 +191,8 @@ export default function Book() {
           trend="down"
           value={isFinite(ask) ? fmtNum(ask) : "—"}
           sub={
-            data?.bestAsk
-              ? `Qty: ${fmtNum(dec(data.bestAsk.qty), qtyDecimals)} ${base}`
+            currentData?.bestAsk
+              ? `Qty: ${fmtNum(dec(currentData.bestAsk.qty), qtyDecimals)} ${base}`
               : "Top selling level"
           }
         />
@@ -208,10 +214,10 @@ export default function Book() {
           label="Index Reference"
           value={stats ? fmtNum(price(stats.indexPrice)) : "—"}
           sub={
-            data?.bookSeq ? (
+            currentData?.bookSeq ? (
               <span className="mono">
                 <TermTip
-                  label={`bookSeq #${data.bookSeq}`}
+                  label={`bookSeq #${currentData.bookSeq}`}
                   tip="Exchange monotonic order book sequence identifier"
                 />
               </span>
@@ -257,7 +263,7 @@ export default function Book() {
         />
       </MetricStrip>
 
-      <ErrorBox error={error} onRetry={refresh} hasStaleData={Boolean(book)} />
+      <ErrorBox error={displayError} onRetry={refresh} hasStaleData={Boolean(book)} />
 
       {/* Cumulative Depth Visualization */}
       <Card
@@ -344,7 +350,7 @@ export default function Book() {
       <div className="grid cols-2">
         <Card
           flush
-          title={`Bids (Buy Orders) · ${data?.bidCount ?? book?.bids.length ?? 0} levels`}
+          title={`Bids (Buy Orders) · ${currentData?.bidCount ?? book?.bids.length ?? 0} levels`}
           actions={
             pair && (
               <span className="faint mono">
@@ -394,7 +400,7 @@ export default function Book() {
 
         <Card
           flush
-          title={`Asks (Sell Orders) · ${data?.askCount ?? book?.asks.length ?? 0} levels`}
+          title={`Asks (Sell Orders) · ${currentData?.askCount ?? book?.asks.length ?? 0} levels`}
           actions={
             pair && (
               <span className="faint mono">

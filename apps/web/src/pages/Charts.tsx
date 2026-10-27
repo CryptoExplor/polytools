@@ -16,6 +16,7 @@ import {
   type CandleTimeframe,
 } from "@poly/core";
 import { api } from "../lib/api";
+import { candlesForRequest, marketForSymbol } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -75,13 +76,18 @@ export default function Charts() {
     [symbol, tf, limit, rangeHours],
   );
 
+  const currentData = candlesForRequest(data, symbol, tf);
+  const requestIdentityError = data && !currentData
+    ? "Candle response did not match the selected symbol or timeframe; it was not displayed."
+    : null;
+  const displayError = requestIdentityError ?? error;
   const { data: ov } = usePollData(() => api.overview([symbol]), 4000, [symbol]);
-  const stats = ov?.markets?.[0];
+  const stats = marketForSymbol(ov?.markets, symbol);
   const [base, quote] = splitSymbol(symbol);
 
   const candles: CandlePoint[] = useMemo(
     () =>
-      (data?.candles ?? []).map((c) => ({
+      (currentData?.candles ?? []).map((c) => ({
         time: c.time,
         open: price(c.open),
         high: price(c.high),
@@ -90,7 +96,7 @@ export default function Charts() {
         volume: dec(c.volume),
         isClosed: c.isClosed,
       })),
-    [data],
+    [currentData],
   );
 
   const windowStats = useMemo(() => {
@@ -124,13 +130,13 @@ export default function Charts() {
             </Pill>
           ) : null
         }
-        subtitle="Price history. Each bar is one time period (open, high, low, close, volume). Hover or use Left/Right arrow keys to inspect a bar."
+        subtitle="Price history. One bar per period. Hover or use Left/Right arrows to inspect."
         actions={
           <div className="row-flex">
             <DataFreshness
-              updatedAt={updatedAt}
+              updatedAt={currentData ? updatedAt : null}
               refreshing={refreshing}
-              error={error}
+              error={displayError}
               intervalSec={pollInterval / 1000}
               paused={paused}
               onTogglePause={() => setPaused(!paused)}
@@ -209,12 +215,12 @@ export default function Charts() {
         />
       </MetricStrip>
 
-      <ErrorBox error={error} onRetry={refresh} hasStaleData={candles.length > 0} />
+      <ErrorBox error={displayError} onRetry={refresh} hasStaleData={candles.length > 0} />
 
       {/* Timeframe & Overlay Toolbar */}
       <Card
         title={`${symbol} · ${tf} Candles`}
-        subtitle="Hover or focus chart and press Left/Right arrow keys to inspect individual OHLCV bars."
+        subtitle="Focus the chart, then Left/Right inspects a bar."
         actions={
           <div className="row-flex" style={{ gap: 8 }}>
             {/* All 11 supported exchange timeframes */}

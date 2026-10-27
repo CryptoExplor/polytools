@@ -12,6 +12,7 @@ import {
   converterPriceReducer,
   INITIAL_CONVERTER_PRICE_STATE,
 } from "../lib/converter";
+import { marketForSymbol } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import {
@@ -114,8 +115,9 @@ function OutputRow({
 export default function Calc() {
   const { symbol, setSymbol, pairBySymbol, assetByCode } = useApp();
   const { data: ov } = usePollData(() => api.overview([symbol]), 5000, [symbol]);
-  const live = ov?.markets?.[0] ? price(ov.markets[0].lastPrice) : NaN;
-  const indexLive = ov?.markets?.[0] ? price(ov.markets[0].indexPrice) : NaN;
+  const selectedMarket = marketForSymbol(ov?.markets, symbol);
+  const live = selectedMarket ? price(selectedMarket.lastPrice) : NaN;
+  const indexLive = selectedMarket ? price(selectedMarket.indexPrice) : NaN;
 
   const [base, quote] = splitSymbol(symbol);
   const pair = pairBySymbol.get(symbol);
@@ -348,7 +350,7 @@ export default function Calc() {
             </Pill>
           ) : null
         }
-        subtitle="Work out trade size, fees, and profit. Everything stays in your browser."
+        subtitle="Position size, fees, and profit. Stays in your browser."
         actions={
           <div className="row-flex">
             <button
@@ -422,7 +424,7 @@ export default function Calc() {
         {/* 1. Position Sizing */}
         <Card
           title="1. Position size"
-          subtitle="Calculates exact position size so a stop-out loses only your target risk %."
+          subtitle="Size a position so a stop-out loses only your target risk %."
           actions={
             <div className="row-flex" style={{ gap: 6 }}>
               <button
@@ -657,7 +659,7 @@ export default function Calc() {
         {/* 3. PnL, Fees & Break-Even */}
         <Card
           title="3. Profit and fees"
-          subtitle="Computes gross PnL, maker/taker round-trip fees, net ROI, and break-even exit."
+          subtitle="Gross PnL, round-trip fees, net ROI, and break-even exit."
           actions={
             <div className="seg-group" role="group" aria-label="PnL trade side">
               <button

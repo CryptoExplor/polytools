@@ -346,12 +346,12 @@ function Workspace({
     <>
       <Card
         title={`${pair.baseAsset}/${pair.quoteAsset} cost-basis inputs`}
-        subtitle="Memory only. Opening lots, flow resolutions, and marks are discarded when this view or account session changes."
+        subtitle="Memory only — discarded when the view or session changes."
         actions={<Pill kind="warn">User-supplied provenance</Pill>}
       >
         <div className="notice warn" role="note" style={{ marginBottom: 14 }}>
           <IconAlert size={15} />
-          <span>Nothing is saved or sent. A current balance or price is never used as historical cost. Incomplete inputs block P&L rather than producing zero.</span>
+          <span>Current balances and prices are never historical cost; incomplete inputs block P&L.</span>
         </div>
         <div className="row-flex" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 16 }}>
           <label className="field">
@@ -384,7 +384,6 @@ function Workspace({
 
           <section aria-labelledby="opening-zero-heading">
             <h4 id="opening-zero-heading">Or establish opening zero</h4>
-            <p className="faint">Only for complete history since account inception. An arbitrary window with no loaded earlier fills is not proof.</p>
             <label className="row-flex" style={{ gap: 8 }}><input type="checkbox" checked={zeroConfirmed} onChange={(event) => setZeroConfirmed(event.target.checked)} /> <span>I have complete-since-inception evidence for opening zero</span></label>
             <div className="row-flex mt-2" style={{ gap: 8, flexWrap: "wrap" }}>
               <input className="input" value={zeroProvenance} onChange={(event) => setZeroProvenance(event.target.value)} placeholder="Evidence/provenance note" aria-label="Opening zero provenance" maxLength={500} />
@@ -402,7 +401,7 @@ function Workspace({
         actions={<Pill kind={flowResolution.issues.length > 0 ? "warn" : "up"}>{flowResolution.issues.length > 0 ? "Blocking" : "Resolved"}</Pill>}
       >
         {relevantFlows.length === 0 ? (
-          <EmptyState title="No relevant loaded transfer rows" description="The complete transfer read is still required. No flow is invented from an empty selected market view." />
+          <EmptyState title="No relevant loaded transfer rows" description="The complete transfer read is still required." />
         ) : (
           <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Activity</th><th>Asset amount</th><th>Time</th><th>Classification</th><th>Resolution inputs</th></tr></thead><tbody>
             {relevantFlows.slice(0, MAX_VISIBLE_FLOWS).map(({ transfer, index, timestamp }) => {
@@ -429,7 +428,7 @@ function Workspace({
         {flowResolution.issues.length > 5 && <p className="faint mt-2">{flowResolution.issues.length - 5} more unresolved flow issues remain. Every relevant row must be resolved.</p>}
       </Card>
 
-      <Card title="Fresh valuation mark" subtitle="Required only for current unrealized and total P&L. Realized P&L remains independently gated.">
+      <Card title="Fresh valuation mark" subtitle="Required for unrealized/total P&L, not realized.">
         <div className="row-flex" style={{ gap: 8, flexWrap: "wrap" }}>
           <input className="input" value={markPrice} onChange={(event) => setMarkPrice(event.target.value)} placeholder={`Price in ${pair.quoteAsset}`} aria-label="Valuation mark price" />
           <input className="input" value={markSource} onChange={(event) => setMarkSource(event.target.value)} placeholder="Labeled source" aria-label="Valuation mark source" maxLength={160} />
@@ -481,17 +480,17 @@ export function AccountCostBasis({ snapshot, accountScope }: { snapshot: account
   const pair = pairs.find((candidate) => candidate.key === selected) ?? pairs[0] ?? null;
 
   if (!snapshot.fills.data || !snapshot.transfers.data) {
-    return <Card title="Profit and loss inputs unavailable" subtitle="Private read failures are never converted to zero activity"><EmptyState title="Complete fills and transfers are required" description="Check each dataset's permission and coverage status. Observed activity remains separate from cost-basis P&L." /></Card>;
+    return <Card><EmptyState title="Complete fills and transfers are required" description="Unavailable reads are not zero; check dataset status." /></Card>;
   }
   if (!pair) {
-    return <Card title="No validated market fills" subtitle="No cost-basis market can be selected"><EmptyState title="No fills in the validated response" description="This does not prove lifetime inactivity or establish opening zero. No P&L number is inferred." /></Card>;
+    return <Card><EmptyState title="No validated fills" description="Lifetime history and opening zero are unverified; P&L is unavailable." /></Card>;
   }
   const fills = snapshot.fills.data.summary.calculations
     .map((calculation) => calculation.fill)
     .filter((fill) => fill.baseAsset === pair.baseAsset && fill.quoteAsset === pair.quoteAsset);
   return (
     <>
-      <Card title="Choose a cost-basis ledger" subtitle="Each account/base/quote ledger remains separate; no mixed-quote conversion or consolidated P&L is invented.">
+      <Card title="Choose a cost-basis ledger" subtitle="Separate ledgers; no quote conversion.">
         <label className="field" style={{ maxWidth: 360 }}><span className="faint">Market ledger</span><select className="select" value={pair.key} onChange={(event) => setSelected(event.target.value)}>{pairs.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.baseAsset}/{candidate.quoteAsset}</option>)}</select></label>
       </Card>
       <Workspace
