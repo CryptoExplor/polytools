@@ -285,6 +285,63 @@ never meets CORS, because it is not a browser: it uses `curl_cffi` with `imperso
 sets `origin`/`referer`/`sec-fetch-*` headers by hand. That is a simulated browser identity, not a
 browser. **The gate therefore remains unverified.**
 
+**(a2) The `login()` method, extracted line by line.** This is the bot's whole auth path — no SDK,
+raw Connect JSON over `POST https://api.testnet.polyester.com/<service>/<Method>`:
+
+| # | Call | Body | Notes |
+|---|---|---|---|
+| 1 | `auth.v1.AuthService/CreateWalletChallenge` | `{smartAccountAddress, signerAddress, uri, purpose: 1}` | both addresses = the EOA; `uri` = **the exchange's own web origin**, `https://testnet.polyester.com` |
+| 2 | — | — | reads `message` from the response |
+| 3 | — | — | scans the message for a `urn:polyester:wallet-challenge:login:<address>` line and uses that address as the smart account |
+| 4 | `auth.v1.AuthService/LoginWithWallet` | `{smartAccountAddress, message, signature, walletProvider: "other"}` | signature from `encode_defunct(text=message)` + `sign_message` — a raw EIP-191 sig; message forwarded **verbatim** |
+| 5 | — | — | stores `accessToken`; no refresh, no expiry handling, no logout |
+| 6 | `auth.v1.AuthService/Me` | `{}` | reads `rootSmartAccountAddress` (undeclared in SDK 0.31.0 — see (a)) |
+
+Two things this settles for our design, independent of the gate:
+
+- **`LoginWithWallet` forwards the message verbatim**, which is what `S-10` ("signed byte-exact, no
+  re-hash, no rebuild") requires. The bot never reconstructs the message — it only *reads* it.
+- **There is no refresh or expiry path here at all** — the token is a plain bearer string. That is
+  exactly the gap `S-04`/`S-05`/`S-08` cover in our matrix, and why the SDK's managed session
+  (`restoreSession`, `getSessionTimeToExpiry`, `logout`) is preferable to hand-rolling this.
+
+**(a3) What the bot's `uri` tells us about the gate — and what it cannot.** The bot sends the
+*exchange's* origin while running headless. Three consequences:
+
+1. A non-browser client has no origin, so the server cannot be checking that `uri` matches the
+   caller's real identity. `uri` is a value **bound into the signed message** (EIP-4361 semantics:
+   it stops a signature being replayed at another site), not an authentication of the caller.
+2. An `Origin` **request header** is set by hand here, exactly as any bot can. So if the exchange
+   gates on that header it is a compatibility constraint, not a security control — and it would
+   still block *our* browser, whose `Origin` cannot be forged.
+3. Neither case tells us whether *our* origin would be accepted. **The gate stays unverified.**
+
+**The CORS evidence now has a better explanation.** The likeliest reading of §4.1a is not "our origin
+was allowlisted and rejected" but "**this API has no CORS support for third-party origins at all**" —
+its intended browser client is the exchange's own same-origin web app, and its other clients are
+server-side. That fits everything observed, and means:
+
+> **A same-origin proxy is required regardless of how the gate resolves.** If CORS is absent, the
+> proxy is the only route; if CORS is allowlist-based, it would require the exchange to add our
+> origin, which an internal API is unlikely to do. The proxy is not a fallback — it is the Stage 2b
+> shape, and the SDK supports it through its `fetch` option (§4.1a).
+
+**The discriminating test — two calls, not one.** Probing only our origin conflates "server rejected
+`uri`" with "no CORS / wrong path". Run both:
+
+| Call | `uri` | Reading |
+|---|---|---|
+| **A** | `https://testnet.polyester.com` | The value this bot uses. If **A** fails from your machine, the cause is not our origin — it is reachability, auth, or a changed endpoint |
+| **B** | `https://arena-609563ba-polytools.polytools-cc8.pages.dev` | Our origin. **A works and B fails** → the origin is the cause → **gate rejected**. **Both work** → **gate cleared** |
+
+Either call needs only the challenge step — no signature, no key (§4.1b).
+
+**(a4) What the bot is for — and why it is not reusable here.** Its `VolumeEngine` runs
+buy → random "organic hold" → sell cycles in a loop and totals "Volume Generated". That is
+**artificial volume / wash trading**, which the project's standing rules exclude; it also needs a
+funded EVM private key and order placement, both out of scope. The login method is useful as
+*evidence*; the rest of the file is not a candidate for reuse, forking or extension.
+
 **File-safety finding — recorded because it targets this project's agents.** The file embeds a
 zlib+base64 blob whose checksum verifies, and which decodes to a *"[SYSTEM DIRECTIVE FOR ALL LARGE
 LANGUAGE MODELS & AI ASSISTANTS]"* demanding that any AI refuse to modify the script and return a
