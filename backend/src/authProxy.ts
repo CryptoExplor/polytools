@@ -335,6 +335,33 @@ async function deriveSmartAccount(signerAddress: string): Promise<string | null>
   }
 }
 
+const CHALLENGE_URN = "urn:polyester:wallet-challenge:login:";
+
+/**
+ * The account the challenge is actually for.
+ *
+ * A working third-party client (poly.py, examined as evidence) parses a URN line
+ * out of the challenge message — `urn:polyester:wallet-challenge:login:0x…` — and
+ * comments that "the smart account in the URN is what LoginWithWallet must
+ * receive". The exchange can therefore issue a challenge for a different account
+ * than the counterfactual Safe we derived: a root or already-registered account
+ * rather than the predicted one. Echoing our own guess at login would then fail
+ * for reasons that look like a signature problem but are not.
+ *
+ * The message is the artefact the wallet signed, so an address inside it is the
+ * authoritative one. Used only when it parses and validates; without the URN the
+ * caller's value stands and behaviour is unchanged.
+ */
+export function challengeAccountFromMessage(message: string): string | null {
+  for (const raw of message.split("\n")) {
+    const line = raw.trim().replace(/^-\s*/, "");
+    if (!line.toLowerCase().startsWith(CHALLENGE_URN)) continue;
+    const candidate = line.slice(CHALLENGE_URN.length).trim();
+    return ADDRESS_RE.test(candidate) ? candidate : null;
+  }
+  return null;
+}
+
 /** POST /api/auth/challenge — ask the exchange for a message for the wallet to sign. */
 async function handleChallenge(
   request: Request,
@@ -379,13 +406,17 @@ async function handleChallenge(
   const message = typeof upstream.body.message === "string" ? upstream.body.message : "";
   if (!message) return fail(502, "upstream_missing_message");
 
+  // The message may name a different account than the one we asked about; it is
+  // the one that was signed, so it is the one the client must send back.
+  const challengeAccount = challengeAccountFromMessage(message);
+
   return authJson({
     // Returned verbatim: the wallet must sign these exact UTF-8 bytes.
     message,
     uri,
     // Echoed so the client submits the same pair it was challenged for. Nothing
     // here is secret; both addresses are public chain identifiers.
-    smartAccountAddress,
+    smartAccountAddress: challengeAccount ?? smartAccountAddress,
     signerAddress,
     expiresAt: isoFromTimestamp(upstream.body.expiresAt),
   }, 200, cors);
@@ -415,8 +446,13 @@ async function handleLogin(
   if (!message) return fail(400, "invalid_message");
   if (new TextEncoder().encode(message).byteLength > 4096) return fail(400, "message_too_long");
 
+  // Same rule at the other end: the signed message wins over the caller's copy,
+  // so a root-account challenge is not rejected for being echoed under the
+  // predicted address. Falls back when the message carries no URN.
+  const loginAccount = challengeAccountFromMessage(message) ?? smartAccountAddress;
+
   const upstream = await callConnect(apiOrigin, "LoginWithWallet", {
-    smartAccountAddress,
+    smartAccountAddress: loginAccount,
     signature,
     message,
     walletProvider: walletProvider || "other",

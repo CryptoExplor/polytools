@@ -566,6 +566,80 @@ describe("upstream refusals stay attributable", () => {
   });
 });
 
+describe("the challenge URN decides which account is logged in", () => {
+  // Evidence: a working third-party client parses
+  // `urn:polyester:wallet-challenge:login:0x…` out of the message and notes that
+  // this address is what LoginWithWallet must receive. The exchange can issue a
+  // challenge for a root account we did not predict.
+  const ROOT = `0x${"d4".repeat(20)}`;
+
+  it("returns the URN account, not the derived one", async () => {
+    reset();
+    scenario = {
+      reply: { status: 200, body: { message: `line one\nurn:polyester:wallet-challenge:login:${ROOT}\n`, expiresAt: 1 } },
+    };
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", { body: JSON.stringify({ signerAddress: SIGNER }) }),
+      env(),
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).smartAccountAddress, ROOT);
+  });
+
+  it("sends the URN account upstream at login, not the client's copy", async () => {
+    reset();
+    scenario = {
+      reply: { status: 200, body: { accessToken: "tok", expiresAt: 1, accountId: "1", username: "u" } },
+    };
+    const response = await backend.api(
+      authRequest("/api/auth/login", {
+        body: JSON.stringify({
+          smartAccountAddress: SMART_ACCOUNT,
+          signature: SIGNATURE,
+          message: `some challenge\nurn:polyester:wallet-challenge:login:${ROOT}\n`,
+        }),
+      }),
+      env(),
+    );
+    assert.equal(response.status, 200);
+    const loginCall = upstreamCalls.at(-1);
+    assert.match(loginCall.url, /LoginWithWallet/);
+    assert.equal(loginCall.body.smartAccountAddress, ROOT);
+  });
+
+  it("falls back to the caller's address when the message has no URN", async () => {
+    reset();
+    scenario = {
+      reply: { status: 200, body: { accessToken: "tok", expiresAt: 1, accountId: "1", username: "u" } },
+    };
+    await backend.api(
+      authRequest("/api/auth/login", {
+        body: JSON.stringify({ smartAccountAddress: SMART_ACCOUNT, signature: SIGNATURE, message: MESSAGE }),
+      }),
+      env(),
+    );
+    assert.equal(upstreamCalls.at(-1).body.smartAccountAddress, SMART_ACCOUNT);
+  });
+
+  it("ignores a malformed URN rather than trusting it", async () => {
+    reset();
+    scenario = {
+      reply: { status: 200, body: { accessToken: "tok", expiresAt: 1, accountId: "1", username: "u" } },
+    };
+    await backend.api(
+      authRequest("/api/auth/login", {
+        body: JSON.stringify({
+          smartAccountAddress: SMART_ACCOUNT,
+          signature: SIGNATURE,
+          message: "urn:polyester:wallet-challenge:login:not-an-address",
+        }),
+      }),
+      env(),
+    );
+    assert.equal(upstreamCalls.at(-1).body.smartAccountAddress, SMART_ACCOUNT);
+  });
+});
+
 describe("a session token can never reach the shared cache", () => {
   it("dispatches the auth route before any cache lookup", async () => {
     // This is the structural guarantee, not a header. Auth is handled before the
