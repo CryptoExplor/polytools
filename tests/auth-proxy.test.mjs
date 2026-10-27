@@ -441,6 +441,47 @@ describe("wire parity with the installed SDK", () => {
   });
 });
 
+describe("upstream origin is constrained, not merely validated", () => {
+  it("refuses a non-Polyester host outright", async () => {
+    // The env var may pick which Polyester endpoint to use. It must never be
+    // able to redirect a login message and an EOA signature to someone else.
+    for (const origin of [
+      "https://evil.example",
+      "https://polyester.com.evil.example",
+      "https://api.polyester.co",
+      "https://notpolyester.com",
+    ]) {
+      reset();
+      const response = await backend.api(
+        authRequest("/api/auth/challenge", {
+          body: JSON.stringify({ smartAccountAddress: SMART_ACCOUNT, signerAddress: SIGNER }),
+        }),
+        { env: { POLYESTER_API_ORIGIN: origin } },
+      );
+      assert.equal(response.status, 503, origin);
+      assert.equal((await response.json()).error, "api_origin_misconfigured");
+      assert.equal(upstreamCalls.length, 0, `${origin} must never be contacted`);
+    }
+  });
+
+  it("accepts Polyester endpoints, and loopback for tests", async () => {
+    const { resolveAuthApiOrigin } = await vite.ssrLoadModule("/backend/src/authProxy.ts");
+    for (const origin of [
+      "https://api.testnet.polyester.com",
+      "https://api.polyester.com",
+      "https://polyester.com",
+      "https://staging.api.polyester.com",
+    ]) {
+      assert.equal(resolveAuthApiOrigin({ POLYESTER_API_ORIGIN: origin }), origin, origin);
+    }
+    assert.equal(resolveAuthApiOrigin({ POLYESTER_API_ORIGIN: "http://127.0.0.1:8080" }), "http://127.0.0.1:8080");
+    // Plain HTTP to a public host is never allowed, even a Polyester one.
+    assert.equal(resolveAuthApiOrigin({ POLYESTER_API_ORIGIN: "http://api.testnet.polyester.com" }), null);
+    // The default is the real testnet endpoint, not something surprising.
+    assert.equal(resolveAuthApiOrigin(undefined), "https://api.testnet.polyester.com");
+  });
+});
+
 describe("surface discipline", () => {
   it("is same-origin only and POST-only", async () => {
     reset();

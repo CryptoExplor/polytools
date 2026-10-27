@@ -267,8 +267,29 @@ function devApiPlugin(): Plugin {
               // Request from the method alone, so any POST arrived with an
               // empty body and no Origin/Content-Type/Sec-Fetch-Site — every
               // POST route worked in production and could never work in dev.
+              // Cap before buffering: the handler's own limit is checked after
+              // the body is in memory. Dev only, but a laptop should not be the
+              // place an unbounded upload is discovered.
+              const MAX_DEV_BODY = 1_048_576;
+              const declared = Number(req.headers["content-length"] ?? "0");
+              if (Number.isFinite(declared) && declared > MAX_DEV_BODY) {
+                res.statusCode = 413;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: "payload_too_large" }));
+                return;
+              }
               const chunks: Buffer[] = [];
-              for await (const chunk of req) chunks.push(chunk as Buffer);
+              let buffered = 0;
+              for await (const chunk of req) {
+                buffered += (chunk as Buffer).length;
+                if (buffered > MAX_DEV_BODY) {
+                  res.statusCode = 413;
+                  res.setHeader("Content-Type", "application/json");
+                  res.end(JSON.stringify({ error: "payload_too_large" }));
+                  return;
+                }
+                chunks.push(chunk as Buffer);
+              }
               const raw = Buffer.concat(chunks);
               const headers = new Headers();
               for (const [name, value] of Object.entries(req.headers)) {

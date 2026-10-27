@@ -83,6 +83,15 @@ function authError(status: number, code: string, detail?: string): Response {
  * Resolve the upstream API origin, allowing plain HTTP only for loopback so the
  * test suite can point this at a local mock without weakening production.
  */
+/**
+ * Hosts this proxy is willing to talk to. A configuration mistake here would
+ * forward a login message, an EOA signature and a user-agent to whatever host
+ * the variable named — so the variable may choose *which* Polyester endpoint,
+ * never an arbitrary server.
+ */
+const ALLOWED_API_SUFFIX = ".polyester.com";
+const ALLOWED_API_ROOT = "polyester.com";
+
 export function resolveAuthApiOrigin(env?: Record<string, string | undefined>): string | null {
   const raw = (env?.POLYESTER_API_ORIGIN ?? DEFAULT_API_ORIGIN).trim();
   let parsed: URL;
@@ -95,10 +104,15 @@ export function resolveAuthApiOrigin(env?: Record<string, string | undefined>): 
     parsed.hostname === "127.0.0.1" ||
     parsed.hostname === "::1" ||
     parsed.hostname === "localhost";
-  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) {
-    return null;
-  }
-  return parsed.origin;
+
+  // Plain HTTP only ever to loopback, so a signature is never sent in the clear.
+  if (parsed.protocol === "http:" && loopback) return parsed.origin;
+  if (parsed.protocol !== "https:") return null;
+
+  // Everything else must be Polyester's own domain.
+  const host = parsed.hostname.toLowerCase();
+  const owned = host === ALLOWED_API_ROOT || host.endsWith(ALLOWED_API_SUFFIX);
+  return owned ? parsed.origin : null;
 }
 
 /**
