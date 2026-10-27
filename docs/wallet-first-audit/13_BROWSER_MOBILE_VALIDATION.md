@@ -175,7 +175,7 @@ Legend: **V** verified · **F** failed · **B** blocked · **NT** not tested.
 | 20 | Wire-sample provenance banner visible | **B** | No browser |
 | 21 | Order placement, signing, mutations | **NT by design** | Out of scope; none attempted |
 
-**Totals: 5 verified, 0 failed, 15 blocked, 1 not tested** (findings: 4 verified, 2 retracted, 2 inspected-only).
+**Totals: 5 verified, 0 failed, 15 blocked, 1 not tested** (findings: F-01, F-04, F-05, F-07 verified; F-02, F-03 retracted; F-06 inspected-only).
 
 ---
 
@@ -257,8 +257,10 @@ either fails, that is a genuine finding — with the source above as the expecte
 1. **A live preview of this branch.** A dev server is currently running from this checkout on
    port **5199** (labelled *"PolyTools app (validation preview)"*). It renders the real app with
    wire-sample public data, which is enough for layout, keyboard, overflow, console and responsive
-   checks — **but not** for real account data. Any modern browser, plus one mobile viewport
-   (360×640 and 390×844 suggested), would clear items 13–20.
+   checks. Any modern browser, plus one mobile viewport (360×640 and 390×844 suggested), would
+   clear items **13–18 and 20**. Item **19 (CSP/security headers as served) is not clearable this
+   way**: a Vite dev server emits no CSP — the policy comes from `apps/web/public/_headers` at the
+   Pages layer, so item 19 needs a Pages preview or the `deployment-security.test.mjs` source check.
 2. **Or a sandbox with a browser.** Chromium plus reachable CDN access (`cdn.playwright.dev` or
    `storage.googleapis.com`). Neither is available here.
 
@@ -320,11 +322,12 @@ Offered as separate recommendations, per the brief's instruction to report rathe
 |---|---|
 | Commit tested | `92d7fd4a0d0006f1c699779436a788b273712363` |
 | Checks run | `test`, `typecheck`, `build`, `check:performance`, `check:contrast`, `check:whitespace`, `check:dependencies`, `check:external`, `check:runtime`, SSR render harness, HTTP smoke |
-| Results | **all pass** (F-01 noted); 318/318 tests, 16/16 render, 5/5 HTTP |
+| Results | **all pass except `check:runtime`** (F-01 noted): 318/318 tests, 16/16 render, 5/5 HTTP. `check:runtime` reports every feature probe passing but **exits 1** on `engine >=24` under this sandbox's Node v22.22.3 — a sandbox limitation, not an app defect; CI runs Node 24 and passes |
 | Working tree | clean before and after (this document excepted) |
 | PR #8 | **OPEN**, mergeable — not merged, not deployed |
 | Merge/deploy | not performed |
 
 **Next executable step:** with a browser available (either the live preview or a browser-capable
-sandbox), re-run items 13–20 and record viewport-specific evidence. Items 6–12 stay blocked until an
+sandbox), re-run items 13–18 and 20 and record viewport-specific evidence (item 19 needs a Pages
+preview, not a dev server). Items 6–12 stay blocked until an
 authorized testnet key is supplied through the app's own form.

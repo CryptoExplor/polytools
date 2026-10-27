@@ -4,8 +4,9 @@
 [`13_BROWSER_MOBILE_VALIDATION.md`](./13_BROWSER_MOBILE_VALIDATION.md), which holds the findings and
 the BLOCKED verdict. This file is only the procedure.
 
-Estimated time: **15–20 minutes**. No credentials required. Nothing here can place an order, sign
-anything, or touch a real account.
+Estimated time: **15–20 minutes for sections A–E**. **A–E need no credentials.** Section F does: it is
+blocked until an authorized **testnet** key is entered through the app's own onboarding form, and F2
+performs one **private read**. Nothing here can place an order, sign, or change an account setting.
 
 ---
 
@@ -103,7 +104,7 @@ DevTools → toggle device toolbar → **iPhone SE / 360×640**. This is the pri
 | C1 | Banner appears after the first public response | *"Development wire samples used in this session."* with `role="note"` | |
 | C2 | Banner persists when navigating between tools | Still visible on other routes | |
 | C3 | Banner **not** shown before any public fetch | Absent on first paint | |
-| C4 | Banner does not appear on private/account reads | Only public data triggers it | |
+| C4 | Private/account reads do not *use or trigger* wire-sample data | Account figures are not fixtures. The banner may **remain visible** from an earlier public fetch — `WireSampleNotice` states it "remains visible across tools", so a persisting banner is **not** a failure here; do not assert that it disappears | |
 
 ### D. Keyboard navigation
 
@@ -178,9 +179,11 @@ For **PASS** rows, the check IDs alone are enough (`A1–A6, B1–B9, C1–C4, D
 | Keyboard traversal is complete | That the app is release-ready |
 | No console errors at runtime | That wallet-first work can build on a verified UI baseline |
 
-A clean pass clears checklist items **13–20** in `13` §3 and moves the verdict from **BLOCKED** to
-**pass with limitations** — with the private path still blocked. It does not make the product
-release-ready, and it does not unblock NBA-5 on its own.
+A clean pass clears checklist items **13–18 and 20** in `13` §3. Item **19 (CSP/security headers as
+served) is not clearable from a Vite dev server** — it needs a Pages preview or the
+`deployment-security.test.mjs` source check. A clean pass plus item 19 moves the verdict from
+**BLOCKED** to **pass with limitations**, with the private path still blocked. It does not make the
+product release-ready.
 
 ---
 

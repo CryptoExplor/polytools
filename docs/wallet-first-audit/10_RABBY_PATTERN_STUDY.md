@@ -1,8 +1,12 @@
 # 10 — The Rabby/Hyperliquid pattern vs. what Polyester actually exposes
 
-**Study requested during audit. No implementation.** This document asks one question: *Rabby
-registers a user's wallet against Rabby's referral code on Hyperliquid and earns a fee share — can
-PolyTools do the same on Polyester?*
+**Study requested during audit. No implementation.** This document asks one question: *the
+Rabby/Hyperliquid pattern is that a wallet client registers a user's wallet against its own referral
+code and earns a fee share — can PolyTools do the same on Polyester?*
+
+**Scoping note:** the *mechanism* is documented by Hyperliquid and is real. **Rabby's own
+participation is not verified from primary sources** (§1) — treat it as the illustration you
+described, not as a confirmed fact about that wallet.
 
 **Short answer: no — and the reason is precise and fixable.** Hyperliquid exposes the referral
 registration as a **wallet-signed action that any client can invoke**. Polyester exposes referral
@@ -91,7 +95,7 @@ same version PolyTools pins in `rest.ts:13`):
 | Parse both OpenAPI specs; list any endpoint whose path or operation mentions "referr" | **NO referral endpoints** (`rest.openapi.json`, `polyester.openapi.json`) |
 | `grep -rniE "referr" proto/public/auth/` | **none** — no referral field in profile/registration/auth |
 | `grep -rni "referral"` across the whole bundle | **one** functional hit: `referral_share_amount_e18`, a **read-only output** on fills (`orders_read.proto:300`) |
-| `OrderIntent` fields (`orders.proto:161-228`) | no fee / builder / referral parameter |
+| `OrderIntent` fields (`orders.proto:161-228`) | **no builder, extra-fee or referral parameter.** It does carry `fee_asset = 21` (*"asset charged for fees, defaults to QUOTE"*) — that selects which asset pays the **standard** fee; it cannot add, redirect or share a fee |
 
 And the official documentation confirms referral management is a **web-console** flow: codes are
 created on `/account/referrals`, and a user applies a code by entering it there or arriving via a
@@ -126,7 +130,7 @@ The only ways to bridge the gap without Polyester changing:
 
 | Workaround | Verdict |
 |---|---|
-| Deep-link the user to `/account/referrals` and ask them to paste the code | **Legitimate.** Manual, unmeasurable, high drop-off — but honest and ToS-safe. This is component M-3 in `09` §5. |
+| Deep-link the user to `/account/referrals` and ask them to paste the code | **Potentially legitimate; terms unverified.** Manual, unmeasurable, high drop-off — but honest, and it collects no credential. Labelling it "ToS-safe" is **not** supported until Fabric Labs confirms the policy in writing (`08` Q16). This is component M-3 in `09` §5. |
 | Browser automation / puppeteer driving the console | **Rejected.** Fragile, almost certainly against terms, and would require handling the user's session — a credential risk. |
 | Ask the user to sign a message and replay it somewhere | **Rejected.** There is no endpoint to replay it to. Fabricating one would invent an API. |
 | Have users set the code once and PolyTools simply *report* nothing | **Allowed but useless** — you can't measure it without the referral analytics API, which also doesn't exist. |

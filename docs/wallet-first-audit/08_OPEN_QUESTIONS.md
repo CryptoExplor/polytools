@@ -165,11 +165,14 @@ allowlist) with an enforced equivalent — see `06` R-03.
 **Recommendation: out of scope** until Stage 6 verification is complete and the licence is
 settled.
 
-### Q10. Node version policy
+### Q10. Node version policy — **ANSWERED from the repository**
 
-`package.json` requires Node ≥24; this sandbox runs **v22.22.3** and npm emitted `EBADENGINE`.
-Everything passes, but it is a latent CI/runtime divergence. Is Node 24 available in your CI,
-or should the engine requirement be relaxed?
+`package.json` requires Node ≥24; the audit sandbox runs **v22.22.3** and npm emitted `EBADENGINE`.
+
+**Answer: CI already uses Node 24.** `.github/workflows/ci.yml` pins `node-version: [24]`
+(line 14) and every check passes there, so there is no CI/runtime divergence to resolve — the
+engine mismatch is **local to the audit sandbox only**. Nothing needs relaxing; do not lower the
+engine requirement to accommodate a sandbox.
 
 ---
 
@@ -433,8 +436,11 @@ a bare HTTP(S) origin — no path, query, fragment or userinfo, ≤2048 chars. T
 **Options.** (1) One canonical production origin only. (2) An explicit allowlist including preview
 and staging. (3) Per-deployment configuration.
 
-**Recommendation: option 2, written down before Stage 2b starts** — otherwise login cannot be tested
-anywhere except production, which is the worst place to discover it does not work.
+**Decision (NBA-4.1) supersedes the earlier recommendation of option 2.** Production is the only
+**shipping** origin. **One** documented non-production origin may be tested **only if the exchange
+accepts it** — established by a real challenge request recording the exact `uri` and the response
+(NBA-6). **If no non-production origin is accepted, Stage 2b stops**: production is not a test
+environment. An "allowlist including preview and staging" is therefore **not** approved.
 
 ### Q30. Do you accept EOA-only wallet support for launch? — **DECIDED 2026-10-27 (NBA-4.2)**
 
@@ -443,11 +449,14 @@ signature**; *"login rejects Safe/ERC-6492 wrapped signatures"*. Smart-contract 
 wallets cannot satisfy this. Any promise of "Google/email embedded wallet" sign-in is therefore
 **not** supported by the login path.
 
-**Options.** (1) EOA-only, stated plainly in the UI. (2) Add a supported embedded-wallet provider that
-can produce a raw EOA signature. (3) Keep API keys as the only private-data path for now.
+**Options.** (1) State the *signature capability* requirement plainly. (2) Add a supported embedded-wallet
+provider that can produce a raw EOA signature. (3) Keep API keys as the only private-data path for now.
 
-**Recommendation: option 1 for launch**, with the limitation surfaced *before* the user connects —
-a wallet that connects but cannot log in is worse than no wallet option.
+**Decision (NBA-4.2): option 1, expressed as a capability rule, not a wallet-type rule.** Copy must say
+login needs the **account owner EOA's raw 65-byte EIP-191 signature** (and that some smart-wallet
+interfaces cannot expose it) *before* the user connects. Categorically excluding "smart wallets" or
+labelling support "EOA-only" is **prohibited as copy**: a Safe-backed account qualifies whenever its
+owner EOA is available. A wallet that connects but cannot log in is still worse than no wallet option.
 
 ---
 

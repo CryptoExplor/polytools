@@ -17,7 +17,7 @@ Your stated priority order, which this document respects without reordering:
 1. stable wallet-first dapp            ← current programme (02–05 of this audit set)
 2. reliable analytics                  ← current programme (Stage 4)
 3. optional AI analyst                 ← this document, read-only, separate approval
-4. user-confirmed AI-assisted trading  ← this document §6 Phase 3, separate approval
+4. user-confirmed AI-assisted trading  ← this document §5 Phase 3, separate approval
 5. monetization                        ← 09, when an eligible mechanism actually exists
 ```
 
@@ -49,7 +49,7 @@ inventing values.
 | `packages/core/src/account/analytics.ts` | `calculateFill`, `summarizeFills`, `deduplicateFills`, `observedFillEligibility`, `sampledEquityMetrics`, `currentRateScenario`, `totalBalance`, `sumExact`/`absoluteExact` | Pure, `ExactDecimal` throughout | **Private** (fills, balances) |
 | `packages/core/src/account/lots.ts` | `analyzeCostBasis` (FIFO / weighted-average, opening lots, non-trade disposals, valuation marks) | Pure, deterministic | **Private** |
 | `packages/core/src/account/coverage.ts`, `pagination.ts` | Coverage/honesty reporting for incomplete data | Pure | **Private** metadata |
-| `packages/core/src/tools.ts` | `PolyesterData`: `spotMarkets`, `marketOverview`, `orderbook`, `candles`, `recentTrades`, `heatmap`, `depositWithdrawConfig`, `assetRoutes`, `compareRoutes`, `lifecycleFlow`, `lifecycleByTx`, `explainTransaction` — 12 read-only tools | Read-only, schema-validated by `publicDtos.ts` | **Public** |
+| `packages/core/src/tools.ts` | `PolyesterData`: `spotMarkets`, `marketOverview`, `orderbook`, `candles`, `recentTrades`, `heatmap`, `depositWithdrawConfig`, `assetRoutes`, `compareRoutes`, `lifecycleFlow`, `lifecycleByTx`, `explainTransaction` — 12 read-only tools | Read-only, but **typed only** — `callTool<T>()` carries a TS generic with no runtime validation. `publicDtos.ts` validates the **HTTP facade** in `apps/web/src/lib/api.ts`; it does not validate these tool results | **Public** |
 | `apps/web/src/lib/compare.ts`, `heatmap.ts`, `converter.ts` | Route comparison, depth-heatmap shaping, unit conversion | Pure | **Public** |
 | `apps/web/src/lib/orderConstraints.ts` | `validateOrderDraft`, `roundToTick`, `isMultipleOf`, `compareDecimal`, `multiplyDecimal` | Pure, scaled-integer | **Neutral** (validation) |
 | `apps/web/src/lib/publicDtos.ts`, `provenance.ts` | Runtime DTO validation + wire-sample provenance flagging | Pure | **Public** |
@@ -102,7 +102,7 @@ A user-supplied **arbitrary** base URL (`https://api.openai.com`, or any compati
 |---|---|---|
 | **A. Direct browser → provider** | Widening `connect-src` to `https:` (or a per-user dynamic allowlist, which CSP cannot express without `report-only` gymnastics) | **Rejected as a default.** It is precisely the "CSP widening" risk already recorded as **R-06** in `06`, and it would let any injected script exfiltrate to any host. Worth revisiting only if the model is *strictly* allowlisted to named providers, which defeats "compatible endpoint". |
 | **B. Backend proxy** | A new backend capability: receive a user secret, forward it, never persist it | **Most likely long-term shape — and it is a new capability class.** The existing backend is a **public-data facade with no auth, no storage, and no secrets** (verified: `backend/src/handler.ts` is a fixed route allowlist; no `authorization`/`cookie`/`database`/`secret` handling anywhere in `backend/src`). A BYOK proxy would be the first thing this backend ever holds that belongs to a user. It is also explicitly on the existing roadmap's non-goals list *("a backend private proxy", `docs/audit/ROADMAP.md`)*. |
-| **C. Local-only provider** | Provider reaches the browser via an endpoint already allowed, or the user runs a local model | Narrow but honest. Covers `https://*.workers.dev` BYOK endpoints, not OpenAI's default host. |
+| **C. Local-only provider** | Provider reaches the browser via an endpoint already allowed, or the user runs a local model | Narrow but honest. Covers `https://*.workers.dev` BYOK endpoints, not OpenAI's default host. **A CSP wildcard is not an approval list** — it matches *any* subdomain, so option C still needs an application-level approved-origin allowlist, and private-data consent must bind to that canonical origin rather than to a provider display name. |
 
 **No option is selected here.** This is a decision that needs your approval and a documented security
 design (`08` Q25). What this audit *does* fix is the constraint: **"just add a base-URL field" is not a
@@ -156,7 +156,14 @@ type ProviderAdapter = {
   describe(): Promise<Capabilities>;                       // connection test + compatibility report
   complete(req: {
     system: string;
-    messages: ReadonlyArray<{ role: "user" | "assistant"; content: string }>;
+    // Must be able to represent a tool-call round trip, not just chat turns:
+    // an assistant turn that requested tools (with ids) and the tool results
+    // answering them. Text-only turns cannot express the next request.
+    messages: ReadonlyArray<
+      | { role: "user"; content: string }
+      | { role: "assistant"; content: string; toolCalls?: ReadonlyArray<ToolCall> }
+      | { role: "tool"; toolCallId: string; content: string }
+    >;
     tools: ReadonlyArray<ToolSchema>;                      // allowlisted only
     signal: AbortSignal;                                   // cancellation is mandatory
   }): Promise<{ text: string; toolCalls: ReadonlyArray<ToolCall>; usage?: Usage }>;

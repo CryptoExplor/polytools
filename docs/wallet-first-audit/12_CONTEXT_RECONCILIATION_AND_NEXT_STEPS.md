@@ -149,7 +149,7 @@ Re-verified this session from the published declarations, not from docs:
 |---|---|---|
 | 1 | **`uri` must be a bare HTTP(S) origin** — no path, query, fragment, or userinfo; ≤2048 chars | The SIWE message is **origin-bound**. A preview host or a second deployment is a *different* origin and may be rejected. This is a deployment concern, not a UI detail. |
 | 2 | **The signature must be the owner EOA's raw 65-byte EIP-191 signature** — login rejects Safe / ERC-6492 wrapped signatures | Smart-contract wallets that only produce wrapped signatures **cannot complete login**. Wallet support is therefore a hard filter, not a preference (`08` Q7). |
-| 3 | **Login uses Ethereum mainnet Chain ID (1)**, set by the backend, with the Polyester chain bound in SIWE `Resources` | A wallet on the wrong network cannot sign. Explicitly *"wallet adapters must select Ethereum mainnet before signing"*. This surprises users who expect the app's own network. |
+| 3 | **Login uses Ethereum mainnet Chain ID (1)**, set by the backend, with the Polyester chain bound in SIWE `Resources`. The switch is **conditional**: the reference says *"If a wallet requires the signing network to match, such as Phantom, select Ethereum mainnet before signing."* | Most EIP-191 signers sign regardless of the active chain, so **do not force a network switch categorically**. Prompt only when signing fails for that reason, and make it actionable (`08` NBA-4.3). |
 | 4 | **The bearer token is the credential, not the wallet** | Any private read is authorized by the token. Losing/rotating it is a session concern; the wallet is irrelevant until re-login. This is also why `AuthSessionStore` is the security-critical object (risk **R-02**). |
 | 5 | **API-key and session identities coexist** — `me()` returns `apiKeyId?` alongside `accountId` and `sessionLevel` | The API-key path and the wallet path are **two doors to the same account**, not two accounts. They must not be treated as separate users, and never merged into one cache entry keyed by the wrong identifier. |
 | 6 | **Session assurance is graded** — `sessionLevel` ∈ `unspecified` / `primaryAuthenticated` / `mfaElevated` / `freshStepUp` | Graded assurance already exists. Any future transaction work must check the level rather than assume "logged in" is enough (`05` Stage 7). |
@@ -160,7 +160,7 @@ Re-verified this session from the published declarations, not from docs:
 |---|---|
 | Wallet connection | **Absent.** Repo-wide search for `window.ethereum`, `connectWallet`, `wagmi`, `viem`, `walletconnect`, `AccountSigner` → **one** hit: a *marketing link card* in `Hub.tsx:36` describing the **exchange's** sign-in options. No wallet code exists. |
 | Exchange authentication | **Absent.** No `createWalletChallenge`, no SIWE, no bearer-token session. |
-| Account access | **Present, by API key only**: `READ_ONLY_OPERATIONS` (10 GETs), Ed25519 HMAC request signing, sealed local vault (passphrase-protected), runtime DTO validation. |
+| Account access | **Present, by API key only**: `READ_ONLY_OPERATIONS` (10 GETs), **Ed25519 request signing** (`Ed25519RequestSigner` over a SHA-256 body digest — a signature scheme, *not* an HMAC), sealed local vault (passphrase-protected), runtime DTO validation. |
 | `@polyester/sdk` | **Not a dependency.** Root `dependencies: {}`, `apps/web` has 3 runtime deps (`react`, `react-dom`, `react-router-dom`) — the SDK is dev-pinned for typechecking examples only. |
 
 So the honest summary of the target experience: **steps 1 and 2 of the vision do not exist yet.** The
@@ -213,8 +213,9 @@ remain open and unchanged. NBA-10 continues by discipline.
 2. **Do you accept EOA-only wallet support for launch?** Login rejects Safe/ERC-6492 wrapped
    signatures (§4.3 #2). Embedded/smart wallets may be unable to sign in. This directly contradicts
    any promise of "Google/email embedded wallet" support.
-3. **Is a hard "switch to Ethereum mainnet" prompt acceptable?** Login signs on chain 1 regardless of
-   the app's network (§4.3 #3). Users will be asked to change network to sign in, then change back.
+3. **Is a "switch to Ethereum mainnet" prompt acceptable *when the wallet needs it*?** Login is
+   bound to chain 1 regardless of the app's network (§4.3 #3), but the official reference makes the
+   switch conditional on the wallet. Users who must switch should be told why and how to return.
 4. **Does the API-key path stay fully functional alongside the wallet path** during the transition —
    i.e. two doors to one account, never merged into one cache key (§4.3 #5)?
 

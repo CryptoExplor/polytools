@@ -80,9 +80,11 @@ about *the audited integration*; it is **not** a proof that PolyTools cannot ear
 
 **2. What is waiting for referral / builder-code launch?**
 Everything in this document:
-- **Referral (planned).** Disclosure + deep link now (M-2/M-3), user-signed registration later if a
-  callable primitive ever ships (`10`, Q21). Worth `0.144 × tier_rate × notional` of *referred*
-  volume (§3), **account-level**, and **not attributable from inside the dapp**.
+- **Referral (planned).** **Copy drafting only** until §7 verification passes; the disclosure and
+  deep link (M-2/M-3) ship only *after* L-1…L-5 (§7.1) clear the §6 gate. User-signed registration
+  later still, if a callable primitive ever ships (`10`, Q21). Worth
+  `0.144 × tier_rate × notional` of *referred* volume (§3), **account-level**, and **not
+  attributable from inside the dapp**.
 - **Builder code (anticipated, not specified).** The exchange's own developers reference builder codes
   as a future thing — the first evidence that Polyester *intends* such a mechanism. **Intention is not
   a specification:** no published parameter, fee rate, eligibility rule, approval flow, payout path,
@@ -100,13 +102,14 @@ Only **boundaries and invariants** — no code, no config keys, no methods, no f
 - **Drafted disclosure copy**, so consent language is never improvised under deadline.
 
 **4. What should trigger a future implementation review?**
-Any **one** of the following — each checkable without guessing (§7):
-- the capability appears in the **SDK capability matrix**, the **OpenAPI spec**, or as an **`rpc`** in
-  `polyester-proto`;
-- a **first-party announcement** names the mechanism *and* its economics;
-- the `/account/referrals` console **observably** issues a link and records a reward event for a real
-  fill;
-- a **mainnet environment** ships in the SDK, so revenue is denominated in real assets.
+Not any single signal. Per **§7.1**, which is the authoritative rule, a review begins only when
+**L-1 *and* L-2 are both present** (the mechanism appears in a published interface *and* in the
+contract). The weaker single signals stay useful but do not open a review:
+- a **first-party announcement** naming the mechanism *and* its economics (L-3) justifies **drafting
+  copy only** — it is a launch signal, and a launch signal triggers a *review*, not implementation;
+- the `/account/referrals` console **observably** issuing a link and recording a reward (L-4) is the
+  strongest evidence and subsumes L-1/L-2;
+- a **mainnet environment** shipping in the SDK (L-5) makes any revenue real rather than paper.
 
 Until then: no implementation, no registration, no configuration, no fee plumbing.
 
@@ -319,8 +322,10 @@ Exclusions that reduce every figure above:
 | RPC / bundler / paymaster | **not used** (no transactions) |
 | Real cost | **developer time only** |
 
-**Break-even:** with no paid infrastructure, break-even is met at $0 revenue — the constraint is not
-cost but **whether any revenue is realizable at all**. Three gates, in order:
+**Break-even (cash):** with no paid infrastructure, *cash* break-even is met at $0 revenue. That is
+**not economic break-even** — the table above lists developer time as the real cost, and it is not
+zero. The binding constraint is therefore not cost but **whether any revenue is realizable at all**.
+Three gates, in order:
 
 0. **Launch gate.** The mechanism is reported **not live** (§0). Until it is, every number below is
    arithmetic on a formula with nothing to apply it to.
@@ -385,8 +390,12 @@ Three distinct figures must never be merged:
 | Referral rewards earned by the user | the user's | Polyester console only |
 | **PolyTools' earned revenue** | **the developer's** | must **not** appear in the dapp at all |
 
-Note a subtlety already in the code: fills carry `referralShare` (`analytics.ts:59`), which is the
-share earned by **the user's own referrer** — a third party. It is currently used only in fill
+Note a subtlety already in the code: fills carry `referralShare` (`analytics.ts:59`). **What the
+contract establishes:** it is the decimal rendering of `referral_share_amount_e18`, documented in the
+pinned SDK as *"Exact referral share magnitude in fixed 18-decimal units of `fee_asset`"*
+(`orders_read_pb.d.ts:578`, SDK `0.31.0`; mapped in `trades.schemas.js:44`). **What it does not
+establish:** whose share it is. Reading it as *the user's own referrer's* earnings is a plausible
+interpretation, **not a verified fact** — do not state it as one. It is currently used only in fill
 identity for dedup/conflict detection and is **not displayed or exported** (verified:
 `grep -rn "referralShare" apps/web/src/` → no hits; `export.ts` → no hits). **Keep it that way.**
 Rendering it would expose a third party's earnings and confuse it with the user's own economics.
@@ -552,8 +561,9 @@ that "is it live yet?" is answered by artifacts instead of impressions.
 | L-4 | **Console observably works**: `/account/referrals` issues a link and the Reward Ledger records a reward against a real fill | A human performs it and records the result | Strongest possible evidence; closes every reading of §0.2 |
 | L-5 | **Mainnet environment ships in the SDK** | `createPolyesterEnvironment` ships a non-testnet value; `02` §1.1 re-checked | Makes revenue denominated in real assets |
 
-> L-1 and L-2 are **required together** merely to *begin a review*. L-3 alone justifies *drafting
-> copy*. **None of L-1…L-5 authorise building anything** — they authorise looking.
+> **L-1 and L-2 are required together** — one without the other begins nothing (§0.4). **L-3 alone
+> justifies drafting copy only.** L-4 can stand in for L-1+L-2 because it is observed behaviour rather
+> than a declaration. **None of L-1…L-5 authorise building anything** — they authorise looking.
 
 #### 7.1a Verification required *at* the review — before any code
 

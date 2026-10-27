@@ -219,7 +219,7 @@ All of the following were confirmed by reading the code at HEAD, not inferred fr
 | **Per-period caches** | `state.periods: Partial<Record<AccountHistoryRange, AccountRangeState>>`; `setRange()`, `getRangeState()` | Switching reporting period never discards another period's data; caches are keyed by range. |
 | **Vault/session invalidation** | `SESSION_BOUNDARIES = {LOCK, WIPE, VAULT_CHANGED, IMPORT, UNLOCK}`; `vault.subscribe()` → `clearForVaultBoundary()` | Any vault boundary event wipes all private state and aborts in-flight work. |
 | **Stale-response guards** | `isCurrent(request)` (:398) and `isSessionIdentityCurrent()` | A response is discarded unless `inFlight === request`, signal not aborted, and **both** vault generation **and** entryId still match the request's captured values. |
-| **View-scoped errors** | `errors: Partial<Record<"snapshot"|"balanceHistory"|"openOrders", SafeAccountError>>`; `Promise.allSettled` + per-result assignment | One dataset failing does not blank the others. |
+| **View-scoped errors** | `errors: Partial<Record<"snapshot"\|"balanceHistory"\|"openOrders", SafeAccountError>>`; `Promise.allSettled` + per-result assignment | One dataset failing does not blank the others. |
 | **Single-flight** | `InFlightLoad` keyed `${generation}:${entryId}:${range}` | Concurrent manual/visibility callers share one promise. |
 | **No durable private storage** | class comment + `MemoryDatasetStore` | Private responses live in memory only. |
 
@@ -351,7 +351,7 @@ Nothing staged, nothing committed, per instruction.
 | `npm install --no-audit --no-fund` | `added 153 packages in 14s`; `EBADENGINE` (needs Node ≥24, have v22.22.3) |
 | `npm test` | **318 tests, 318 pass, 0 fail**, 71 suites, 40.3 s |
 | `npm run typecheck` | PASS (web + backend, exit 0) |
-| `npm run check:runtime` | PASS — TextDecoder, Blob, URL, webCrypto, ed25519 |
+| `npm run check:runtime` | **Probes PASS** (TextDecoder, Blob, URL, webCrypto, ed25519) but the **command exits 1**: its `engine >=24` assertion fails on the recorded Node v22.22.3 |
 | `npm run check:whitespace` | 184/184 files, **0 violations** |
 | `npm run check:external` | 13 links, 89 assets, 3 SDKs; `npm:@polyester/sdk pin=0.31.0; sourceMatches=true`; 0 mismatches |
 | `npm run check:dependencies` | 225 external paths (8 prod, 217 dev); **`UNLICENSED=1`**; 0 missing licence metadata |

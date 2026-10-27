@@ -306,7 +306,7 @@ When it is eventually considered:
 | Cross-wallet/account leakage | The single largest risk. Fail-closed guards + explicit cache wipe on every identity change (`06` R-02). |
 | Server secrets | None in the frontend. `VITE_API_BASE` only. Telegram secrets remain Worker secrets. |
 | Infrastructure | **No** new backend, proxy, or database. A proxy would put a bearer token in the server's hands and destroy the "user holds their own session" property. |
-| CSP | Current `connect-src` permits only `api.testnet.polyester.com`; the SDK needs `rpc.polyester.live`, `bundler.polyester.live`, `paymaster.polyester.live`, and `wss://api.testnet.polyester.com` for realtime; WalletConnect needs relay + iframes (`frame-src 'none'` currently blocks it). Every addition is a security decision, not a build fix (`06` R-06). |
+| CSP | Current `connect-src` permits `'self'`, `https://api.coingecko.com`, `https://api.testnet.polyester.com` and `https://*.workers.dev` — so of the SDK's named endpoints, **only the testnet API** is already allowed (and the wildcard is a CSP concession, not an approval list). The SDK additionally needs `rpc.polyester.live`, `bundler.polyester.live`, `paymaster.polyester.live`, and `wss://api.testnet.polyester.com` for realtime; WalletConnect needs relay + iframes (`frame-src 'none'` currently blocks it). Every addition is a security decision, not a build fix (`06` R-06). |
 
 ---
 

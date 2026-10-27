@@ -176,10 +176,10 @@ Cannot be automated here; no credentials will be created by this audit.
 
 ## 10. Gate summary
 
-| Stage mergeable when… |
-|---|
+| Stage | Mergeable when… |
+|---|---|
 | 0 | Reports published; zero source files modified |
-| 1 | Missing audit directory restored by the user; docs corrected; suite green |
+| 1 | F-07–F-11 record accepted from PR #7 (directory restoration optional, Q2/Q5 closed); docs corrected; suite green |
 | 2a | W-01…W-09 pass; **no** Polyester request made on connect |
 | 2b | S-01…S-11 pass; **G1 licence resolved**; in-memory token confirmed |
 | 3 | D-01…D-19 pass with the flag on **and** off; K-01…K-10 still pass |

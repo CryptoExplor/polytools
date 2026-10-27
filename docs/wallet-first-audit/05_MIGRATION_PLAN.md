@@ -28,19 +28,19 @@ abandonable.** No stage requires a big-bang cutover.
 
 Three small, honest housekeeping items, because current documentation is misleading.
 
-1. **Restore `docs/build-reality-audit/`.** It is absent from the repository while the brief
-   treats it as protected and authoritative — including as the definition of F-07–F-11.
-   Without it, "keep F-07–F-11 deferred" is unactionable.
+1. **Accept the F-07–F-11 record without the missing directory.** `docs/build-reality-audit/` was
+   untracked and is **not recoverable from Git** (`12` §3). **Q2/Q5 are closed** on PR #7's
+   description, cross-checked against its diff. Restoration is now *optional* — if the user supplies
+   the directory it can be added, but **no stage blocks on it**.
 2. **Correct the baseline record.** `README.md`/audit docs should state HEAD `091a1b1`, PR #6
    merged, PR #7 merged.
 3. **Resolve the Node engine drift** (repo requires ≥24, CI/dev may run 22 → `EBADENGINE`).
 
 - **Files:** `docs/**`, possibly `package.json`, `.github/workflows/ci.yml`.
-- **Dependencies:** user must supply the missing directory (it is user-owned; I must not
-  recreate it from memory).
+- **Dependencies:** none. The missing directory is no longer a prerequisite (Q2/Q5 closed).
 - **Tests:** `npm run check:whitespace`, `npm test`, `npm run check:external`.
-- **Acceptance:** the audit directory exists and is byte-identical to the user's copy; no
-  source behaviour changes; tests unchanged.
+- **Acceptance:** F-07–F-11 is traceable to PR #7's description; no source behaviour changes;
+  tests unchanged.
 - **Security risk:** none.
 - **Rollback:** revert the docs commit.
 - **User approval:** **required** (Q1, Q2, Q5).
