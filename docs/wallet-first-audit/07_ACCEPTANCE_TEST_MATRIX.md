@@ -172,6 +172,35 @@ calls to the auth API. Two viable shapes:
 | **Proxy through our own origin** (`/api/*` Pages Function → auth API) | Removes the CORS dependency entirely; the browser only talks to our own origin, which `connect-src 'self'` already covers. Also the only shape that can keep the session token out of script reach (HttpOnly cookie). **Recommended.** |
 | Browser calls the API directly | Requires the exchange to allowlist our exact origin *and* the browser to pass preflight. Unproven, and unprovable on a non-production origin until it is tested. |
 
+**The proxy shape is supported by the SDK without a fork** (verified in SDK 0.31.0).
+`PolyesterClientCommonConfig` declares:
+
+```ts
+/** Custom fetch implementation for SDK HTTP requests. Defaults to the global
+ *  `fetch`, resolved on each request. Ignored when `transports` is provided. */
+fetch?: typeof fetch;
+```
+
+and `PolyesterBrowserClientConfig = Omit<PolyesterClientBaseConfig, "auth"> & { accountSigner?, tokenStorage? }`
+— **only `auth` is removed**, so `fetch` is available on the browser client too. Passing a `fetch`
+that rewrites `https://api.testnet.polyester.com/*` to `/api/*` routes every SDK call through our own
+origin, which `connect-src 'self'` already covers. Three consequences worth recording:
+
+- **Prefer `fetch` over `transports`.** `transports` is documented as skipping the built-in
+  auth/error-mapping interceptors, which the `S1`–`S10` assertions rely on; overriding `fetch`
+  leaves them in place.
+- **The proxy must stay transparent.** The SDK speaks Connect (binary by default), so the Pages
+  Function has to forward method, headers and body **bytes** unchanged and stream the response back
+  — no re-serialisation.
+- **`auth` is a credential option, not a transport one.** It decides *what* is sent
+  (`JwtAuthProvider` / `ApiKeyEd25519AuthProvider`), never *where* it is sent, so it does nothing
+  for CORS on its own.
+
+Open decision for Stage 2b, not asserted: with a proxy, the session token could live in an
+`HttpOnly` cookie set by our origin and never reach script. The SDK's own `tokenStorage` is
+JS-reachable (memory or cookie), so "SDK-managed token" vs "proxy-managed `HttpOnly` session" is a
+decision to take with the gate result, not now.
+
 **A related question this raises, not asserted:** the existing API-key account path builds
 **direct browser GETs** to the same host with Ed25519 headers — which also triggers a preflight
 (`docs/account-live-verification.md`, `docs/audit/DEPLOYMENT_HARDENING.md`). If CORS is refused
