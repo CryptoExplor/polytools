@@ -409,7 +409,7 @@ later" has a concrete starting point and a threat model already written; it is *
 
 # WALLET / EXCHANGE AUTHENTICATION — added 2026-10-27 (see `12` §4)
 
-### Q28. Stage 2a scope: wallet connection alone, or connection + SIWE login in one release?
+### Q28. Stage 2a scope: wallet connection alone, or connection + SIWE login in one release? — **DECIDED 2026-10-27**
 
 **Context.** `12` §4 establishes that these are three separate things: (1) wallet connection proves an
 origin can see an address; (2) exchange authentication is a server-issued SIWE challenge exchanged for
@@ -424,7 +424,7 @@ together. (3) Defer both until after browser/mobile validation.
 cheap, reversible, and gives the wallet-first shell without touching the licence question or the
 origin-binding problem. Option 3 is defensible if NBA-3 (browser validation) has not been done.
 
-### Q29. Which origin(s) may request a SIWE challenge?
+### Q29. Which origin(s) may request a SIWE challenge? — **DECIDED 2026-10-27 (NBA-4.1)**
 
 **Evidence.** `createWalletChallenge({ smartAccountAddress, signerAddress, uri })` requires `uri` to be
 a bare HTTP(S) origin — no path, query, fragment or userinfo, ≤2048 chars. The message is
@@ -436,7 +436,7 @@ and staging. (3) Per-deployment configuration.
 **Recommendation: option 2, written down before Stage 2b starts** — otherwise login cannot be tested
 anywhere except production, which is the worst place to discover it does not work.
 
-### Q30. Do you accept EOA-only wallet support for launch?
+### Q30. Do you accept EOA-only wallet support for launch? — **DECIDED 2026-10-27 (NBA-4.2)**
 
 **Evidence.** `AccountSigner.signMessage` must return the **owner EOA's raw 65-byte EIP-191
 signature**; *"login rejects Safe/ERC-6492 wrapped signatures"*. Smart-contract and some embedded
@@ -448,4 +448,26 @@ can produce a raw EOA signature. (3) Keep API keys as the only private-data path
 
 **Recommendation: option 1 for launch**, with the limitation surfaced *before* the user connects —
 a wallet that connects but cannot log in is worse than no wallet option.
+
+---
+
+## Decisions recorded 2026-10-27
+
+Full text: [`12` §9](./12_CONTEXT_RECONCILIATION_AND_NEXT_STEPS.md). Applied here so these questions
+are not reopened by accident:
+
+| Question | Decision |
+|---|---|
+| **Q1** baseline | **`main @ 091a1b1`** is the verified snapshot. It advances **when PR #8 merges** — resolve the actual merge commit, do not assume the hash |
+| **Q2** + **Q5** F-07–F-11 / missing directory | **Closed.** PR #7's description, cross-checked against the diff, is the record. No attempt to recover the untracked directory |
+| **Q16** referral terms | **Still open**, and now sequenced behind launch status (`09` §7) |
+| **Q28** Stage 2a scope | Wallet connection **alone** ships first; SIWE is a separate stage with its own gates |
+| **Q29** SIWE origins | Production is the only **shipping** origin. **One** non-production origin may be tested **only if the exchange accepts it** (NBA-6, real challenge, exact `uri` + response recorded). **If not accepted, Stage 2b stops — production is not a test environment** |
+| **Q30** wallet compatibility | Login requires the **account owner's raw 65-byte EIP-191 signature**; some smart-wallet interfaces cannot expose it. Categorically excluding "smart wallets" is **incorrect** and prohibited as copy |
+| **NBA-4.3** mainnet switch | Accepted, conditional on actionable UX (state it before signing, single switch action, route back, name the failure cause). `12` §9.6 |
+| **NBA-4.4** API-key preservation | API-key path stays fully functional. Cache isolation defined in `07` §13 (AUTH-01…AUTH-12); parity must be **measurable** before removal is proposed |
+
+**Still unverified** (must not be assumed): whether the exchange allowlists `uri` or merely binds it
+into the message; whether any specific wallet produces a raw signature in practice; whether the two
+auth forms return identical response shapes; whether any non-testnet environment exists. See `12` §9.7.
 

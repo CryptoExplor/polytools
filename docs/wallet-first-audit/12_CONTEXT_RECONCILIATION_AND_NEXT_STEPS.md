@@ -201,6 +201,9 @@ stated where a step has a hard prerequisite.
 | **NBA-9** | **Resolve API compatibility** before any "live-compatible" claim: one authenticated read against a known-good API key, with the exchange's **exact error code and body** captured on failure. | Me + you (needs a key) | A recorded request/response pair | Stage 3; the whole reliability story |
 | **NBA-10** | **Keep the monetization and AI work parked** exactly as specified — no code, no flags, no placeholders (`09` §5.1, `11` §0). | Me (discipline) | Nothing to do; monitored at each review | — |
 
+**Status (2026-10-27): NBA-1, NBA-2 and NBA-4 have been decided — see §9.** NBA-3, NBA-5…NBA-9
+remain open and unchanged. NBA-10 continues by discipline.
+
 ### NBA-4, expanded — the four questions that gate Stage 2a
 
 1. **Which origin(s) will be allowed to request a SIWE challenge?** The message is origin-bound
@@ -265,3 +268,141 @@ never read a missing-module failure as a regression.
 No source change. No dependency added (`dependencies` is still `{}` at the root; `apps/web` still has
 three). No wallet code. No SIWE call. No private request. No registration. No merge, deploy, or fee
 change. `git status --short` → only `?? docs/wallet-first-audit/`.
+
+---
+
+## 9. Recorded decisions (approved 2026-10-27)
+
+**Status: decided.** The six items below were approved by the repository owner on 2026-10-27, with the
+**NBA-4.1 amendment** proposed in review (test-origin escape hatch, gated on evidence).
+
+> **Scope of these decisions.** They authorise **documenting the plan**. They do **not** authorise
+> implementation, and they do **not** bypass any gate in `05`, `06`, `07` or `09`. Every stage below
+> still requires its own evidence and, where `05` says so, its own approval. Nothing here changes the
+> application, its dependencies, or its behaviour.
+
+> **Unverified items stay unverified.** This document does not convert an assumption into a fact.
+> §9.7 lists what remains unknown and what evidence would close each item. Chief among them: whether
+> the exchange validates `uri` against a registered allowlist, or merely binds it into the signed SIWE
+> message. **That is the whole of NBA-6 and it is not yet known.**
+
+### 9.1 The six decisions
+
+| # | Decision | Consequence |
+|---|---|---|
+| **NBA-1** | **Baseline** is `main @ 091a1b1` as the verified snapshot. The baseline advances when PR #8 merges — **verify the actual merge commit before updating it.** | Stages may be planned against `091a1b1`; no stage may cite a baseline it has not resolved |
+| **NBA-2** | **F-07–F-11:** PR #7's description, **cross-checked against the diff**, is the record. Stop trying to recover the untracked audit directory. | Q2/Q5 closed. The five changes are auditable in `main`; the F-numbers are labels only |
+| **NBA-4.1** | **SIWE origin:** production is the only approved **shipping** origin. Test on **one documented non-production origin only if the exchange accepts it**; NBA-6 establishes this with a real challenge request recording the exact `uri` and response. **If no non-production origin is accepted, Stage 2b stops** — production must not be used as a substitute test environment. | Stage 2b is shippable only if a test origin exists. This is a gate, not a formality |
+| **NBA-4.2** | **Signature compatibility:** login needs the **account owner's raw 65-byte EIP-191 signature**. Some smart-wallet interfaces may not expose that signature. **Do not** claim that all smart-account users are unsupported. | UI copy describes the *signature requirement*, not a wallet-type exclusion |
+| **NBA-4.3** | **Mainnet switch:** the Ethereum mainnet signing requirement is accepted, **subject to clear, actionable UX** explaining why the switch is required and how to return to the app's intended network. | A bare error is non-compliant with this decision |
+| **NBA-4.4** | **API-key authentication is preserved.** Before a second auth form ships, cache isolation must be defined in `07`: identity binds **auth form AND account**, separate namespaces, never served across forms. Measurable parity must be defined before anyone proposes removing API keys. | Recorded in `07` §13 as AUTH-01…AUTH-12. The API-key path is not deprecated by this programme |
+
+### 9.2 NBA-1 — baseline, and how it advances
+
+- Verified snapshot: **`main @ 091a1b1803ce1fb672e5593c10b51fc0c4cbf23c`**.
+- This branch (`arena/609563ba-polytools`) is **ahead** of that snapshot by the documentation commit(s)
+  in PR #8. Those commits add files under `docs/wallet-first-audit/` only and change no source.
+- **When PR #8 merges**, the baseline becomes **the merge commit**, not `091a1b1`. Resolve it with
+  `git rev-parse` at that time and record the hash here; do not assume it.
+- `6506e9f` remains **historical**: the frozen head of `arena/cb53163e-polytools`, not an ancestor of
+  `main` (PR #6 was squash-merged). It must not be used as a baseline for any stage.
+
+### 9.3 NBA-2 — the F-07–F-11 record
+
+Closed by description. The five changes were verified in the tree at `091a1b1` rather than taken on
+trust — anchors in §3 and in the PR #8 description:
+
+| Claim in PR #7's body | Anchor |
+|---|---|
+| Order-agnostic equity metrics; no synthetic timestamps or drawdown | `analytics.ts:308–333`; label `sampled-valuation-order-unverified-not-pnl` |
+| Account export schema v2 | `export.ts:60,378` → `polytools.account-export.v2` |
+| Public runtime validation, fail-closed | `publicDtos.ts:23–56`; single decode point `api.ts:139` |
+| Private reads labelled testnet-only, separately from the public badge | `AccountAnalytics.tsx:898`; `Portfolio.tsx:516` |
+| SDK pinned + licence warning retained | `package.json:31`; `SdkGuide.tsx:379,414` |
+
+**No attempt will be made to recover `docs/build-reality-audit/`.** Those files were untracked; git
+does not carry them across a squash merge, and they exist only in the original sandbox (§3).
+
+### 9.4 NBA-4.1 — the amendment, restated precisely
+
+The original recommendation was "production origin only". That merged two different decisions and
+would have had a bad consequence: because the SIWE message is **origin-bound**, and every Cloudflare
+Pages PR gets a distinct preview origin, production-only would have made **Stage 2b testable only in
+production** — the single worst place to discover a rejected `uri`, a rejected signature form, or a
+wallet that cannot sign.
+
+As amended:
+
+| | Rule |
+|---|---|
+| **Shipping** | The confirmed production origin, and only it |
+| **Testing** | **One** documented non-production origin, **only if the exchange accepts it** |
+| **Establishing acceptance** | NBA-6: a real `createWalletChallenge` request from that origin, recording the exact `uri` sent and the full response |
+| **If rejected** | **Stage 2b stops.** Production is not used as a test environment, and no workaround (host rewriting, tunnels, proxying through the backend) is permitted without a new decision |
+| **Afterwards** | The test origin is retired and the result recorded here |
+
+This converts an unknown into a gate. Stage 2b cannot be declared shippable on the strength of
+production anecdote.
+
+### 9.5 NBA-4.2 — the wording that must be used
+
+The verified SDK constraint is about the **signature**, not the account type:
+
+- `AccountSigner.signMessage` must return *"that EOA's raw 65-byte EIP-191 signature: login rejects
+  Safe/ERC-6492 wrapped signatures."*
+- `ownerAddress` is *"declared as the LOGIN challenge signer when present; otherwise accountAddress
+  signs."* A smart-account user therefore logs in **by signing with their owner EOA** — the account
+  type is not the obstacle.
+- The real failure mode is a **wallet interface that cannot expose a raw EOA signature**.
+
+Permitted copy: *"Sign-in requires a raw signature from the wallet that owns this account. Some
+smart-wallet interfaces cannot produce one."*
+Prohibited copy: *"Smart wallets are not supported"* — categorically false, and it would needlessly
+exclude users who can sign.
+
+### 9.6 NBA-4.3 — what "actionable UX" means here
+
+Accepted, with the condition made testable. The flow must, at minimum:
+
+1. State **before** the signature prompt that the wallet will be asked to sign on **Ethereum mainnet**,
+   and why (the login message is bound to chain 1; the exchange binds its own chain in SIWE
+   `Resources`).
+2. Offer a **single** action to switch, and not silently switch for the user.
+3. After login, offer a clear route **back** to the app's intended network.
+4. Preserve the user's place — an abandoned login must not strand them on the wrong network.
+5. Never present a rejected signature as a generic error; name the likely cause (wrong network,
+   unsupported signature form, user cancellation).
+
+A bare `"Login failed"` is **non-compliant** with NBA-4.3.
+
+### 9.7 Unverified register — stays unverified until evidenced
+
+| # | Unknown | Closes with | Do not assume |
+|---|---|---|---|
+| U-1 | Does the exchange validate `uri` against a **registered allowlist**, or only bind it into the signed message? | NBA-6 real challenge from a non-production origin | That preview origins work, or that any origin works |
+| U-2 | Does any **specific wallet** produce a raw 65-byte EIP-191 signature in practice? | The wallet matrix (NBA-7) tested against a real origin | That a given wallet works because its docs say "EIP-191" |
+| U-3 | Does the **API-key path** and the **session path** return identical shapes for the same account? | NBA-9 authenticated read | That two auth forms are interchangeable because they reach the same account |
+| U-4 | Is a non-testnet environment reachable at all? | `02` §1.1 re-checked; `00` B2 | That mainnet exists because the docs discuss fees |
+| U-5 | Will referral/builder revenue ever pay a third-party app? | `09` §7 triggers | Anything — see `09` §0.5 |
+| U-6 | Does the exchange's SIWE implementation accept `sessionLevel` beyond `primaryAuthenticated` without MFA? | Not scheduled; only matters for `05` Stage 7 | That "logged in" implies authority to trade |
+
+### 9.8 What these decisions change in the plan
+
+| Artifact | Change |
+|---|---|
+| `07` | **New §13** — auth-form cache isolation gates (AUTH-01…AUTH-12), the enforcement of NBA-4.4 |
+| `08` | Q28–Q30 marked **decided**; Q2/Q5 marked **closed** |
+| `05` Stage 2a/2b | Unchanged in content; the entry conditions are now these decisions rather than open questions |
+| `09`, `11` | Unchanged. Monetization and AI remain parked — no code, no flags, no placeholders |
+
+### 9.9 Standing prohibitions reaffirmed
+
+These decisions do **not** authorise: wallet connection code, SIWE implementation, private account
+requests, trading, cancellation, transfers, withdrawals, monetization, or AI. They do not change
+application source, dependencies, CSP, or configuration. They do not permit registration, deployment,
+merging, or any fee or financial action.
+
+**Next executable step remains NBA-3** (browser/mobile validation of the current API-key path), then
+**NBA-5** (wallet connection only), then **NBA-6** (SIWE feasibility on a real origin — which is the
+first step that could invalidate Stage 2b entirely).
+

@@ -238,3 +238,43 @@ it is approved, it inherits this matrix's rules and adds the ones in `11` §8 �
 
 Until then, the correct state of this document with respect to AI is **unchanged**.
 
+---
+
+## 13. Authentication-form cache isolation — required *before* a second auth form ships
+
+**Origin:** decision **NBA-4.4** (2026-10-27, `12` §9). Today there is one auth form: an Ed25519
+API-key vault. The wallet-first programme introduces a **second** form: a SIWE bearer session. This
+section defines the gates that must pass before the second form is allowed to serve private data.
+
+**Why this is a gate and not a nice-to-have.** Risk **R-02** (`06`) is Critical: `AccountSessionOwner`
+retains completed private datasets in memory for the whole session, and the SDK's `AuthSessionStore`
+is bound to an **environment fingerprint, not a wallet** — a token minted for wallet A stays valid
+while wallet B is connected. One auth form is already at risk; two forms sharing a cache would make
+cross-form and cross-account disclosure the default rather than the exception.
+
+**Current identity is insufficient.** `AccountSessionIdentity` is `{ generation, entryId }`
+(`accountSessionOwner.ts:42`). Both fields are vault-scoped. That is adequate for one form and
+**inadequate for two**: it cannot express "which auth form produced this dataset".
+
+| ID | Assertion | Type |
+|---|---|---|
+| AUTH-01 | Cache identity binds **authentication form** *and* **account identity**, not vault generation alone | A |
+| AUTH-02 | Datasets are stored in **separate namespaces** per auth form; no read path can return a dataset produced under the other form | A |
+| AUTH-03 | Switching auth form (API-key ⇄ session) **invalidates or shadows** the previous form's cached private data — it is never served, not merely hidden in the UI | A |
+| AUTH-04 | Switching **account** within one form does not serve the previous account's datasets (`R-02` regression) | A |
+| AUTH-05 | Switching **wallet** while a session token from a different wallet is live cannot expose that wallet's data (the `AuthSessionStore` fingerprint gap) | A |
+| AUTH-06 | An in-flight load started under form/account A cannot publish into a view now bound to B (late-response guard, extended to the form dimension) | A |
+| AUTH-07 | Session expiry or rejection (`handleRejectedToken`) clears the session form's namespace; the API-key path is unaffected | A |
+| AUTH-08 | A test asserts **no** cache read path can be constructed without naming both form and account | A |
+| AUTH-09 | Removal of the API-key path requires **measurable parity**: a named, passing test set covering every capability in `03` for both forms | **M** |
+| AUTH-10 | Parity is recorded with the date and the evidence; "it feels equivalent" is not parity | **M** |
+| AUTH-11 | The API-key path remains functional for every capability it supports today, with its own tests, until AUTH-09 and AUTH-10 are satisfied | A |
+| AUTH-12 | Any document proposing API-key removal without AUTH-09/AUTH-10 attached is rejected on sight | G |
+
+**Gate:** Stage 2b (SIWE) may serve **private** data only when AUTH-01…AUTH-08 pass. Public-data
+rendering and wallet-connection UI (Stage 2a) are unaffected and may ship earlier.
+
+**Non-goals.** This section does not authorise building the session path, and it does not weaken
+AUTH-09 into an aspiration. If parity cannot be measured, the API-key path stays — that is the
+decided outcome, not a failure.
+
