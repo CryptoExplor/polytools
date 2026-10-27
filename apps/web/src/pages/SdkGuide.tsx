@@ -17,6 +17,7 @@ import {
   type CandleTimeframe,
 } from "@poly/core";
 import { api } from "../lib/api";
+import { buildTypeScriptSdkExample } from "../lib/sdkTypescriptExamples";
 import { marketForSymbol } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
@@ -161,96 +162,15 @@ export default function SdkGuide() {
     const cleanKeyId = keyIdInput.trim() || "ak_...";
 
     if (lang === "typescript") {
-      if (step === "install") {
-        return `# 1. Install the official TypeScript SDK (Node.js 20+, Bun, Deno, Workers, or Browser)
-npm install @polyester/sdk
-# or: pnpm add @polyester/sdk | bun add @polyester/sdk
-
-# Ensure package.json has: "type": "module"`;
-      }
-      if (step === "market") {
-        return `import { PolyesterClient, POLYESTER_TESTNET_ENVIRONMENT } from "@polyester/sdk";
-
-// Public market data requires NO API keys or credentials
-const client = new PolyesterClient({
-  environment: POLYESTER_TESTNET_ENVIRONMENT,
-});
-
-// Load the reference catalog to map between numeric symbolId and "${symbol}"
-await client.catalog.ensureReady();
-const symbolId = client.catalog.market.requireSymbolIdByPairSymbol("${symbol}");
-console.log("Resolved ${symbol} -> symbolId:", symbolId);
-
-// Fetch live market overview (prices are returned as exact decimal strings, e.g. "82132.47")
-const { markets } = await client.marketOverview.list({ limit: 10 });
-for (const m of markets) {
-  const pairSymbol = client.catalog.market.requirePairSymbolBySymbolId(m.symbolId);
-  console.log(\`\${pairSymbol} (#\${m.symbolId}): last=\${m.lastPrice}\`);
-}`;
-      }
-      if (step === "stream") {
-        return `import { PolyesterClient, POLYESTER_TESTNET_ENVIRONMENT } from "@polyester/sdk";
-
-const client = new PolyesterClient({
-  environment: POLYESTER_TESTNET_ENVIRONMENT,
-});
-
-await client.catalog.ensureReady();
-const symbolId = client.catalog.market.requireSymbolIdByPairSymbol("${symbol}");
-
-// Subscribe to live ${streamTf} candles for ${symbol}
-const unsubscribe = client.candles.subscribe({
-  symbolId,
-  timeframe: "${streamTf}",
-  onEvent: (candle) => {
-    console.log("[${symbol} ${streamTf}] close:", candle.close, "volume:", candle.volume);
-  },
-  onError: (ctx) => {
-    console.error("Stream error:", ctx);
-  },
-});
-
-// Call unsubscribe() when finished to close the stream cleanly
-// setTimeout(() => unsubscribe(), 30_000);`;
-      }
-      return `import {
-  PolyesterClient,
-  POLYESTER_TESTNET_ENVIRONMENT,
-  evmHexToBytes,
-} from "@polyester/sdk";
-
-// Authenticate with your Ed25519 API key (requires trade-spot & read-spot permissions)
-const client = new PolyesterClient({
-  environment: POLYESTER_TESTNET_ENVIRONMENT,
-  auth: {
-    kind: "api-key-ed25519",
-    getKeyId: () => process.env.POLYESTER_API_KEY_ID ?? "${cleanKeyId}",
-    getSecretKey: () => evmHexToBytes(process.env.POLYESTER_API_SECRET_HEX ?? "0x..."),
-  },
-});
-
-await client.catalog.ensureReady();
-const symbolId = client.catalog.market.requireSymbolIdByPairSymbol("${symbol}");
-
-// Place a post-only limit ${orderSide} order on ${symbol} (mutates testnet state)
-const created = await client.orders.create({
-  symbolId,
-  side: "${orderSide}",
-  qty: "${cleanQty}",
-  execution: {
-    type: "limit_gtc",
-    price: "${cleanPx}",
-    postOnly: true,
-  },
-  clientOrderId: crypto.randomUUID(),
-});
-console.log("Order admitted:", created.orderId);
-
-// Cancel the test order by orderId
-await client.orders.cancel({
-  orderId: created.orderId,
-  symbolId,
-});`;
+      return buildTypeScriptSdkExample({
+        step,
+        symbol,
+        streamTf,
+        orderSide,
+        orderQty,
+        orderPrice,
+        keyIdInput,
+      });
     }
 
     if (lang === "python") {
@@ -455,8 +375,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         <MetricCell
           label="TypeScript SDK"
           trend="up"
-          value="@polyester/sdk"
-          sub="Node 20+, Bun, Edge & Browser"
+          value="@polyester/sdk@0.31.0"
+          sub="Fabric Labs · license-restricted"
         />
         <MetricCell
           label="Python SDK"
@@ -487,6 +407,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           <strong>PolyTools does not run this code.</strong> These snippets are examples you
           copy into your own project. Running the order examples places real orders on
           testnet and may cancel them again — nothing here executes on your behalf.
+        </div>
+      </div>
+      <div className="notice warn" role="note">
+        <div>
+          <strong>TypeScript SDK provenance and license:</strong> Registry metadata lists
+          <code className="mono"> @polyester/sdk@0.31.0</code> and links the public
+          <code className="mono"> Fabric-Labs/polyester-sdk-typescript</code> repository. Its
+          included LICENSE says use requires a separate written agreement with Fabric Blockchain
+          Labs Inc.; confirm authorization before installing or using these examples.
         </div>
       </div>
 

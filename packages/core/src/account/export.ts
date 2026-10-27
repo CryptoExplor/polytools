@@ -57,7 +57,7 @@ export interface AccountExportWindow {
 }
 
 export interface AccountExportManifest {
-  schemaVersion: "polytools.account-export.v1";
+  schemaVersion: "polytools.account-export.v2";
   dataset: AccountExportDataset;
   environment: "testnet";
   /** Only the coordinator's non-identifying account-scope category is retained. */
@@ -113,14 +113,13 @@ const BALANCE_COLUMNS = [
 
 const EQUITY_COLUMNS = [
   "series",
-  "sample_index",
+  "source_array_index",
   "source_equity",
-  "source_btc_price",
+  "source_btc_price_at_same_array_index",
   "quote_asset",
-  "derived_series_start",
-  "derived_series_latest",
-  "derived_series_change",
-  "derived_series_max_drawdown",
+  "derived_series_sample_count",
+  "derived_series_observed_low",
+  "derived_series_observed_high",
 ];
 
 const ORDER_COLUMNS = [
@@ -225,14 +224,13 @@ function projectionFor(options: AccountExportOptions): Projection {
         series.equity.forEach((equity, sampleIndex) => {
           rows.push({
             series: seriesLabel,
-            sample_index: sampleIndex,
+            source_array_index: sampleIndex,
             source_equity: equity,
-            source_btc_price: response.btcPrices[sampleIndex] ?? null,
+            source_btc_price_at_same_array_index: response.btcPrices[sampleIndex] ?? null,
             quote_asset: response.quoteAsset ?? null,
-            derived_series_start: metrics?.start?.raw ?? null,
-            derived_series_latest: metrics?.latest?.raw ?? null,
-            derived_series_change: metrics?.change?.raw ?? null,
-            derived_series_max_drawdown: metrics?.maxDrawdownAbsolute?.raw ?? null,
+            derived_series_sample_count: metrics?.sampleCount ?? null,
+            derived_series_observed_low: metrics?.observedLow?.raw ?? null,
+            derived_series_observed_high: metrics?.observedHigh?.raw ?? null,
           });
         });
       });
@@ -377,7 +375,7 @@ function manifestFor(
         : { snapshot: "Current response" };
   const exportedAtUtc = new Date(exportedAtMs).toISOString();
   return {
-    schemaVersion: "polytools.account-export.v1",
+    schemaVersion: "polytools.account-export.v2",
     dataset,
     environment: "testnet",
     scopeLabel: snapshot.scopeLabel === "Selected subaccount" ? "Selected subaccount" : "Main account",

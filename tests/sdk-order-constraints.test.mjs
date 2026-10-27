@@ -224,9 +224,10 @@ describe("SDK page contract", () => {
   });
 
   it("does not call generated order code safe", () => {
-    assert.ok(!/\bsafe post/i.test(page), "the snippet must not describe itself as safe");
+    const examples = source("apps/web/src/lib/sdkTypescriptExamples.ts");
+    assert.ok(!/\bsafe post/i.test(`${page}\n${examples}`), "the snippet must not describe itself as safe");
     assert.ok(
-      page.includes("mutates testnet state"),
+      examples.includes("mutates testnet state"),
       "the snippet comment states the consequence instead",
     );
   });
@@ -259,7 +260,8 @@ describe("SDK page contract", () => {
       ),
     ).replace(/<!-- -->/g, "");
     assert.ok(html.includes("PolyTools does not run this code."));
-    assert.ok(html.includes("npm install @polyester/sdk"), "the install step is the default view");
+    assert.ok(html.includes("npm install @polyester/sdk@0.31.0"), "the install step pins the verified package version");
+    assert.ok(html.includes("separate written agreement"), "the registry license restriction is disclosed");
     assert.ok(!html.includes("No snippet until this order is valid."), "the default step is not an order step");
   });
 });

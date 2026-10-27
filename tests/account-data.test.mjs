@@ -148,31 +148,20 @@ describe("Exact account arithmetic and coverage", () => {
     assert.equal(malformed.eligible, false);
   });
 
-  it("computes sampled change/drawdown and rejects unsorted or falsely precise samples", () => {
-    const metrics = account.sampledEquityMetrics([
-      { timestamp: "1", equity: "100" },
-      { timestamp: "2", equity: "120" },
-      { timestamp: "3", equity: "90" },
-    ]);
-    assert.equal(metrics.change.raw, "-10");
-    assert.equal(metrics.changePercent.raw, "-10");
-    assert.equal(metrics.maxDrawdownAbsolute.raw, "30");
-    assert.equal(metrics.maxDrawdownPercent.raw, "25");
-    assert.equal(metrics.label, "sampled-valuation-not-pnl");
-    const gain = account.sampledEquityMetrics([
-      { timestamp: "10", equity: "1000" },
-      { timestamp: "20", equity: "1100" },
-    ]);
-    assert.equal(gain.change.raw, "100");
-    assert.equal(gain.changePercent.raw, "10");
-    assert.throws(
-      () => account.sampledEquityMetrics([
-        { timestamp: "2", equity: "100" },
-        { timestamp: "1", equity: "90" },
-      ]),
-      (error) => error?.code === "UNSORTED_SAMPLES",
-    );
-    assert.equal(account.sampledEquityMetrics([]).latest, undefined);
+  it("reports order-agnostic sampled equity bounds without chronological metrics", () => {
+    const metrics = account.sampledEquityMetrics(["100", "120", "90"]);
+    assert.equal(metrics.sampleCount, 3);
+    assert.equal(metrics.observedLow.raw, "90");
+    assert.equal(metrics.observedHigh.raw, "120");
+    assert.equal(metrics.label, "sampled-valuation-order-unverified-not-pnl");
+    for (const chronologicalField of ["latest", "start", "change", "maxDrawdownAbsolute", "maxDrawdownPercent"]) {
+      assert.equal(chronologicalField in metrics, false);
+    }
+    const reversed = account.sampledEquityMetrics(["90", "120", "100"]);
+    assert.equal(reversed.observedLow.raw, metrics.observedLow.raw);
+    assert.equal(reversed.observedHigh.raw, metrics.observedHigh.raw);
+    assert.equal(account.sampledEquityMetrics([]).observedLow, undefined);
+    assert.throws(() => account.sampledEquityMetrics(["100", "not-a-decimal"]));
   });
 
   it("requires clean exhausted coverage and separate basis/flow gates for P&L", () => {

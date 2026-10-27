@@ -129,9 +129,7 @@ function makeSnapshot() {
   });
   const equity = {
     response: equityResponse,
-    seriesMetrics: equityResponse.series.map((series) => account.sampledEquityMetrics(
-      series.equity.map((value, index) => ({ timestamp: String(index), equity: value })),
-    )),
+    seriesMetrics: equityResponse.series.map((series) => account.sampledEquityMetrics(series.equity)),
   };
   const orders = account.validateOrderHistoryResponse({ nextPageToken: RAW_CURSOR, orders: [rawOrder()] }, markets);
   const fillsPage = account.validateFillsResponse(
@@ -297,7 +295,14 @@ describe("R2 safe account exports", () => {
     const equity = JSON.parse(account.createAccountExport({ snapshot, dataset: "equity", format: "json", exportedAtMs: EXPORTED_AT }).contents);
     assert.deepEqual(equity.manifest.filters.server, { range: "7d", groupBy: "ASSET" });
     assert.equal(equity.manifest.window.actualStartTsSec, 1700000000);
+    assert.equal(equity.manifest.schemaVersion, "polytools.account-export.v2");
     assert.equal(equity.rows[0].source_equity, "10.0000");
+    assert.equal(equity.rows[0].source_array_index, 0);
+    assert.equal(equity.rows[0].derived_series_sample_count, 2);
+    assert.equal(equity.rows[0].derived_series_observed_low, "10");
+    assert.equal(equity.rows[0].derived_series_observed_high, "11");
+    assert.equal(equity.rows[0].derived_series_latest, undefined);
+    assert.equal(equity.rows[0].derived_series_max_drawdown, undefined);
 
     const rates = JSON.parse(account.createAccountExport({ snapshot, dataset: "feeRates", format: "json", exportedAtMs: EXPORTED_AT }).contents);
     assert.equal(rates.rows[0].source_maker_fee_rate_percent, "-0.0100");
@@ -326,6 +331,14 @@ describe("R2 safe account exports", () => {
     assert.equal(account.accountCsvCell("@command"), "'@command");
     assert.equal(account.accountCsvCell("-0.0100"), "-0.0100");
     assert.equal(account.accountCsvCell('a,"b"'), '"a,""b"""');
+    const equityCsv = asRecords(account.createAccountExport({ snapshot, dataset: "equity", format: "csv", exportedAtMs: EXPORTED_AT }).contents);
+    assert.equal(equityCsv[0].manifest_schema_version, "polytools.account-export.v2");
+    assert.equal(equityCsv[0].source_array_index, "0");
+    assert.equal(equityCsv[0].derived_series_sample_count, "2");
+    assert.equal(equityCsv[0].derived_series_observed_low, "10");
+    assert.equal(equityCsv[0].derived_series_observed_high, "11");
+    assert.equal("derived_series_latest" in equityCsv[0], false);
+
     const rates = asRecords(account.createAccountExport({ snapshot, dataset: "feeRates", format: "csv", exportedAtMs: EXPORTED_AT }).contents);
     assert.equal(rates[0].source_maker_fee_rate_percent, "-0.0100");
   });

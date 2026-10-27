@@ -117,13 +117,35 @@ describe("Account UX source and cache isolation", () => {
     assert.ok(tape.includes("Public data — not your fills"));
   });
 
+  it("shows order-agnostic equity samples and separates the account testnet label from public environment", () => {
+    const analytics = source("apps/web/src/components/AccountAnalytics.tsx");
+    const portfolio = source("apps/web/src/pages/Portfolio.tsx");
+    const layout = source("apps/web/src/components/Layout.tsx");
+    const html = renderAccount("overview");
+
+    assert.ok(html.includes("Private reads: Testnet only"));
+    assert.ok(portfolio.includes("Private account reads use Polyester Testnet only."));
+    assert.ok(layout.includes("Read-only · {apiEnv}"), "the global badge still reports the public API environment");
+    assert.ok(analytics.includes("point order is unverified"));
+    assert.ok(analytics.includes("<th>Samples</th><th>Observed low</th><th>Observed high</th>"));
+    assert.ok(!analytics.includes("<th>Latest</th>"));
+    assert.ok(!analytics.includes("<th>Change</th>"));
+    assert.ok(!analytics.includes("<th>Drawdown</th>"));
+  });
+
   it("keeps the public trades request free of account authentication headers", async () => {
     const originalFetch = globalThis.fetch;
     let captured;
     try {
       globalThis.fetch = async (url, init) => {
         captured = { url: String(url), init };
-        return new Response(JSON.stringify({ symbol: "BTC-USDT", trades: [] }), {
+        return new Response(JSON.stringify({
+          apiEnv: "testnet",
+          symbol: "BTC-USDT",
+          symbolId: 1,
+          tradeCount: 0,
+          trades: [],
+        }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
