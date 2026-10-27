@@ -417,7 +417,7 @@ Tracked so nothing in this handoff is silently dropped. None of these is closed 
 
 | # | Item | State | Owner | Where |
 |---|---|---|---|---|
-| **C-1** | **Stage 2b origin gate (NBA-6)** | **Unverified** — needs one approved origin + one browser; no challenge called | You approve, then one call | `07` §4.1–4.2 |
+| **C-1** | **Stage 2b origin gate (NBA-6)** | **Unverified** — needs one approved origin + one browser; no challenge called. The check is now a committed script: `node tools/auth-gate-probe.mjs` (unauthenticated, testnet, fabricated address, no key or wallet) | You run it in your own terminal — this sandbox has no TLS egress to the API (`ECONNRESET`) | `07` §4.1–4.2 |
 | **C-2** | **Authorised live API-key tests** (items 6, 7, 8, 11, and stale/401/403 of 12) | **Blocked** — needs an authorised testnet key entered by you through the app's own UI | You | `13` §3, §3.2 |
 | **C-3** | **Pages-level CSP as served** (item 19) | **Blocked** — dev server emits no CSP; needs a Pages preview | Deploy authorisation (not granted) | `13` §3 |
 | **C-4** | **Outstanding browser sub-checks** — A3, A6, B8, C3, D3, D6, D8, E2, E5, B6-inner-scroll | **Not run** — honest gaps, none needs a key or wallet | Either of us, ~10 min total | `14` §4 |
