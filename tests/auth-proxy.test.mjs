@@ -543,6 +543,55 @@ describe("upstream refusals stay attributable", () => {
   });
 });
 
+describe("a session token can never reach the shared cache", () => {
+  it("dispatches the auth route before any cache lookup", async () => {
+    // This is the structural guarantee, not a header. Auth is handled before the
+    // `cached()` calls in api(), so no token can enter the isolate-wide store
+    // even if a response header were ever dropped. If a refactor moves the
+    // auth branch below the cache, this fails.
+    const { clearCache, cacheStats } = await vite.ssrLoadModule("/backend/src/cache.ts");
+    clearCache();
+    reset();
+    scenario = {
+      reply: {
+        status: 200,
+        body: { accessToken: "tok_secret", expiresAt: "2026-10-27T21:43:44.000Z", accountId: "1", username: "u" },
+      },
+    };
+
+    const before = cacheStats();
+    const response = await backend.api(
+      authRequest("/api/auth/login", {
+        body: JSON.stringify({ smartAccountAddress: SMART_ACCOUNT, signature: SIGNATURE, message: MESSAGE }),
+      }),
+      env(),
+    );
+    const after = cacheStats();
+
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).accessToken, "tok_secret");
+    assert.deepEqual(after, before, "the cache must be untouched by an auth request");
+    assert.equal(after.keys, 0);
+  });
+
+  it("still marks the token non-cacheable for anything downstream", async () => {
+    reset();
+    scenario = {
+      reply: {
+        status: 200,
+        body: { accessToken: "tok_secret", expiresAt: "2026-10-27T21:43:44.000Z", accountId: "1", username: "u" },
+      },
+    };
+    const response = await backend.api(
+      authRequest("/api/auth/login", {
+        body: JSON.stringify({ smartAccountAddress: SMART_ACCOUNT, signature: SIGNATURE, message: MESSAGE }),
+      }),
+      env(),
+    );
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+  });
+});
+
 describe("surface discipline", () => {
   it("is same-origin only and POST-only", async () => {
     reset();
