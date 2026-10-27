@@ -512,10 +512,33 @@ describe("upstream refusals stay attributable", () => {
     assert.equal(/<title>|<!DOCTYPE/i.test(result.detail), false);
   });
 
-  it("does not echo arbitrary HTML as if it were a message", async () => {
+  it("names a firewall block without echoing the page", async () => {
+    // The real answer from the deployed preview: 403, HTML, cf-ray, and no
+    // cf-mitigated header. Cloudflare uses cf-mitigated for challenges, so its
+    // absence is itself the evidence that this was a rule block, not a challenge.
+    const d = await describeFn();
+    const headers = new Headers({ "cf-ray": "a514e09d6d7fa7e5-DEL" });
+    const html =
+      '<!DOCTYPE html><html><head><title>Access denied | api.testnet.polyester.com used Cloudflare to restrict access</title></head>' +
+      "<body><h1>Error 1020</h1><p>This website is using a security service.</p></body></html>";
+    const result = d(403, "text/html", headers, html, null);
+
+    assert.equal(result.code, "upstream_403");
+    assert.match(result.detail, /firewall/i);
+    assert.match(result.detail, /cf-error=1020/);
+    assert.match(result.detail, /title="Access denied/);
+    assert.match(result.detail, /cf-ray=a514e09d6d7fa7e5-DEL/);
+    // Markup never reaches the caller; only the title text and the identifiers.
+    assert.equal(/<title>|<h1>|DOCTYPE/i.test(result.detail), false);
+    // It must not claim a browser challenge it has no evidence for: no
+    // cf-mitigated header and no challenge marker in the page.
+    assert.equal(/browser challenge|cf-mitigated/i.test(result.detail), false);
+  });
+
+  it("does not echo arbitrary HTML as a message", async () => {
     const d = await describeFn();
     const result = d(502, "text/html", new Headers(), "<html><body>Bad gateway</body></html>", null);
-    assert.match(result.detail, /HTML page instead of a Connect error/i);
+    assert.match(result.detail, /firewall|HTML/i);
     assert.equal(/<body>/.test(result.detail), false);
   });
 

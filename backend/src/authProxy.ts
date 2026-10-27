@@ -198,12 +198,25 @@ export function describeUpstreamFailure(
   }
 
   if (isHtml) {
-    // Never echo the markup. Say what it is, so the block is attributable.
-    const challenge = /just a moment|checking your browser|cf-browser-verification|challenge-platform/i.test(body);
+    // Never echo the markup. Cloudflare block pages carry two things worth
+    // keeping: a <title> that names the rule ("Access denied", "Just a moment…")
+    // and sometimes a numeric error code (1020, 1010). Both identify the block
+    // precisely enough for the API's operator to find it, without us relaying
+    // their HTML or guessing at a cause.
+    const title = (/<title[^>]*>([^<]{1,120})<\/title>/i.exec(body)?.[1] ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80);
+    const numeric = /\b(?:error|code)[^0-9]{0,12}(\d{4})\b/i.exec(body)?.[1];
+    const challenge = /just a moment|checking your browser|cf-browser-verification|challenge-platform|cf_chl/i.test(body);
+
     const label = challenge
       ? "blocked by a browser challenge in front of the API"
-      : "returned an HTML page instead of a Connect error";
-    return { code, detail: [label, ...suffixes].join(" · ") };
+      : "refused by a firewall in front of the API (HTML, no Connect body)";
+    const facts: string[] = [];
+    if (title) facts.push(`title="${title}"`);
+    if (numeric) facts.push(`cf-error=${numeric}`);
+    return { code, detail: [label, ...facts, ...suffixes].join(" · ") };
   }
 
   const snippet = body.replace(/\s+/g, " ").trim().slice(0, 200);
