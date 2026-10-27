@@ -265,6 +265,12 @@ non-app noise separately.
 that failed to inject at all (§3.1a). EIP-6963 replaces "trust one global" with "wallets announce
 themselves, the user picks".
 
+**One control, not one button per wallet.** The first implementation rendered a button per announced
+wallet; with 7–8 extensions the topbar became a wall of buttons (user-reported). It is now a **single
+"Connect wallet ▾"** control: clicking it opens a compact menu, capped at 260 px and scrollable, that
+closes on Escape, on an outside click, and after a choice. A single wallet never opens a menu — the
+button connects immediately, exactly as before.
+
 **What changed.** `apps/web/src/lib/walletDiscovery.ts` collects `eip6963:announceProvider` replies,
 validates every announcement as untrusted input (uuid required, provider needs `request`, names
 trimmed, control characters stripped and bounded to 32 chars, malformed entries dropped, first
@@ -276,15 +282,18 @@ choice** — a single wallet keeps the original "Connect wallet" button, markup 
 **Scope guards, asserted by tests:** discovery issues no network request (`fetch` spy), never throws
 on a hostile event target, and grants no account session.
 
-**Browser evidence (real Chromium, 18/18 checks):**
+**Browser evidence (real Chromium: 17 checks on the menu, plus the earlier discovery runs):**
 
 | Case | Result |
 |---|---|
-| Single legacy wallet | **Unchanged** — "Connect wallet", no picker, connects to `0xabcd…ef01` |
-| Two EIP-6963 wallets, **no** `window.ethereum` at all | Two buttons; choosing Phantom connects through **Phantom's** provider (`0x2222…2222`) |
-| Legacy winner plus an announced rival | Picker wins: choosing Rabby uses Rabby (`0x3333…3333`), not the global |
-| Keyboard at 390 px | Wallet buttons reachable by Tab; **Enter connects** |
-| Layout at 390 px | Two buttons fit, `scrollWidth === innerWidth`, no overflow |
+| **8 wallets installed** | **One** topbar control, `Connect wallet ▾`; menu lists all 8 only on demand |
+| **30 wallets installed** | Still one control; menu capped at **260 px**, scrollable, last item reachable, **no page overflow** |
+| Menu dismissal | **Escape** closes, **outside click** closes, closes after a choice |
+| Single legacy wallet | **Unchanged** — plain `Connect wallet`, no caret, no menu, connects to `0xabcd…ef01` |
+| Two EIP-6963 wallets, **no** `window.ethereum` at all | Menu; choosing Phantom connects through **Phantom's** provider (`0x2222…2222`) |
+| Legacy winner plus an announced rival | Choosing Rabby uses Rabby (`0x3333…3333`), not the global |
+| Keyboard at 390 px | Button reachable by Tab, **Enter opens the menu**, Tab moves into the items |
+| Layout at 390 px | Menu stays inside the viewport, `scrollWidth === innerWidth` |
 | Console / page errors | None in any case |
 
 **Test coverage:** `tests/wallet-discovery.test.mjs` — 22 tests (parsing, sanitisation, dedupe,

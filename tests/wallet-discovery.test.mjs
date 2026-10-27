@@ -396,3 +396,35 @@ describe("Wallet selection — UI contract", () => {
     assert.match(title, /no trading/i);
   });
 });
+
+describe("Wallet selection — one control, however many wallets", () => {
+  const providerEntry = (uuid, name) => ({
+    info: { uuid, name, rdns: `io.${name.toLowerCase()}` },
+    provider: fakeProvider(),
+  });
+  // `before()` has not run when the describe body executes, so build views lazily.
+  const connectView = () =>
+    button.describeWalletControl({ status: "disconnected", address: null, chainId: null, error: null, updatedAtMs: 1 });
+  const connectedView = () =>
+    button.describeWalletControl({ status: "connected", address: ADDR_LOWER, chainId: "1", error: null, updatedAtMs: 1 });
+
+  it("connects directly with no wallet or exactly one", () => {
+    assert.equal(button.walletClickAction([], connectView()), "connect");
+    assert.equal(button.walletClickAction([providerEntry("a", "Alpha")], connectView()), "connect");
+  });
+
+  it("opens the menu only when there is a real choice", () => {
+    assert.equal(
+      button.walletClickAction([providerEntry("a", "Alpha"), providerEntry("b", "Beta")], connectView()),
+      "menu",
+    );
+    // Eight installed wallets are still ONE button.
+    const eight = Array.from({ length: 8 }, (_, i) => providerEntry(`u${i}`, `Wallet ${i}`));
+    assert.equal(button.walletClickAction(eight, connectView()), "menu");
+  });
+
+  it("never opens the menu for a connected wallet", () => {
+    const many = Array.from({ length: 8 }, (_, i) => providerEntry(`u${i}`, `Wallet ${i}`));
+    assert.equal(button.walletClickAction(many, connectedView()), "connect");
+  });
+});

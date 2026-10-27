@@ -459,6 +459,12 @@ cannot be closed without one real call. Two further facts change the cost of clo
 
 Approving the origin is therefore the only thing standing between this question and an answer.
 
+**Update 2026-10-27 — the browser route is closed.** A probe from the deployed preview origin was
+refused by CORS before the POST was sent (*"No 'Access-Control-Allow-Origin' header is present"*).
+That does **not** answer this question — the request never reached the server — but it does mean the
+test must be run **server-to-server**. It also makes a same-origin proxy the likely Stage 2b shape,
+which removes the CORS dependency and keeps the session token out of script reach (`07` §4.1a).
+
 ### Q30. Do you accept EOA-only wallet support for launch? — **DECIDED 2026-10-27 (NBA-4.2)**
 
 **Evidence.** `AccountSigner.signMessage` must return the **owner EOA's raw 65-byte EIP-191

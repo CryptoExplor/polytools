@@ -9,6 +9,7 @@
  * without a DOM or a client renderer.
  */
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   chainLabel,
   shortenAddress,
@@ -16,6 +17,7 @@ import {
   type WalletState,
 } from "../lib/walletConnection";
 import { useWalletConnection, useWalletProviders } from "../lib/useWallet";
+import type { DiscoveredProvider } from "../lib/walletDiscovery";
 
 export type WalletControlView =
   | { kind: "hidden" }
@@ -61,6 +63,21 @@ export function describeWalletControl(state: WalletState): WalletControlView {
   }
 }
 
+/**
+ * What a click on the single wallet button should do.
+ *
+ * No choice to make → connect immediately, exactly the pre-discovery behaviour.
+ * A choice → open the menu. The label never changes, so the topbar stays one
+ * control however many wallets are installed.
+ */
+export function walletClickAction(
+  providers: readonly DiscoveredProvider[],
+  view: WalletControlView,
+): "connect" | "menu" {
+  if (view.kind === "connected") return "connect";
+  return providers.length > 1 ? "menu" : "connect";
+}
+
 /** Tooltip for a per-wallet button. Same claim as CONNECT_TITLE, per wallet. */
 export function walletChoiceTitle(name: string): string {
   return `Connect ${name}. Connection only: no sign-in, no account data, no trading.`;
@@ -70,6 +87,41 @@ export function WalletButton() {
   const { state, connect, disconnect } = useWalletConnection();
   const { providers, choose } = useWalletProviders();
   const view = describeWalletControl(state);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
+
+  // Close on Escape and on any click outside, the two things a menu must honour.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    const onPointer = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && wrapRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onPointer);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onPointer);
+    };
+  }, [menuOpen]);
+
+  // A wallet that disappears (extension disabled) must not leave a stale menu.
+  useEffect(() => {
+    if (providers.length <= 1) setMenuOpen(false);
+  }, [providers.length]);
+
+  const pick = useCallback(
+    (uuid: string) => {
+      setMenuOpen(false);
+      choose(uuid);
+      void connect();
+    },
+    [choose, connect],
+  );
 
   if (view.kind === "hidden") return null;
 
@@ -78,36 +130,6 @@ export function WalletButton() {
       <span className="pill wallet-pill" aria-live="polite">
         <span className="dot" />
         Connecting…
-      </span>
-    );
-  }
-
-  // Only shown when the user actually has a choice to make: two or more wallets
-  // announced themselves, or one announced itself without owning
-  // `window.ethereum` (an EIP-6963-only wallet). A single legacy wallet keeps the
-  // original button exactly, and a connected wallet is never re-prompted.
-  const showsPicker =
-    view.kind !== "connected" &&
-    (providers.length > 1 || (providers.length === 1 && view.kind === "unavailable"));
-
-  if (showsPicker) {
-    return (
-      <span className="wallet-cluster" role="group" aria-label="Choose a wallet to connect">
-        {providers.map((entry) => (
-          <button
-            key={entry.info.uuid}
-            type="button"
-            className="btn sm wallet-connect"
-            onClick={() => {
-              // Selection first, then the same explicit gesture path as always.
-              choose(entry.info.uuid);
-              void connect();
-            }}
-            title={walletChoiceTitle(entry.info.name)}
-          >
-            {entry.info.name}
-          </button>
-        ))}
       </span>
     );
   }
@@ -132,7 +154,9 @@ export function WalletButton() {
     );
   }
 
-  if (view.kind === "unavailable") {
+  // An EIP-6963-only wallet owns no `window.ethereum`, so "No wallet" would be a
+  // lie; the button must be offered even when the legacy probe found nothing.
+  if (view.kind === "unavailable" && providers.length === 0) {
     return (
       <span className="pill wallet-pill" title={view.message} aria-live="polite">
         No wallet
@@ -153,14 +177,58 @@ export function WalletButton() {
     );
   }
 
+  const action = walletClickAction(providers, view);
+  const label = "Connect wallet";
+
+  if (action === "connect") {
+    return (
+      <button
+        type="button"
+        className="btn sm wallet-connect"
+        onClick={() => {
+          // A single announced wallet may not be the one `window.ethereum` gave
+          // us, so point the connection at it before the explicit gesture.
+          if (providers.length === 1) choose(providers[0].info.uuid);
+          void connect();
+        }}
+        title={view.kind === "connect" ? view.title : CONNECT_TITLE}
+      >
+        {label}
+      </button>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      className="btn sm wallet-connect"
-      onClick={() => void connect()}
-      title={view.title}
-    >
-      Connect wallet
-    </button>
+    <span className="wallet-picker" ref={wrapRef}>
+      <button
+        type="button"
+        className="btn sm wallet-connect wallet-menu-toggle"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+        title="Choose a browser wallet. Connection only: no sign-in, no account data, no trading."
+      >
+        {label}
+        <span className="wallet-menu-caret" aria-hidden="true">
+          ▾
+        </span>
+      </button>
+      {menuOpen && (
+        <div className="wallet-menu" role="menu" aria-label="Choose a wallet">
+          {providers.map((entry) => (
+            <button
+              key={entry.info.uuid}
+              type="button"
+              role="menuitem"
+              className="wallet-menu-item"
+              onClick={() => pick(entry.info.uuid)}
+              title={walletChoiceTitle(entry.info.name)}
+            >
+              {entry.info.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }

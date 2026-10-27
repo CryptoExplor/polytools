@@ -118,6 +118,7 @@ declaration study only. Everything below was established **without** calling the
 | 6 | Is a non-production origin an expected case? | Client config: *"Browser storage scopes the bearer and display-session cookies by port on loopback, `.localhost`, and RFC1918 private IPv4 hosts"* | **Yes — local/LAN origins are a supported scenario** |
 | 7 | Does our own CSP already permit the call? | `apps/web/public/_headers` → `connect-src … https://api.testnet.polyester.com` | **Already permitted**; no CSP change needed for the API host |
 | 8 | Can the agent's sandbox execute the test? | DNS resolves (`api.testnet.polyester.com`); TCP 443 opens; TLS handshake fails `SSL_ERROR_SYSCALL` (egress proxy resets). Docs are readable only through a separate reader | **No — must run in your browser** |
+| 9 | Can a browser at a non-production origin call it directly? | **User-executed 2026-10-27** at `https://arena-609563ba-polytools.polytools-cc8.pages.dev`: `fetch` POST to `.../auth.v1.AuthService/CreateWalletChallenge` → *"blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource"*, then `net::ERR_FAILED` | **No — preflight refused** |
 
 **What this narrows.** The gate is **not** an origin-registration, allowlist-application or
 deployment-authorisation process: no such step appears in any official declaration, and the SDK
@@ -128,11 +129,56 @@ public call**:
 1. whether the backend accepts `uri` set to a non-production origin, and
 2. whether CORS permits a browser at that origin to read the response.
 
-**What the gate needs.** One approved origin value (`07` §4.2) and one ordinary browser. **No
-deployment, wallet, API key or exchange account is required for this step**: `createWalletChallenge`
-is public (`auth: public` in the SDK reference) and takes any two syntactically valid addresses, so
-the acceptance question is settled before any signature exists. The *later* S-12 step — signature →
-JWT → `sessionLevel` — is separate and does need a real wallet.
+**What the gate needs — revised 2026-10-27.** A browser is **not** sufficient: the preflight is
+refused (§4.1a), so the request never leaves the page. The acceptance question must be asked
+**server-to-server**, where CORS does not apply. Still no wallet, key, account or deployment is
+required — `createWalletChallenge` is public and takes any two syntactically valid addresses. The
+*later* S-12 step — signature → JWT → `sessionLevel` — is separate and does need a real wallet.
+
+### 4.1a CORS — the browser cannot call the auth API directly (evidence, 2026-10-27)
+
+You ran the proposed probe from the deployed preview origin
+`https://arena-609563ba-polytools.polytools-cc8.pages.dev`. The browser refused it **before the POST
+was ever sent**:
+
+```
+Access to fetch at 'https://api.testnet.polyester.com/auth.v1.AuthService/CreateWalletChallenge'
+from origin 'https://arena-609563ba-polytools.polytools-cc8.pages.dev' has been blocked by CORS
+policy: Response to preflight request doesn't pass access control check: No
+'Access-Control-Allow-Origin' header is present on the requested resource.
+POST ... net::ERR_FAILED
+```
+
+**What this establishes:** a browser at that origin cannot call the auth RPC successfully today. The
+preflight was answered without `Access-Control-Allow-Origin`, and the browser then refused to send
+the request.
+
+**What it does not establish — and this matters:**
+
+1. **It does not answer the gate.** The POST never happened, so the question "does the backend accept
+   a non-production `uri`" is untouched. CORS is a browser policy check on the *response*; it tells us
+   nothing about what the server would have done with the request.
+2. **It does not distinguish two different causes.** Either the exchange allowlists specific origins
+   (and this one is not on the list), or the service emits no CORS headers for this route at all. The
+   browser hides the status code and headers of a failed preflight, so we cannot tell which.
+3. **It does not tell us about the production origin.** The shipping origin was never tested, and it
+   will not be — production is not a test environment.
+
+**Architectural consequence (recorded, not implemented).** Stage 2b must not assume browser-direct
+calls to the auth API. Two viable shapes:
+
+| Shape | Consequence |
+|---|---|
+| **Proxy through our own origin** (`/api/*` Pages Function → auth API) | Removes the CORS dependency entirely; the browser only talks to our own origin, which `connect-src 'self'` already covers. Also the only shape that can keep the session token out of script reach (HttpOnly cookie). **Recommended.** |
+| Browser calls the API directly | Requires the exchange to allowlist our exact origin *and* the browser to pass preflight. Unproven, and unprovable on a non-production origin until it is tested. |
+
+**A related question this raises, not asserted:** the existing API-key account path builds
+**direct browser GETs** to the same host with Ed25519 headers — which also triggers a preflight
+(`docs/account-live-verification.md`, `docs/audit/DEPLOYMENT_HARDENING.md`). If CORS is refused
+origin-wide, that path would fail in a browser too, independently of the key. **This is a hypothesis,
+not a finding**: the API-key path has never been exercised live (`13` item 6–8, still blocked), and
+the observed refusal may be route-specific. The discriminating test is a preflight against the
+account REST route from the same origin — cheap, and it needs no key.
 
 ### 4.2 The one origin to approve
 
