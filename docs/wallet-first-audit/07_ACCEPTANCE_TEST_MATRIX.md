@@ -209,6 +209,56 @@ not a finding**: the API-key path has never been exercised live (`13` item 6–8
 the observed refusal may be route-specific. The discriminating test is a preflight against the
 account REST route from the same origin — cheap, and it needs no key.
 
+### 4.1b The exact command to run (corrected 2026-10-27)
+
+Two errors in the first version circulated, both fixed here:
+
+- **`purpose` was wrong.** The enum is `auth.v1.WalletChallengePurpose` with values
+  `WALLET_PROOF_UNSPECIFIED = 0` and **`LOGIN = 1`**. There is no `WALLET_CHALLENGE_PURPOSE_LOGIN`.
+  The SDK itself sends `purpose: 1`, so that is what the probe must send.
+- **It is a shell command, not JavaScript.** Pasting it into a browser console fails immediately
+  (`SyntaxError: Unexpected identifier 'POST'`), because the console runs JavaScript. The browser
+  route is closed anyway (§4.1a) — CORS refuses the preflight, so the POST never leaves the page.
+
+Route verified from the generated proto: `auth.v1.AuthService/CreateWalletChallenge`.
+
+**Bash / zsh / Git Bash (one line, no continuations):**
+
+```bash
+curl -si -X POST 'https://api.testnet.polyester.com/auth.v1.AuthService/CreateWalletChallenge' -H 'Content-Type: application/json' -d '{"smartAccountAddress":"0x1111111111111111111111111111111111111111","signerAddress":"0x1111111111111111111111111111111111111111","uri":"https://arena-609563ba-polytools.polytools-cc8.pages.dev","purpose":1}' | head -30
+```
+
+**PowerShell / CMD** (`curl.exe`, not the PowerShell `curl` alias):
+
+```powershell
+curl.exe -si -X POST "https://api.testnet.polyester.com/auth.v1.AuthService/CreateWalletChallenge" -H "Content-Type: application/json" -d "{\"smartAccountAddress\":\"0x1111111111111111111111111111111111111111\",\"signerAddress\":\"0x1111111111111111111111111111111111111111\",\"uri\":\"https://arena-609563ba-polytools.polytools-cc8.pages.dev\",\"purpose\":1}"
+```
+
+**Node ≥ 18 (any OS — no curl quoting problems):** save as `probe.mjs` and run `node probe.mjs`.
+
+```js
+fetch("https://api.testnet.polyester.com/auth.v1.AuthService/CreateWalletChallenge", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    smartAccountAddress: "0x1111111111111111111111111111111111111111",
+    signerAddress: "0x1111111111111111111111111111111111111111",
+    uri: "https://arena-609563ba-polytools.polytools-cc8.pages.dev",
+    purpose: 1,
+  }),
+}).then(async (r) => {
+  console.log("STATUS:", r.status);
+  console.log("ACAO:", r.headers.get("access-control-allow-origin"));
+  console.log("BODY:", (await r.text()).slice(0, 500));
+});
+```
+
+**What each outcome means.** Any HTTP status with a body settles the gate: `200` + a SIWE message
+means the `uri` is accepted; a structured error means it is not, and the code names the reason.
+`ACAO` additionally shows whether the host would ever answer a browser, which decides between the
+two Stage 2b shapes in §4.1a. A *network* error means nothing was learned — the tool never reached
+the host.
+
 ### 4.2 The one origin to approve
 
 | Candidate | Non-production? | Real HTTPS? | Notes |
