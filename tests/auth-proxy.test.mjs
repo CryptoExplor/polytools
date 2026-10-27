@@ -384,11 +384,11 @@ describe("dev/prod parity", () => {
 
       // The header proves headers arrived.
       const cross = await post(
-        { "Content-Type": "application/json", "Sec-Fetch-Site": "cross-site" },
+        { "Content-Type": "application/json", Origin: "https://evil.example" },
         JSON.stringify({ smartAccountAddress: SMART_ACCOUNT, signerAddress: SIGNER }),
       );
       assert.equal(cross.status, 403);
-      assert.equal((await cross.json()).error, "cross_site_blocked");
+      assert.equal((await cross.json()).error, "origin_not_allowed");
     } finally {
       await new Promise((resolve) => devServer.close(resolve));
     }
@@ -501,18 +501,82 @@ describe("surface discipline", () => {
     assert.equal(options.headers.get("Allow"), "POST, OPTIONS");
   });
 
-  it("blocks a cross-site caller before it reaches the exchange", async () => {
+  it("refuses an unlisted cross-origin caller before it reaches the exchange", async () => {
     reset();
     const response = await backend.api(
       authRequest("/api/auth/challenge", {
-        headers: { "Content-Type": "application/json", "Sec-Fetch-Site": "cross-site" },
+        headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
         body: JSON.stringify({ smartAccountAddress: SMART_ACCOUNT, signerAddress: SIGNER }),
       }),
       env(),
     );
     assert.equal(response.status, 403);
-    assert.equal((await response.json()).error, "cross_site_blocked");
+    assert.equal((await response.json()).error, "origin_not_allowed");
     assert.equal(upstreamCalls.length, 0);
+    // An unlisted origin gets no CORS grant, so it cannot read the reply either.
+    assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+  });
+
+  it("allows the app origin when it is explicitly configured", async () => {
+    // The documented deployment is a static frontend on a different origin from
+    // the worker. A same-origin-only rule broke every real request.
+    reset();
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", {
+        headers: { "Content-Type": "application/json", Origin: "https://app.example" },
+        body: JSON.stringify({ signerAddress: SIGNER }),
+      }),
+      { env: { POLYESTER_API_ORIGIN: mockOrigin, POLYTOOLS_APP_ORIGINS: "https://app.example" } },
+    );
+    assert.equal(response.status, 200);
+    // Echoed exactly, never `*`.
+    assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://app.example");
+    assert.equal(response.headers.get("Vary"), "Origin");
+    assert.equal(upstreamCalls.length, 1);
+  });
+
+  it("answers the preflight only for an allowed origin", async () => {
+    const preflight = (origin, appOrigins) =>
+      backend.api(
+        new Request("https://polytools.example/api/auth/challenge", {
+          method: "OPTIONS",
+          headers: { Origin: origin, "Access-Control-Request-Method": "POST" },
+        }),
+        { env: { POLYESTER_API_ORIGIN: mockOrigin, ...(appOrigins ? { POLYTOOLS_APP_ORIGINS: appOrigins } : {}) } },
+      );
+
+    const blocked = await preflight("https://evil.example");
+    assert.equal(blocked.status, 403);
+    assert.equal(blocked.headers.get("Access-Control-Allow-Origin"), null);
+
+    const ok = await preflight("https://app.example", "https://app.example");
+    assert.equal(ok.status, 204);
+    assert.equal(ok.headers.get("Access-Control-Allow-Origin"), "https://app.example");
+    assert.match(ok.headers.get("Access-Control-Allow-Headers") ?? "", /content-type/i);
+  });
+
+  it("keeps same-origin callers working with no CORS grant at all", async () => {
+    reset();
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", {
+        body: JSON.stringify({ signerAddress: SIGNER }),
+      }),
+      env(),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+  });
+
+  it("parses the allowlist defensively", async () => {
+    const { resolveAppOrigins } = await vite.ssrLoadModule("/backend/src/authProxy.ts");
+    assert.deepEqual(resolveAppOrigins(undefined), []);
+    assert.deepEqual(resolveAppOrigins({ POLYTOOLS_APP_ORIGINS: "" }), []);
+    assert.deepEqual(
+      resolveAppOrigins({ POLYTOOLS_APP_ORIGINS: "https://a.example, https://b.example/" }),
+      ["https://a.example", "https://b.example"],
+    );
+    // A malformed entry must not widen the list.
+    assert.deepEqual(resolveAppOrigins({ POLYTOOLS_APP_ORIGINS: "not-a-url,https://a.example" }), ["https://a.example"]);
   });
 
   it("leaves every existing route GET-only", async () => {

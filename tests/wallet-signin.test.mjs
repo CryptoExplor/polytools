@@ -344,3 +344,62 @@ describe("consent — connecting is not signing in", () => {
     }
   });
 });
+
+describe("a refusal names the right layer — never the wrong one", () => {
+  /** A fetch that returns exactly the proxy response we want to classify. */
+  const responding = (status, payload) => async () =>
+    new Response(typeof payload === "string" ? payload : JSON.stringify(payload), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const attempt = (fetchImpl) =>
+    sessionModule.login({ provider: fakeWallet(), address: EOA, fetchImpl });
+
+  it("reports our own origin guard as this deployment, not as Polyester", async () => {
+    // The bug: every 403 was reported as "Polyester refused this site's origin",
+    // which sends the reader to the exchange when the block happened here.
+    for (const code of ["origin_not_allowed", "cross_site_blocked"]) {
+      try {
+        await attempt(responding(403, { error: code }));
+        assert.fail("should have thrown");
+      } catch (error) {
+        assert.equal(error.code, "origin_not_allowed", code);
+      }
+    }
+  });
+
+  it("still reports the exchange's own refusal as an origin rejection", async () => {
+    try {
+      await attempt(responding(403, { error: "permission_denied", detail: "uri is not permitted" }));
+      assert.fail("should have thrown");
+    } catch (error) {
+      assert.equal(error.code, "origin_rejected");
+      assert.equal(error.detail, "uri is not permitted");
+    }
+  });
+
+  it("recognises a non-JSON 403 as an unreachable endpoint", async () => {
+    // A static host answering POST to a path only the backend serves.
+    try {
+      await attempt(responding(403, "<html>Forbidden</html>"));
+      assert.fail("should have thrown");
+    } catch (error) {
+      assert.equal(error.code, "endpoint_unreachable");
+    }
+  });
+});
+
+describe("the client honours the deployment's API base", () => {
+  it("builds auth URLs from API_BASE rather than a bare relative path", () => {
+    // On the documented static deploy the backend is a separate worker, so a
+    // relative /api/auth/... call hits the static host and 403s there. This is
+    // exactly the failure that shipped.
+    const text = source("apps/web/src/lib/polyesterSession.ts");
+    assert.match(text, /import \{ API_BASE \} from "\.\/api"/);
+    assert.match(text, /\$\{API_BASE\}\/api\/auth\/challenge/);
+    assert.match(text, /\$\{API_BASE\}\/api\/auth\/login/);
+    // No bare relative auth URL may remain.
+    assert.equal(/doFetch\("\/api\/auth/.test(text), false);
+  });
+});

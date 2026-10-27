@@ -64,19 +64,22 @@ export interface AuthProxyEnv {
 type Json = Record<string, unknown>;
 
 /** Auth responses are same-origin only: no `Access-Control-Allow-Origin`. */
-function authJson(body: unknown, status = 200): Response {
+function authJson(body: unknown, status = 200, cors?: Record<string, string>): Response {
   const headers = new Headers({
     "Content-Type": "application/json; charset=utf-8",
     // A session token must not land in any cache, browser, edge or otherwise.
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
+    // The response varies by caller origin, so any cache must key on it.
+    Vary: "Origin",
   });
+  for (const [name, value] of Object.entries(cors ?? {})) headers.set(name, value);
   applySecurityHeaders(headers);
   return new Response(JSON.stringify(body), { status, headers });
 }
 
-function authError(status: number, code: string, detail?: string): Response {
-  return authJson(detail ? { error: code, detail } : { error: code }, status);
+function authError(status: number, code: string, detail?: string, cors?: Record<string, string>): Response {
+  return authJson(detail ? { error: code, detail } : { error: code }, status, cors);
 }
 
 /**
@@ -256,15 +259,21 @@ async function deriveSmartAccount(signerAddress: string): Promise<string | null>
 }
 
 /** POST /api/auth/challenge — ask the exchange for a message for the wallet to sign. */
-async function handleChallenge(request: Request, env?: Record<string, string | undefined>): Promise<Response> {
+async function handleChallenge(
+  request: Request,
+  env?: Record<string, string | undefined>,
+  cors?: Record<string, string>,
+): Promise<Response> {
+  const fail = (status: number, code: string, detail?: string) =>
+    authError(status, code, detail, cors);
   const apiOrigin = resolveAuthApiOrigin(env);
-  if (!apiOrigin) return authError(503, "api_origin_misconfigured");
+  if (!apiOrigin) return fail(503, "api_origin_misconfigured");
 
   const body = await readJsonBody(request);
-  if (!body) return authError(400, "invalid_body");
+  if (!body) return fail(400, "invalid_body");
 
   const signerAddress = typeof body.signerAddress === "string" ? body.signerAddress.trim() : "";
-  if (!ADDRESS_RE.test(signerAddress)) return authError(400, "invalid_signer_address");
+  if (!ADDRESS_RE.test(signerAddress)) return fail(400, "invalid_signer_address");
 
   // Derive unless the caller knows its own Safe address exactly (an existing
   // account). A supplied value is validated, never trusted blindly.
@@ -272,14 +281,14 @@ async function handleChallenge(request: Request, env?: Record<string, string | u
     typeof body.smartAccountAddress === "string" ? body.smartAccountAddress.trim() : "";
   let smartAccountAddress = supplied;
   if (smartAccountAddress) {
-    if (!ADDRESS_RE.test(smartAccountAddress)) return authError(400, "invalid_smart_account_address");
+    if (!ADDRESS_RE.test(smartAccountAddress)) return fail(400, "invalid_smart_account_address");
   } else {
     smartAccountAddress = (await deriveSmartAccount(signerAddress)) ?? "";
-    if (!smartAccountAddress) return authError(503, "smart_account_derivation_unavailable");
+    if (!smartAccountAddress) return fail(503, "smart_account_derivation_unavailable");
   }
 
   const uri = challengeUri(request);
-  if (!uri) return authError(400, "invalid_request_origin");
+  if (!uri) return fail(400, "invalid_request_origin");
 
   const upstream = await callConnect(apiOrigin, "CreateWalletChallenge", {
     smartAccountAddress,
@@ -291,7 +300,7 @@ async function handleChallenge(request: Request, env?: Record<string, string | u
   if (!upstream.ok) return upstream.response;
 
   const message = typeof upstream.body.message === "string" ? upstream.body.message : "";
-  if (!message) return authError(502, "upstream_missing_message");
+  if (!message) return fail(502, "upstream_missing_message");
 
   return authJson({
     // Returned verbatim: the wallet must sign these exact UTF-8 bytes.
@@ -302,26 +311,32 @@ async function handleChallenge(request: Request, env?: Record<string, string | u
     smartAccountAddress,
     signerAddress,
     expiresAt: isoFromTimestamp(upstream.body.expiresAt),
-  });
+  }, 200, cors);
 }
 
 /** POST /api/auth/login — exchange the signature for a session token. */
-async function handleLogin(request: Request, env?: Record<string, string | undefined>): Promise<Response> {
+async function handleLogin(
+  request: Request,
+  env?: Record<string, string | undefined>,
+  cors?: Record<string, string>,
+): Promise<Response> {
+  const fail = (status: number, code: string, detail?: string) =>
+    authError(status, code, detail, cors);
   const apiOrigin = resolveAuthApiOrigin(env);
-  if (!apiOrigin) return authError(503, "api_origin_misconfigured");
+  if (!apiOrigin) return fail(503, "api_origin_misconfigured");
 
   const body = await readJsonBody(request);
-  if (!body) return authError(400, "invalid_body");
+  if (!body) return fail(400, "invalid_body");
 
   const smartAccountAddress = typeof body.smartAccountAddress === "string" ? body.smartAccountAddress.trim() : "";
   const signature = typeof body.signature === "string" ? body.signature.trim() : "";
   const message = typeof body.message === "string" ? body.message : "";
   const walletProvider = typeof body.walletProvider === "string" ? body.walletProvider.trim().slice(0, 32) : "";
 
-  if (!ADDRESS_RE.test(smartAccountAddress)) return authError(400, "invalid_smart_account_address");
-  if (!SIGNATURE_RE.test(signature)) return authError(400, "invalid_signature");
-  if (!message) return authError(400, "invalid_message");
-  if (new TextEncoder().encode(message).byteLength > 4096) return authError(400, "message_too_long");
+  if (!ADDRESS_RE.test(smartAccountAddress)) return fail(400, "invalid_smart_account_address");
+  if (!SIGNATURE_RE.test(signature)) return fail(400, "invalid_signature");
+  if (!message) return fail(400, "invalid_message");
+  if (new TextEncoder().encode(message).byteLength > 4096) return fail(400, "message_too_long");
 
   const upstream = await callConnect(apiOrigin, "LoginWithWallet", {
     smartAccountAddress,
@@ -335,7 +350,7 @@ async function handleLogin(request: Request, env?: Record<string, string | undef
   if (!upstream.ok) return upstream.response;
 
   const accessToken = typeof upstream.body.accessToken === "string" ? upstream.body.accessToken : "";
-  if (!accessToken) return authError(502, "upstream_missing_token");
+  if (!accessToken) return fail(502, "upstream_missing_token");
 
   const accountId = upstream.body.accountId;
   return authJson({
@@ -345,7 +360,40 @@ async function handleLogin(request: Request, env?: Record<string, string | undef
     accountId:
       typeof accountId === "string" ? accountId : typeof accountId === "bigint" ? accountId.toString() : null,
     username: typeof upstream.body.username === "string" ? upstream.body.username : null,
-  });
+  }, 200, cors);
+}
+
+/**
+ * Origins allowed to call these routes cross-origin, from `POLYTOOLS_APP_ORIGINS`
+ * (comma-separated, exact origins). Empty by default, which means same-origin
+ * only — the safest default and the right one when the API is served from the
+ * same deployment (Cloudflare Pages Functions).
+ *
+ * WHY THIS EXISTS
+ *   The documented deployment is a static frontend (GitHub Pages) talking to a
+ *   standalone Worker on `*.workers.dev`. That is genuinely cross-origin, so a
+ *   same-origin-only rule rejects every real request.
+ *
+ * WHY IT IS STILL SAFE
+ *   The allowed origin is echoed exactly — never `*` — so only a site we name can
+ *   read a challenge or a session token. Unlisted origins get 403 and no CORS
+ *   headers, which is what the previous blanket `Sec-Fetch-Site` check was trying
+ *   to achieve, but without breaking the intended deployment.
+ */
+export function resolveAppOrigins(env?: Record<string, string | undefined>): string[] {
+  const raw = (env?.POLYTOOLS_APP_ORIGINS ?? "").trim();
+  if (!raw) return [];
+  const origins: string[] = [];
+  for (const entry of raw.split(",")) {
+    const value = entry.trim();
+    if (!value) continue;
+    try {
+      origins.push(new URL(value).origin);
+    } catch {
+      // A malformed entry is ignored rather than widening the allowlist.
+    }
+  }
+  return origins;
 }
 
 /** Whether this path is one of ours. */
@@ -353,27 +401,67 @@ export function isAuthPath(path: string): boolean {
   return path === "/api/auth/challenge" || path === "/api/auth/login";
 }
 
+/**
+ * Whether the caller is on a different origin from this deployment.
+ *
+ * Deliberately not a bare `Origin !== request.url.origin` comparison: behind a
+ * proxy — and in the Vite dev middleware, which reconstructs the URL — the
+ * request URL is not guaranteed to be the URL the browser actually used. Judging
+ * same-origin by that alone turned an ordinary same-origin call into a 403.
+ *
+ * `Sec-Fetch-Site` is the browser's own verdict and is therefore preferred when
+ * present. Without it (curl, tests, non-browser callers) there is no Origin to
+ * confuse us, so the request is treated as same-origin — which grants nothing,
+ * since no CORS headers are ever emitted for it.
+ */
+function isCrossOrigin(request: Request, originHeader: string | null): boolean {
+  const fetchSite = request.headers.get("Sec-Fetch-Site");
+  if (fetchSite === "same-origin") return false;
+  if (!originHeader) return false;
+  const selfOrigin = challengeUri(request);
+  if (!selfOrigin) return false;
+  return originHeader !== selfOrigin;
+}
+
 export async function handleAuthRoute(
   request: Request,
   path: string,
   opts: AuthProxyEnv = {},
 ): Promise<Response> {
+  const originHeader = request.headers.get("Origin");
+  const crossOrigin = isCrossOrigin(request, originHeader);
+  const allowed = crossOrigin && resolveAppOrigins(opts.env).includes(originHeader as string);
+
+  // Cross-origin callers must be named in POLYTOOLS_APP_ORIGINS. An unlisted
+  // origin is refused here rather than reaching the exchange.
+  if (crossOrigin && !allowed) {
+    return authError(403, "origin_not_allowed");
+  }
+
+  // Echoed exactly, never `*`: only a site we named may read a token.
+  const cors: Record<string, string> | undefined = allowed
+    ? {
+        "Access-Control-Allow-Origin": originHeader as string,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "600",
+      }
+    : undefined;
+
   if (request.method === "OPTIONS") {
-    // Same-origin only: no `Access-Control-Allow-Origin` is ever emitted.
-    const headers = new Headers({ Allow: "POST, OPTIONS", "Cache-Control": "no-store" });
+    const headers = new Headers({
+      Allow: "POST, OPTIONS",
+      "Cache-Control": "no-store",
+      Vary: "Origin",
+      ...(cors ?? {}),
+    });
     applySecurityHeaders(headers);
     return new Response(null, { status: 204, headers });
   }
   if (request.method !== "POST") {
-    return authError(405, "method_not_allowed");
+    return authError(405, "method_not_allowed", undefined, cors);
   }
 
-  // A cross-site caller should never reach the upstream, even if a future
-  // change re-opens CORS by accident.
-  if (request.headers.get("Sec-Fetch-Site") === "cross-site") {
-    return authError(403, "cross_site_blocked");
-  }
-
-  if (path === "/api/auth/challenge") return handleChallenge(request, opts.env);
-  return handleLogin(request, opts.env);
+  if (path === "/api/auth/challenge") return handleChallenge(request, opts.env, cors);
+  return handleLogin(request, opts.env, cors);
 }

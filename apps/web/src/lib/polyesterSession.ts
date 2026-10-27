@@ -17,6 +17,7 @@
  *     address, and the caller must already have one.
  */
 
+import { API_BASE } from "./api";
 import type { InjectedProvider } from "./walletConnection";
 import { signLoginMessage, WalletSignatureError, type SignFailure } from "./walletSigner";
 
@@ -36,6 +37,8 @@ export interface PolyesterSession {
 export type LoginFailure =
   | SignFailure
   | "origin_rejected"
+  | "origin_not_allowed"
+  | "endpoint_unreachable"
   | "upstream_unreachable"
   | "invalid_response"
   | "no_wallet";
@@ -92,15 +95,31 @@ async function readJson(response: Response): Promise<ChallengeBody & LoginBody> 
 function failureFor(response: Response, body: ChallengeBody): PolyesterLoginError {
   const code = typeof body.error === "string" ? body.error : "";
   const detail = typeof body.detail === "string" ? body.detail : undefined;
+
+  // OUR guard refused before the exchange was contacted. Reporting this as a
+  // Polyester refusal would send the reader to the wrong place entirely.
+  if (code === "origin_not_allowed" || code === "cross_site_blocked") {
+    return new PolyesterLoginError("origin_not_allowed", detail ?? code);
+  }
+
   if (response.status === 502 || response.status === 503) {
     return new PolyesterLoginError("upstream_unreachable", detail ?? code);
   }
+
   // The exchange's own refusal, relayed verbatim by our proxy. This is the shape
   // a pinned-origin answer takes, so it must stay legible rather than generic.
-  if (ORIGIN_REFUSAL_CODES.has(code) || response.status === 403) {
+  if (ORIGIN_REFUSAL_CODES.has(code)) {
     return new PolyesterLoginError("origin_rejected", detail ?? code);
   }
-  return new PolyesterLoginError("invalid_response", detail ?? code);
+
+  // A 403 with no JSON body is not our proxy and not the exchange: something in
+  // front of the backend (a static host, a proxy, a WAF) answered. On a static
+  // deploy this is what you get when the API base points at the site itself.
+  if (response.status === 403 || response.status === 404 || response.status === 405) {
+    return new PolyesterLoginError("endpoint_unreachable", `HTTP ${response.status}`);
+  }
+
+  return new PolyesterLoginError("invalid_response", detail ?? (code || `HTTP ${response.status}`));
 }
 
 /**
@@ -118,7 +137,7 @@ export async function login(input: LoginInput): Promise<PolyesterSession> {
 
   // 1. Ask our backend for a challenge. It derives the Safe address and tells
   //    the exchange which origin is requesting the signature.
-  const challengeResponse = await doFetch("/api/auth/challenge", {
+  const challengeResponse = await doFetch(`${API_BASE}/api/auth/challenge`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     // Only the owner EOA is sent. The smart account is derived server-side so a
@@ -148,7 +167,7 @@ export async function login(input: LoginInput): Promise<PolyesterSession> {
   }
 
   // 3. Exchange the signature for a session.
-  const loginResponse = await doFetch("/api/auth/login", {
+  const loginResponse = await doFetch(`${API_BASE}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ smartAccountAddress, signature, message }),

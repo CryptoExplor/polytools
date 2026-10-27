@@ -45,6 +45,14 @@ export function sessionErrorMessage(code: LoginFailure, detail?: string): string
       return detail
         ? `Polyester refused this site's origin: ${detail}`
         : "Polyester refused this site's origin. Sign-in cannot work from this deployment.";
+    case "origin_not_allowed":
+      // This deployment refused the call before Polyester ever saw it.
+      return detail
+        ? `This deployment refused the request: ${detail}`
+        : "This deployment refused the request before it reached Polyester.";
+    case "endpoint_unreachable":
+      // Usually a static host being asked for a route only the backend serves.
+      return "The sign-in endpoint is not reachable from this deployment. Nothing was signed in.";
     case "upstream_unreachable":
       return "Could not reach Polyester. Nothing was signed in or changed.";
     case "no_wallet":

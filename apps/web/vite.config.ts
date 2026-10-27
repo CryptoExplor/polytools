@@ -298,7 +298,15 @@ function devApiPlugin(): Plugin {
                 if (name === "host" || name === "connection" || name === "content-length") continue;
                 headers.set(name, Array.isArray(value) ? value.join(", ") : value);
               }
-              const webReq = new Request(`http://localhost${path}`, {
+              // Use the host the browser actually addressed. A fixed
+              // `localhost` here made the request URL disagree with the Origin
+              // header, which both mislabelled same-origin calls as cross-origin
+              // and bound login challenges to the wrong `uri` in development.
+              // From the raw request: `headers` above deliberately drops `host`
+              // because Request recomputes it from the URL.
+              const rawHost = req.headers.host;
+              const host = typeof rawHost === "string" && rawHost ? rawHost : "localhost";
+              const webReq = new Request(`http://${host}${path}`, {
                 method: req.method ?? "GET",
                 headers,
                 body: raw.length > 0 ? raw : undefined,
