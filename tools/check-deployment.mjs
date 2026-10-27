@@ -8,13 +8,27 @@
  * finding.
  *
  *   node tools/check-deployment.mjs https://your-site.pages.dev
+ *   node tools/check-deployment.mjs https://your-site.pages.dev 0xYourWalletAddress
  *
- * Read-only. Two GETs. No credentials, no wallet, no signature, no state change.
+ * With only a URL it asks two harmless GETs. Give it a wallet address and it also
+ * requests a real challenge, which is the only way to learn whether the exchange
+ * accepts this deployment's origin. No credentials, no wallet connection, no
+ * signature, nothing written anywhere — a challenge is a server-side message the
+ * exchange issues and forgets.
+ *
+ * Written for Windows PowerShell as much as for a terminal: PowerShell aliases
+ * `curl` to Invoke-WebRequest, so the usual curl recipe fails there with a
+ * "parameter cannot be found" error. Node has no such problem.
  */
 
 const target = process.argv[2];
+const signer = process.argv[3];
 if (!target) {
-  console.error("usage: node tools/check-deployment.mjs https://your-deployment");
+  console.error("usage: node tools/check-deployment.mjs https://your-deployment [0xWalletAddress]");
+  process.exit(2);
+}
+if (signer !== undefined && !/^0x[0-9a-fA-F]{40}$/.test(signer)) {
+  console.error(`not an address: ${signer}`);
   process.exit(2);
 }
 
@@ -118,9 +132,89 @@ if (challenge.transport) {
   exitCode = 1;
 }
 
-say("");
-say("Note: a GET only proves the route exists. A POST proves the exchange accepts");
-say("this origin, which is a separate question (C-1) and needs a real challenge.");
+// --- the real question: does the exchange issue a challenge for this origin? ---
+if (signer) {
+  say("");
+  say("-".repeat(64));
+  say(`Requesting a real challenge for ${signer}\n`);
+
+  let res;
+  try {
+    res = await fetch(`${base}/api/auth/challenge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signerAddress: signer }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    say(`✗ The request failed outright: ${error?.cause?.code ?? error?.message}`);
+    console.log(lines.join("\n") + "\n");
+    process.exit(1);
+  }
+
+  const text = await res.text();
+  let body = null;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    /* kept below: an HTML body is itself the finding */
+  }
+
+  say(`HTTP ${res.status}`);
+
+  if (res.status === 200 && body?.message) {
+    say("");
+    say("✓ SUCCESS — the exchange issued a challenge.");
+    say("  It accepts this deployment's origin. Sign-in works; click Sign in.");
+    if (body.uri) say(`  Challenge bound to uri: ${body.uri}`);
+    say(`  Smart account derived: ${body.smartAccountAddress ?? "(absent)"}`);
+  } else if (body?.error === "upstream_403" || body?.error === "upstream_429") {
+    // An answer with no Connect body never came from Polyester's API layer.
+    say(`  code: ${body.error}`);
+    if (body.detail) say(`  detail: ${body.detail}`);
+    say("");
+    if (/browser challenge|cf-mitigated|cf-ray|challenge-platform/i.test(body.detail ?? "")) {
+      say("VERDICT: the edge in front of Polyester blocked our server, before the");
+      say("  API saw the request. This is bot management on a server-to-server call,");
+      say("  not an origin problem and not a wallet problem.");
+      const ray = /cf-ray=(\S+)/.exec(body.detail ?? "");
+      if (ray) say(`  Quote this to Polyester support: cf-ray ${ray[1].replace(/\.$/, "")}`);
+      say("  Ask them to allowlist our egress or point us at an API host without it.");
+    } else {
+      say("VERDICT: the exchange refused without a Connect error body. That is a");
+      say("  proxy or WAF in front of it, not the API itself.");
+      const ray = /cf-ray=(\S+)/.exec(body.detail ?? "");
+      if (ray) say(`  Quote this to Polyester support: cf-ray ${ray[1].replace(/\.$/, "")}`);
+    }
+  } else if (body?.error === "permission_denied" || body?.error === "unauthenticated") {
+    say(`  code: ${body.error}`);
+    if (body.detail) say(`  detail: ${body.detail}`);
+    say("");
+    say("VERDICT: Polyester's own API refused the challenge. This is the origin");
+    say("  gate (C-1) answering, in the exchange's own words.");
+  } else if (body?.error === "origin_not_allowed") {
+    say("");
+    say("VERDICT: our allowlist refused before the exchange was contacted.");
+    say("  This build believes the caller is cross-origin. Set");
+    say("  POLYTOOLS_APP_ORIGINS to this deployment's exact origin.");
+  } else if (res.status === 404 && /Unknown route/i.test(body?.error ?? "")) {
+    say("");
+    say("VERDICT: this deployment predates wallet sign-in (no auth route).");
+    say("  Deploy a build that contains the sign-in work.");
+  } else if (res.status === 405) {
+    say("");
+    say(`VERDICT: the route exists but rejected POST (${body?.error ?? text.slice(0, 80)}).`);
+  } else {
+    say(`  ${body ? JSON.stringify(body).slice(0, 400) : text.slice(0, 400)}`);
+    say("");
+    say("VERDICT: unrecognised. The body above is the whole answer we have.");
+  }
+} else {
+  say("");
+  say("Note: a GET only proves the route exists. Add a wallet address to also ask");
+  say("the exchange for a real challenge, which answers the C-1 question:");
+  say("  node tools/check-deployment.mjs <url> 0xYourWalletAddress");
+}
 
 console.log(lines.join("\n") + "\n");
 process.exit(exitCode);
