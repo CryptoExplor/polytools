@@ -19,6 +19,18 @@ The SPA uses hash routes so deep links work on static hosts. Account features ar
 `/account`; the older `/flow` and `/portfolio` links redirect to account sections, while `/book`
 remains a public market-data route.
 
+### Wallet connection
+
+The topbar can connect a supported injected EOA wallet (any EIP-1193 provider) and shows the
+connected address and chain. It handles rejected requests, missing providers, account switches and
+chain switches.
+
+**A connected wallet is not a login.** It proves nothing about exchange authentication or account
+authorization, and wallet state is stored separately from the passphrase-encrypted API-key vault.
+No signature is ever requested, no transaction is ever sent, and disconnecting only clears local
+state — wallets expose no site revocation, so use your wallet's own settings to disconnect there.
+Private account data still requires the API-key vault.
+
 | Area | Route | What it provides |
 |---|---|---|
 | Account overview | `/#/account` | Authenticated balances, sampled balance/equity history, current fee rates, and explicitly confirmed exports; no unsupported P&L |

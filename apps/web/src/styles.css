@@ -873,6 +873,32 @@ a:hover {
   border-color: var(--warn-border);
 }
 
+/* Injected wallet connection — connection only, never authentication. */
+.wallet-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.wallet-pill {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wallet-connect,
+.wallet-disconnect {
+  white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  /* The address chip is the first thing to give up space on a phone. */
+  .wallet-pill {
+    max-width: 130px;
+  }
+}
+
 .pill.info {
   background: var(--info-soft);
   color: var(--info);

@@ -12,6 +12,7 @@ import { Pill, SymbolSelect } from "./ui";
 import { GlossaryDrawer } from "./Glossary";
 import { PublicCacheStatus } from "./PublicCacheStatus";
 import { WireSampleNotice } from "./WireSampleNotice";
+import { WalletButton } from "./WalletButton";
 import {
   IconActivity,
   IconBook,
@@ -473,7 +474,7 @@ export function Layout() {
             <a href={NETWORKS.testnet.appUrl} target="_blank" rel="noreferrer">
               Polyester ↗
             </a>
-            . No wallet or login.
+            . No login required for public data.
           </div>
         </div>
       </aside>
@@ -502,6 +503,8 @@ export function Layout() {
           <div className="spacer" />
 
           <div className="topbar-controls">
+            <WalletButton />
+
             {meta.showSymbolSelector && (
               <SymbolSelect
                 value={symbol}
