@@ -1,8 +1,7 @@
 # PolyTools — modular toolkit for the Polyester exchange
 
 Community-built tools for **read-only market and account research** on [Polyester](https://testnet.polyester.com) (non-custodial
-cross-chain spot exchange). Works on **testnet today** and is **mainnet-ready** — when the mainnet
-endpoint is announced, update the network configuration or deployment override.
+cross-chain spot exchange). Public market data runs on **testnet today**; public mainnet support can be configured when an official endpoint is announced. **Private account analytics currently supports Polyester Testnet only.**
 
 💬 [Discussions](https://github.com/CryptoExplor/polyester/discussions) ·
 🐛 [Issues](https://github.com/CryptoExplor/polyester/issues) ·
@@ -23,7 +22,7 @@ remains a public market-data route.
 | Area | Route | What it provides |
 |---|---|---|
 | Account overview | `/#/account` | Authenticated balances, sampled balance/equity history, current fee rates, and explicitly confirmed exports; no unsupported P&L |
-| API setup | `/#/account/api` | Passphrase-encrypted IndexedDB key vault, nonextractable local Ed25519 sessions, and read-only request signing |
+| API setup | `/#/account/api` | Passphrase-encrypted IndexedDB key vault, nonextractable local Ed25519 sessions, and read-only private requests (Testnet only) |
 | Your Trades | `/#/account/trade` | Authenticated, validated account executions and their actual execution fees; never the public trade tape |
 | Orders | `/#/account/orders` | Authenticated open and completed orders, with supported read-only order details |
 | Profit and Loss | `/#/account/pnl` | Experimental, user-assisted exact FIFO or moving-weighted-average cost-basis estimates after complete fills, opening basis, resolved flows, and method provenance; realized output is independently gated, while unrealized/total also require fresh marks. Not verified tax output |
@@ -149,13 +148,15 @@ the optional notification bot, never for account custody or signing. Account rea
 
 ## Mainnet switch
 
-1. When mainnet MCP/REST endpoints are announced, set `mcpUrl` in `packages/core/src/config.ts`
-   and/or `MCP_URL_MAINNET` on the backend. `MCP_URL` remains the primary override when both are set.
-2. Redeploy. The UI environment badge is data-driven (`apiEnv` in payloads), so it reports the
-   serving environment returned by the API rather than assuming a network from the route.
-3. Private account reads remain read-only and require an unlocked registered key, a secure context,
-   and an explicit load action. Do not treat a public endpoint, a successful signature, or a
-   synthetic test as proof of private permissions or complete account coverage.
+1. When an official **public MCP** mainnet endpoint is announced, configure it in
+   `packages/core/src/config.ts` and/or `MCP_URL_MAINNET` on the backend. `MCP_URL` remains the
+   primary override when both are set.
+2. Redeploy the public-data service. The UI environment badge reports the public `apiEnv` returned
+   by that service; it does not select the private account API network.
+3. Private account reads currently use the official Polyester Testnet REST endpoint only. Mainnet
+   private reads are unsupported until an official endpoint, signing contract, and permissions are
+   separately verified. These GET reads require an unlocked registered key, a secure context, and
+   explicit activation; a public endpoint or synthetic test does not prove private compatibility.
 
 ## Data and custody notes
 

@@ -255,7 +255,10 @@ describe("Account data coordinator (synthetic authenticated transport)", () => {
     const snapshot = await coordinator.loadAll({ range: "7d", markets });
     assert.equal(snapshot.balances.coverage.status, "complete");
     assert.equal(snapshot.balances.data.balances[0].trading, "2.5");
-    assert.equal(snapshot.equity.data.seriesMetrics[0].change.raw, "1");
+    assert.equal(snapshot.equity.data.seriesMetrics[0].sampleCount, 2);
+    assert.equal(snapshot.equity.data.seriesMetrics[0].observedLow.raw, "10");
+    assert.equal(snapshot.equity.data.seriesMetrics[0].observedHigh.raw, "11");
+    assert.equal("timestamp" in snapshot.equity.data.response.series[0], false);
     assert.equal(snapshot.orders.data.orders.length, 2);
     assert.equal(snapshot.orders.coverage.pagesFetched, 2);
     assert.equal(snapshot.orders.coverage.cursorExhausted, true);

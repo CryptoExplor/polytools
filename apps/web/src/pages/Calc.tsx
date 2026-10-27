@@ -650,9 +650,10 @@ export default function Calc() {
             )}
           </div>
           <div className="faint mt-2">
-            <strong>Model Assumption:</strong> Excludes exchange maintenance margin ratio,
-            taker liquidation fees, and funding payments. Actual liquidation occurs slightly
-            closer to entry.
+            <strong>Model limitations:</strong> Textbook 1/L sketch only; it excludes the exchange
+            maintenance margin ratio, taker liquidation fees, funding, and venue-specific risk
+            rules. It does not model Polyester's spot/lending risk behavior or predict an actual
+            liquidation price.
           </div>
         </Card>
 

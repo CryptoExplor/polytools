@@ -10,7 +10,7 @@ export const SDK_PACKAGES = [
   {
     ecosystem: "npm",
     name: "@polyester/sdk",
-    pinnedVersion: null,
+    pinnedVersion: "0.31.0",
     registryUrl: "https://registry.npmjs.org/@polyester%2Fsdk",
   },
   {
@@ -68,8 +68,10 @@ export function collectBrandAssets(brand) {
 
 export function sdkPinMatchesSource(pkg, sdkGuideSource) {
   if (pkg.ecosystem === "npm") {
-    return sdkGuideSource.includes(`npm install ${pkg.name}`) &&
-      !sdkGuideSource.includes(`npm install ${pkg.name}@`);
+    return Boolean(pkg.pinnedVersion) &&
+      sdkGuideSource.includes(`npm install ${pkg.name}@${pkg.pinnedVersion}`) &&
+      sdkGuideSource.includes(`pnpm add ${pkg.name}@${pkg.pinnedVersion}`) &&
+      sdkGuideSource.includes(`bun add ${pkg.name}@${pkg.pinnedVersion}`);
   }
   if (pkg.ecosystem === "pypi") {
     return sdkGuideSource.includes(`${pkg.name}==${pkg.pinnedVersion}`);
@@ -90,6 +92,8 @@ export async function loadExternalInventory(rootDir = DEFAULT_ROOT) {
   try {
     const brand = await vite.ssrLoadModule("/apps/web/src/brand.ts");
     const sdkGuideSource = readFileSync(`${rootDir}/apps/web/src/pages/SdkGuide.tsx`, "utf8");
+    const sdkExamplesSource = readFileSync(`${rootDir}/apps/web/src/lib/sdkTypescriptExamples.ts`, "utf8");
+    const sdkSource = `${sdkGuideSource}\n${sdkExamplesSource}`;
     const hubSource = readFileSync(`${rootDir}/apps/web/src/pages/Hub.tsx`, "utf8");
     const links = new Map();
     for (const item of [
@@ -103,7 +107,7 @@ export async function loadExternalInventory(rootDir = DEFAULT_ROOT) {
       assets: collectBrandAssets(brand),
       sdk: SDK_PACKAGES.map((pkg) => ({
         ...pkg,
-        sourceMatches: sdkPinMatchesSource(pkg, sdkGuideSource),
+        sourceMatches: sdkPinMatchesSource(pkg, sdkSource),
       })),
     };
   } finally {
@@ -180,9 +184,21 @@ export async function checkUrls(items, options = {}) {
 export function sdkRegistryVersionInfo(pkg, data) {
   let latestVersion = null;
   let pinnedVersionAvailable = null;
+  let publishedLicense = null;
+  let repository = null;
+  let maintainers = [];
   if (pkg.ecosystem === "npm") {
     latestVersion = data?.["dist-tags"]?.latest ?? null;
-    if (pkg.pinnedVersion) pinnedVersionAvailable = Boolean(data?.versions?.[pkg.pinnedVersion]);
+    const pinnedMetadata = pkg.pinnedVersion ? data?.versions?.[pkg.pinnedVersion] : null;
+    if (pkg.pinnedVersion) pinnedVersionAvailable = Boolean(pinnedMetadata);
+    publishedLicense = pinnedMetadata?.license ?? data?.license ?? null;
+    const repositoryMetadata = pinnedMetadata?.repository ?? data?.repository;
+    repository = typeof repositoryMetadata === "string"
+      ? repositoryMetadata
+      : repositoryMetadata?.url ?? null;
+    maintainers = Array.isArray(data?.maintainers)
+      ? data.maintainers.map((entry) => entry?.name).filter((name) => typeof name === "string")
+      : [];
   } else if (pkg.ecosystem === "pypi") {
     latestVersion = data?.info?.version ?? null;
     if (pkg.pinnedVersion) {
@@ -200,6 +216,9 @@ export function sdkRegistryVersionInfo(pkg, data) {
     latestVersion,
     pinnedVersion: pkg.pinnedVersion,
     pinnedVersionAvailable,
+    publishedLicense,
+    repository,
+    maintainers,
     status: pkg.pinnedVersion
       ? pinnedVersionAvailable ? "pinned-present" : "pinned-missing"
       : "unpinned",
@@ -245,8 +264,11 @@ function printHuman(report) {
   for (const pkg of report.sdk) {
     const pin = pkg.pinnedVersion ?? "unpinned";
     const latest = pkg.latestVersion ? `; latest=${pkg.latestVersion}` : "";
+    const license = pkg.publishedLicense ? `; license=${pkg.publishedLicense}` : "";
+    const repository = pkg.repository ? `; repository=${pkg.repository}` : "";
+    const maintainers = pkg.maintainers?.length ? `; maintainers=${pkg.maintainers.join(",")}` : "";
     const error = pkg.error ? `; ${pkg.error}` : "";
-    console.log(`SDK ${pkg.ecosystem}:${pkg.name} pin=${pin}; sourceMatches=${pkg.sourceMatches}${latest}${error}`);
+    console.log(`SDK ${pkg.ecosystem}:${pkg.name} pin=${pin}; sourceMatches=${pkg.sourceMatches}${latest}${license}${repository}${maintainers}${error}`);
   }
   const failures = [...report.links, ...report.assets, ...report.sdk].filter((item) => item.ok === false);
   for (const failure of failures) {

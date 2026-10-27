@@ -846,9 +846,7 @@ export class AccountDataCoordinator {
         const response = validateEquityHistoryResponse(value);
         return {
           response,
-          seriesMetrics: response.series.map((series) => sampledEquityMetrics(
-            series.equity.map((equity, index) => ({ timestamp: String(index), equity })),
-          )),
+          seriesMetrics: response.series.map((series) => sampledEquityMetrics(series.equity)),
         };
       }, (data) => data.response.series.reduce((count, series) => count + series.equity.length, 0), request, options.signal),
       this.readOrders(session, { ...paged, ...timeWindow }, period, markets, request, options.signal),

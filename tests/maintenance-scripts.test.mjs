@@ -57,7 +57,7 @@ describe("P3-3 external content inventory and synthetic freshness checks", () =>
       ["token-front", "token-side", "token-low-angle"],
     );
 
-    const guide = source("apps/web/src/pages/SdkGuide.tsx");
+    const guide = `${source("apps/web/src/pages/SdkGuide.tsx")}\n${source("apps/web/src/lib/sdkTypescriptExamples.ts")}`;
     for (const pkg of SDK_PACKAGES) {
       assert.equal(sdkPinMatchesSource(pkg, guide), true, `${pkg.ecosystem} source pin`);
     }
@@ -95,10 +95,22 @@ describe("P3-3 external content inventory and synthetic freshness checks", () =>
     const npm = SDK_PACKAGES.find((pkg) => pkg.ecosystem === "npm");
     const pypi = SDK_PACKAGES.find((pkg) => pkg.ecosystem === "pypi");
     const crates = SDK_PACKAGES.find((pkg) => pkg.ecosystem === "crates");
-    assert.equal(
-      sdkRegistryVersionInfo(npm, { "dist-tags": { latest: "1.2.3" } }).status,
-      "unpinned",
-    );
+    assert.equal(npm.pinnedVersion, "0.31.0");
+    const npmInfo = sdkRegistryVersionInfo(npm, {
+      "dist-tags": { latest: "0.32.0" },
+      maintainers: [{ name: "verified-maintainer" }],
+      versions: {
+        "0.31.0": {
+          license: "UNLICENSED",
+          repository: { url: "git+https://github.com/Fabric-Labs/polyester-sdk-typescript.git" },
+        },
+      },
+    });
+    assert.equal(npmInfo.status, "pinned-present");
+    assert.equal(npmInfo.latestVersion, "0.32.0");
+    assert.equal(npmInfo.publishedLicense, "UNLICENSED");
+    assert.equal(npmInfo.repository, "git+https://github.com/Fabric-Labs/polyester-sdk-typescript.git");
+    assert.deepEqual(npmInfo.maintainers, ["verified-maintainer"]);
     assert.equal(
       sdkRegistryVersionInfo(pypi, {
         info: { version: "0.1.0a55" },

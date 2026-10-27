@@ -891,6 +891,12 @@ export function AccountAnalytics({
           <span className={`pill ${secureContext && session?.registeredKeyId ? "info" : "warn"}`}>
             {secureContext ? (session?.registeredKeyId ? "Key ID saved" : "Key ID required") : "HTTPS required"}
           </span>
+          <span
+            className="pill info"
+            title="Private account analytics is fixed to the official Polyester Testnet REST endpoint, independent of the public market environment."
+          >
+            Private reads: Testnet only
+          </span>
           {hasViewResponse && <span className="faint account-session-status__time"><IconClock size={12} /> {dataIsStale
             ? (oldestRangeUpdate ? `Oldest update ${fmtAgo(oldestRangeUpdate)}` : "No successful response time")
             : (latest ? `Latest update ${fmtAgo(latest)}` : "No successful response time")}</span>}
@@ -1026,17 +1032,17 @@ export function AccountAnalytics({
             ) : <><NoDataset dataset={snapshot.balances} /><DatasetMessages dataset={snapshot.balances} /></>}
           </Card>}
 
-          {view === "overview" && <Card title="Sampled equity history" subtitle="Sampled valuation only — never live equity or P&L." actions={<DatasetActions dataset={snapshot.equity} name="equity" rowCount={snapshot.equity.data?.response.series.reduce((count, series) => count + series.equity.length, 0) ?? 0} onExport={requestExport} />}>
+          {view === "overview" && <Card title="Sampled equity history" subtitle="Sampled values only — point order is unverified, so no latest, change, or drawdown is inferred." actions={<DatasetActions dataset={snapshot.equity} name="equity" rowCount={snapshot.equity.data?.response.series.reduce((count, series) => count + series.equity.length, 0) ?? 0} onExport={requestExport} />}>
             {snapshot.equity.data ? (
               <>
                 <div className="faint" style={{ marginBottom: 10 }}>
                   Server bounds: {snapshot.equity.data.response.startTsSec !== undefined ? apiTime(String(snapshot.equity.data.response.startTsSec * 1000), "millis") : "not supplied"} → {snapshot.equity.data.response.endTsSec !== undefined ? apiTime(String(snapshot.equity.data.response.endTsSec * 1000), "millis") : "not supplied"}
                 </div>
-                {snapshot.equity.data.seriesMetrics.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Series</th><th>Samples</th><th>First</th><th>Latest</th><th>Change</th><th>Max drawdown</th></tr></thead><tbody>
+                {snapshot.equity.data.seriesMetrics.length > 0 ? <div className="table-wrap"><table className="data"><thead><tr><th className="align-left">Series</th><th>Samples</th><th>Observed low</th><th>Observed high</th></tr></thead><tbody>
                   {snapshot.equity.data.seriesMetrics.map((metrics, index) => {
                     const series = snapshot.equity.data?.response.series[index];
                     const label = series?.asset?.symbol ?? series?.account?.name ?? `Series ${index + 1}`;
-                    return <tr key={`${label}-${index}`}><td className="align-left">{label}</td><td>{metrics.sampleCount}</td><td>{metrics.start ? <ExactValue value={metrics.start} /> : "—"}</td><td>{metrics.latest ? <ExactValue value={metrics.latest} /> : "—"}</td><td>{metrics.change ? <ExactValue value={metrics.change} /> : "—"}</td><td>{metrics.maxDrawdownAbsolute ? <ExactValue value={metrics.maxDrawdownAbsolute} /> : "—"}</td></tr>;
+                    return <tr key={`${label}-${index}`}><td className="align-left">{label}</td><td>{metrics.sampleCount}</td><td>{metrics.observedLow ? <ExactValue value={metrics.observedLow} /> : "—"}</td><td>{metrics.observedHigh ? <ExactValue value={metrics.observedHigh} /> : "—"}</td></tr>;
                   })}
                 </tbody></table></div> : <EmptyState title="No equity series in validated response" description="Nothing is inferred from an empty series." />}
                 <DatasetMessages dataset={snapshot.equity} />

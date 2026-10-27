@@ -24,6 +24,7 @@ import {
   WIRE_SAMPLE_DATA_SOURCE,
   WIRE_SAMPLE_HEADER,
 } from "./provenance";
+import { decodePublicApiResponse, PublicApiSchemaError } from "./publicDtos";
 
 let wireSampleUsed = false;
 const wireSampleListeners = new Set<() => void>();
@@ -128,8 +129,14 @@ async function getResponse<T>(
     }
     throw new ApiError(msg, res.status, code, detail);
   }
-  const data = await res.json() as T;
-  if (isWireSamplePayload(data)) noteWireSampleUsage();
+  let raw: unknown;
+  try {
+    raw = await res.json();
+  } catch {
+    throw new PublicApiSchemaError(path);
+  }
+  if (isWireSamplePayload(raw)) noteWireSampleUsage();
+  const data = decodePublicApiResponse<T>(path, raw, params);
   return { data, cacheControl: res.headers.get("cache-control") };
 }
 

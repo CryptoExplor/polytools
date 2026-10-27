@@ -16,7 +16,7 @@ import type { Coverage } from "./coverage";
 import { observedMetricEligibility } from "./coverage";
 
 export class AnalyticsError extends Error {
-  constructor(readonly code: "INVALID_FILL" | "INVALID_EQUITY" | "UNSORTED_SAMPLES" | "INCOMPATIBLE_DATA", message: string) {
+  constructor(readonly code: "INVALID_FILL" | "INCOMPATIBLE_DATA", message: string) {
     super(message);
     this.name = "AnalyticsError";
   }
@@ -302,71 +302,37 @@ export function observedFillEligibility(
   });
 }
 
-export interface EquitySample {
-  timestamp: string;
-  equity: string;
-}
-
 export interface SampledEquityMetrics {
-  label: "sampled-valuation-not-pnl";
+  /** No point timestamps/order contract is available; these are order-agnostic values only. */
+  label: "sampled-valuation-order-unverified-not-pnl";
   sampleCount: number;
-  latest?: ExactDecimal;
-  start?: ExactDecimal;
-  change?: ExactDecimal;
-  changePercent?: ExactDecimal;
-  maxDrawdownAbsolute?: ExactDecimal;
-  maxDrawdownPercent?: ExactDecimal;
+  observedLow?: ExactDecimal;
+  observedHigh?: ExactDecimal;
 }
 
-function timestampValue(timestamp: string): bigint {
-  if (!/^\d+$/.test(timestamp)) {
-    throw new AnalyticsError("INVALID_EQUITY", "Sample timestamps must retain an exact numeric representation for ordering.");
+/**
+ * Summarize sampled equity without treating array position as time. The
+ * upstream response has range bounds but no per-point timestamps, and its
+ * ordering contract is not verified. Therefore latest/change/drawdown are not
+ * computed here.
+ */
+export function sampledEquityMetrics(equities: readonly string[]): SampledEquityMetrics {
+  if (equities.length === 0) {
+    return { label: "sampled-valuation-order-unverified-not-pnl", sampleCount: 0 };
   }
-  return BigInt(timestamp);
-}
-
-export function sampledEquityMetrics(samples: readonly EquitySample[]): SampledEquityMetrics {
-  if (samples.length === 0) return { label: "sampled-valuation-not-pnl", sampleCount: 0 };
-  const values = samples.map((sample) => ({
-    timestamp: sample.timestamp,
-    time: timestampValue(sample.timestamp),
-    equity: parseDecimal(sample.equity),
-  }));
-  for (let index = 1; index < values.length; index++) {
-    if (values[index].time <= values[index - 1].time) {
-      throw new AnalyticsError("UNSORTED_SAMPLES", "Equity samples must be strictly chronological; no ordering was invented.");
-    }
+  const values = equities.map(parseDecimal);
+  let observedLow = values[0];
+  let observedHigh = values[0];
+  for (const value of values.slice(1)) {
+    if (compare(value, observedLow) < 0) observedLow = value;
+    if (compare(value, observedHigh) > 0) observedHigh = value;
   }
-  const first = values[0].equity;
-  const latest = values[values.length - 1].equity;
-  const result: SampledEquityMetrics = {
-    label: "sampled-valuation-not-pnl",
+  return {
+    label: "sampled-valuation-order-unverified-not-pnl",
     sampleCount: values.length,
-    latest,
-    start: first,
+    observedLow,
+    observedHigh,
   };
-  if (values.length > 1) {
-    const change = subtract(latest, first);
-    result.change = change;
-    if (compare(first, fromBigInt(0n)) > 0) {
-      result.changePercent = multiply(divide(change, first), fromBigInt(100n));
-    }
-  }
-  let peak = first;
-  let maxAbsolute: ExactDecimal | undefined;
-  let maxPercent: ExactDecimal | undefined;
-  for (const value of values) {
-    if (compare(value.equity, peak) > 0) peak = value.equity;
-    const drawdown = subtract(peak, value.equity);
-    if (!maxAbsolute || compare(drawdown, maxAbsolute) > 0) maxAbsolute = drawdown;
-    if (compare(peak, fromBigInt(0n)) > 0) {
-      const percent = multiply(divide(drawdown, peak), fromBigInt(100n));
-      if (!maxPercent || compare(percent, maxPercent) > 0) maxPercent = percent;
-    }
-  }
-  result.maxDrawdownAbsolute = maxAbsolute;
-  result.maxDrawdownPercent = maxPercent;
-  return result;
 }
 
 export function currentRateScenario(

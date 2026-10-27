@@ -511,6 +511,12 @@ export default function Portfolio() {
           Reads start only on click; the inspector sends none.
         </div>
       </div>
+      <div className="notice info" role="note">
+        <div>
+          <strong>Private account reads use Polyester Testnet only.</strong>{" "}
+          This is separate from the public market environment shown in the header; mainnet private reads are not supported.
+        </div>
+      </div>
 
       <MetricStrip>
         <MetricCell

@@ -181,6 +181,7 @@ export function validateBalanceHistoryResponse(value: unknown): BalanceHistoryRe
 }
 
 export interface EquityHistorySeries {
+  /** Source array order is retained but is not treated as chronological without an upstream contract. */
   equity: string[];
   account?: { accountCode?: number; name?: string };
   asset?: { id?: number; symbol?: string };

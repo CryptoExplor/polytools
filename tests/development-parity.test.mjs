@@ -149,7 +149,13 @@ describe("P2-8 session-persistent sample provenance", () => {
     });
     globalThis.fetch = async (_url, init) => {
       requestInit = init;
-      return new Response(JSON.stringify({ dataSource: "wire-samples" }), {
+      return new Response(JSON.stringify({
+        dataSource: "wire-samples",
+        apiEnv: "testnet",
+        tsSec: 1792664721,
+        assets: [],
+        pairs: [],
+      }), {
         status: 200,
         headers: {
           "Content-Type": "application/json",
