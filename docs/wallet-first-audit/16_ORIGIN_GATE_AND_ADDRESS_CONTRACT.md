@@ -286,3 +286,64 @@ Provider → `AccountSigner`. No protocol code.
   document, and a C-1 status line. No application code, no sign-in, no tests
   touched.
 - Known gap carried forward: C-1 unverified; C-2, C-3, C-4, C-5, C-10 unchanged.
+
+---
+
+## 7. Addendum — Stage 2b implemented on explicit instruction (2026-10-28)
+
+The user authorised implementation after reading this report, accepting that
+C-1 remains unverified. The decision above stands as the evidence-based
+position; this records what was built and what is still unproven.
+
+### 7.1 What was built
+
+| File | Role |
+| --- | --- |
+| `apps/web/src/lib/walletSigner.ts` | `personal_sign` over the exact issued bytes; 65-byte validation; provider errors mapped to our own codes |
+| `apps/web/src/lib/polyesterSession.ts` | challenge → sign → token; **in-memory** token store; the login state machine |
+| `apps/web/src/lib/usePolyesterSession.ts` | React binding; `signIn` is an explicit call, never a side effect |
+| `apps/web/src/components/WalletButton.tsx` | third state: **Sign in** / **Sign out** |
+| `backend/src/authProxy.ts` | derives the Safe address **server-side** from the owner EOA |
+
+**The SDK stays out of the browser.** `@polyester/sdk` is a root devDependency,
+not a web dependency, and C-7 is still open. Deriving the Safe address on the
+server meant the client needs no SDK at all: the bundle grew **2 kB**
+(102.5 kB → 104.4 kB gzip) rather than the ~1.4 MB RainbowKit comparison. It
+also resolved the EOA-only case from §2 — a wallet with no Polyester account
+sends only its owner address, and the server derives the counterfactual Safe.
+
+### 7.2 Verified
+
+- **16 unit tests** (`tests/wallet-signin.test.mjs`) and **460 total**, all
+  passing, including an end-to-end challenge → sign → token run against a mock
+  exchange, refusal paths, and the consent invariant.
+- **12 browser checks in real Chromium** against the full stack: connecting
+  signs nothing; **Sign in** requests exactly one `personal_sign`; the signed
+  bytes decode to the issued message; a token is obtained; no bearer token
+  appears in `localStorage`/`sessionStorage` (only the pre-existing
+  `poly-tools:theme`); **Sign out** returns to connected-and-unsigned; a reload
+  signs you out because the token is memory-only.
+- **Refusal path**: with the mock returning `403 permission_denied`, the UI
+  shows **“Not allowed”** with the exchange's own words in the tooltip and
+  **asks for no signature at all** (`signCalls: 0`).
+- No overflow at 360 px in either the signed-in or refused state.
+
+### 7.3 What is still not proven
+
+**Polyester's real behaviour is untested.** Every one of the above runs against
+a local mock. C-1 — whether the exchange issues a challenge for our origin — is
+still unknown, and the refusal path above is the shape a pinned origin would
+take. If the real API answers that way, the button will say “Not allowed” and
+be correct.
+
+Also unverified: the signature must be raw EIP-191 rather than ERC-6492 (U-2),
+whether a counterfactual Safe is accepted for an unseen account (U-5), and any
+network requirement before signing (U-6).
+
+### 7.4 Preserved
+
+The API-key path is untouched: `apps/web/src/lib/api.ts` and
+`accountSessionOwner.ts` still call the REST origin directly, and `connect-src`
+still permits it. The two auth mechanisms share no storage. Wallet sign-in is
+the only thing that talks to `/api/auth/*`.
+

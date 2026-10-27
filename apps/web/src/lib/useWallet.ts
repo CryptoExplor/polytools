@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   INITIAL_WALLET_STATE,
   getWalletConnection,
+  type InjectedProvider,
   type WalletConnection,
   type WalletState,
 } from "./walletConnection";
@@ -20,6 +21,8 @@ export interface WalletBinding {
   state: WalletState;
   connect: () => Promise<WalletState>;
   disconnect: () => void;
+  /** The provider this connection selected. Needed by the signer. */
+  getProvider: () => InjectedProvider | null;
 }
 
 export function useWalletConnection(
@@ -40,7 +43,11 @@ export function useWalletConnection(
   const connect = useCallback(() => connection.connect(), [connection]);
   const disconnect = useCallback(() => connection.disconnect(), [connection]);
 
-  return { state, connect, disconnect };
+  // Wrapped, not passed by reference: `getProvider` reads `this.provider`, so
+  // handing the method over unbound makes `this` undefined at the call site.
+  const getProvider = useCallback(() => connection.getProvider(), [connection]);
+
+  return { state, connect, disconnect, getProvider };
 }
 
 /**

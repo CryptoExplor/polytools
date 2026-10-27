@@ -337,6 +337,15 @@ export class WalletConnection {
     this.listeners.clear();
   }
 
+  /**
+   * The provider currently in use, or null. Read-only escape hatch for the
+   * signer, which needs the same injected provider this connection selected —
+   * not `window.ethereum`, which may belong to a different wallet.
+   */
+  getProvider(): InjectedProvider | null {
+    return this.provider;
+  }
+
   /** Exposed for tests and for the UI's manual refresh of chain identity. */
   handleAccountsChanged(accounts: readonly unknown[]): void {
     if (this.disposed) return;

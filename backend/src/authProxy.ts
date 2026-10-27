@@ -209,6 +209,52 @@ async function callConnect(
   return { ok: true, body: parsed ?? {} };
 }
 
+/**
+ * Derives the Polyester Safe address an owner EOA controls.
+ *
+ * WHY THE SERVER DOES THIS
+ *   `smartAccountAddress` is a counterfactually derived Safe, not an EOA (see
+ *   docs/wallet-first-audit/16 §2). A wallet with no Polyester account yet has no
+ *   way to know its own Safe address, so a client that had to supply it would
+ *   only ever work for users who already existed. Deriving here also means the
+ *   client cannot send a mismatched pair.
+ *
+ *   It is deliberately server-side: the derivation needs `@polyester/sdk`, which
+ *   is not a browser dependency of this app. Keeping it out of the client leaves
+ *   the 102 kB bundle untouched.
+ *
+ *   The SDK helper's own `signMessage` returns ERC-6492 wrapped signatures,
+ *   which login rejects. Only `accountAddress` is taken from it — the signing
+ *   always happens in the user's wallet, in the browser.
+ */
+async function deriveSmartAccount(signerAddress: string): Promise<string | null> {
+  try {
+    const [{ createPolyesterAccountSigner }, { POLYESTER_TESTNET_ENVIRONMENT }] = await Promise.all([
+      import("@polyester/sdk/account-signer"),
+      import("@polyester/sdk"),
+    ]);
+    const { accountAddress } = createPolyesterAccountSigner({
+      environment: POLYESTER_TESTNET_ENVIRONMENT,
+      /**
+       * The parameter is typed as a viem `LocalAccount`, i.e. a keypair. This
+       * server has no key and must never hold one, and the derivation reads
+       * only `.address`: `create-polyester-account-signer.js` uses `owner` for
+       * the owners array and nothing else. Verified by calling the helper with
+       * a bare `{ address }` and getting the same deterministic Safe address
+       * (docs/wallet-first-audit/16 §2.2). The cast documents that gap rather
+       * than fabricating a signing key to satisfy the type.
+       */
+      owner: { address: signerAddress } as unknown as Parameters<
+        typeof createPolyesterAccountSigner
+      >[0]["owner"],
+    });
+    return accountAddress;
+  } catch {
+    // A missing or incompatible SDK is a configuration fault, not a user error.
+    return null;
+  }
+}
+
 /** POST /api/auth/challenge — ask the exchange for a message for the wallet to sign. */
 async function handleChallenge(request: Request, env?: Record<string, string | undefined>): Promise<Response> {
   const apiOrigin = resolveAuthApiOrigin(env);
@@ -217,10 +263,20 @@ async function handleChallenge(request: Request, env?: Record<string, string | u
   const body = await readJsonBody(request);
   if (!body) return authError(400, "invalid_body");
 
-  const smartAccountAddress = typeof body.smartAccountAddress === "string" ? body.smartAccountAddress.trim() : "";
   const signerAddress = typeof body.signerAddress === "string" ? body.signerAddress.trim() : "";
-  if (!ADDRESS_RE.test(smartAccountAddress)) return authError(400, "invalid_smart_account_address");
   if (!ADDRESS_RE.test(signerAddress)) return authError(400, "invalid_signer_address");
+
+  // Derive unless the caller knows its own Safe address exactly (an existing
+  // account). A supplied value is validated, never trusted blindly.
+  const supplied =
+    typeof body.smartAccountAddress === "string" ? body.smartAccountAddress.trim() : "";
+  let smartAccountAddress = supplied;
+  if (smartAccountAddress) {
+    if (!ADDRESS_RE.test(smartAccountAddress)) return authError(400, "invalid_smart_account_address");
+  } else {
+    smartAccountAddress = (await deriveSmartAccount(signerAddress)) ?? "";
+    if (!smartAccountAddress) return authError(503, "smart_account_derivation_unavailable");
+  }
 
   const uri = challengeUri(request);
   if (!uri) return authError(400, "invalid_request_origin");
@@ -241,6 +297,10 @@ async function handleChallenge(request: Request, env?: Record<string, string | u
     // Returned verbatim: the wallet must sign these exact UTF-8 bytes.
     message,
     uri,
+    // Echoed so the client submits the same pair it was challenged for. Nothing
+    // here is secret; both addresses are public chain identifiers.
+    smartAccountAddress,
+    signerAddress,
     expiresAt: isoFromTimestamp(upstream.body.expiresAt),
   });
 }

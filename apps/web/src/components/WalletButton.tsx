@@ -18,6 +18,7 @@ import {
   type WalletState,
 } from "../lib/walletConnection";
 import { useWalletConnection, useWalletProviders } from "../lib/useWallet";
+import { usePolyesterSession } from "../lib/usePolyesterSession";
 import type { DiscoveredProvider } from "../lib/walletDiscovery";
 
 export type WalletControlView =
@@ -156,8 +157,9 @@ export function WalletErrorControl(props: {
 }
 
 export function WalletButton() {
-  const { state, connect, disconnect } = useWalletConnection();
+  const { state, connect, disconnect, getProvider } = useWalletConnection();
   const { providers, choose } = useWalletProviders();
+  const session = usePolyesterSession();
   const view = describeWalletControl(state);
   const [menuOpen, setMenuOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement | null>(null);
@@ -265,6 +267,14 @@ export function WalletButton() {
   }
 
   if (view.kind === "connected") {
+    // Three honest states, never two. Connecting proves control of an address;
+    // it does not sign you in, and the control must not imply otherwise.
+    const onSignIn = () => {
+      // The provider this connection selected — not `window.ethereum`, which
+      // may belong to a different installed wallet.
+      const provider = getProvider();
+      if (provider) void session.signIn(provider, view.address);
+    };
     return (
       <span className="wallet-cluster">
         <span className="pill up wallet-pill" title={view.title} aria-live="polite">
@@ -272,6 +282,31 @@ export function WalletButton() {
           <span className="mono">{view.short}</span>
         </span>
         {view.chain && <span className="pill wallet-pill">{view.chain}</span>}
+        {session.authenticated ? (
+          <button
+            type="button"
+            className="btn sm wallet-signout"
+            onClick={session.signOut}
+            title="Sign out of Polyester. The session token is discarded from memory; your wallet stays connected."
+          >
+            Sign out
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn sm primary wallet-signin"
+            onClick={onSignIn}
+            disabled={session.signingIn}
+            title="Sign a message with your wallet to open a Polyester session. This does not place orders."
+          >
+            {session.signingIn ? "Signing in…" : "Sign in"}
+          </button>
+        )}
+        {session.error && (
+          <span className="pill down wallet-pill" title={session.error.message} aria-live="polite">
+            {session.error.code === "origin_rejected" ? "Not allowed" : "Sign-in failed"}
+          </span>
+        )}
         <button
           type="button"
           className="btn sm wallet-disconnect"
