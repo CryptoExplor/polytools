@@ -36,6 +36,7 @@ export interface PolyesterSession {
 
 export type LoginFailure =
   | SignFailure
+  | "exchange_refused"
   | "origin_rejected"
   | "origin_not_allowed"
   | "endpoint_unreachable"
@@ -81,6 +82,24 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 /** Upstream refusals that mean "this deployment is not allowed to log in". */
 const ORIGIN_REFUSAL_CODES = new Set(["permission_denied", "unauthenticated", "invalid_argument"]);
 
+/**
+ * Refusals that are about the *account*, not the origin.
+ *
+ * `auth.v1.AuthErrorCode` enumerates these: terms not accepted, a smart account
+ * already linked to another login, a wallet login the exchange rejected. The
+ * exchange processed the request, so reporting them as "this deployment's origin
+ * was refused" would send the reader to the wrong place — the same
+ * misattribution this file has already been wrong about once.
+ */
+const ACCOUNT_REFUSAL_CODES = new Set([
+  "auth_wallet_login_failed",
+  "auth_terms_not_accepted",
+  "auth_smart_account_already_linked",
+  "auth_resource_not_found",
+  "auth_invalid_request",
+  "auth_invite_access_denied",
+]);
+
 async function readJson(response: Response): Promise<ChallengeBody & LoginBody> {
   try {
     const parsed = (await response.json()) as unknown;
@@ -112,6 +131,10 @@ function failureFor(response: Response, body: ChallengeBody): PolyesterLoginErro
   // body, which is exactly what an edge block looks like. Never report this as
   // an unreachable endpoint: the request got an answer, just not the one we
   // wanted.
+  if (ACCOUNT_REFUSAL_CODES.has(code.toLowerCase())) {
+    return new PolyesterLoginError("exchange_refused", detail ?? code);
+  }
+
   if (code.startsWith("upstream_") || ORIGIN_REFUSAL_CODES.has(code)) {
     return new PolyesterLoginError("origin_rejected", detail ?? code);
   }
@@ -233,12 +256,20 @@ export class PolyesterSessionStore {
     this.set(null);
   }
 
-  /** True when a token exists and has not passed its stated expiry. */
+  /**
+   * True when a token exists and has not passed its stated expiry.
+   *
+   * An expiry we cannot parse is treated as **expired**, not as unbounded. The
+   * previous behaviour failed open: a malformed or dropped expiry kept a token
+   * usable for the life of the tab. A session with no stated expiry at all is
+   * still used — the server remains the authority and will reject it — but a
+   * stated expiry that does not parse is not a reason to assume it is valid.
+   */
   isUsable(now: number = Date.now()): boolean {
     if (!this.session) return false;
     if (!this.session.expiresAt) return true;
     const expiry = Date.parse(this.session.expiresAt);
-    return Number.isFinite(expiry) ? expiry > now : true;
+    return Number.isFinite(expiry) ? expiry > now : false;
   }
 }
 

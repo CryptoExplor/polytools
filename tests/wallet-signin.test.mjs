@@ -390,6 +390,32 @@ describe("a refusal names the right layer — never the wrong one", () => {
   });
 });
 
+describe("an unreadable expiry is not an unbounded session", () => {
+  it("treats a token as unusable when its stated expiry does not parse", async () => {
+    const { PolyesterSessionStore } = await vite.ssrLoadModule("/apps/web/src/lib/polyesterSession.ts");
+    const store = new PolyesterSessionStore();
+    const base = {
+      accessToken: "tok",
+      accountId: null,
+      username: null,
+      smartAccountAddress: EOA,
+      signerAddress: EOA,
+    };
+
+    store.set({ ...base, expiresAt: "2026-10-27T21:43:44.000Z" }, Date.parse("2026-10-27T21:00:00Z"));
+    assert.equal(store.isUsable(Date.parse("2026-10-27T21:00:00Z")), true, "future expiry is usable");
+    assert.equal(store.isUsable(Date.parse("2026-10-27T22:00:00Z")), false, "past expiry is not");
+
+    // The regression this guards: a garbled expiry must not read as "never expires".
+    store.set({ ...base, expiresAt: "garbage" });
+    assert.equal(store.isUsable(), false);
+
+    // No stated expiry still relies on the server to reject the token.
+    store.set({ ...base, expiresAt: null });
+    assert.equal(store.isUsable(), true);
+  });
+});
+
 describe("an exchange-side block is not an unreachable endpoint", () => {
   const responding = (status, payload) => async () =>
     new Response(typeof payload === "string" ? payload : JSON.stringify(payload), {
@@ -430,6 +456,40 @@ describe("an exchange-side block is not an unreachable endpoint", () => {
     const originCase = sessionErrorMessage("origin_rejected", "uri is not permitted");
     assert.match(originCase, /refused this site's origin/i);
     assert.equal(/edge blocked/i.test(originCase), false);
+  });
+});
+
+describe("account refusals are not blamed on the origin", () => {
+  const responding = (status, payload) => async () =>
+    new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
+  const attempt = (fetchImpl) =>
+    sessionModule.login({ provider: fakeWallet(), address: EOA, fetchImpl });
+
+  it("classifies an auth account code as the exchange refusing the account", async () => {
+    // auth.v1.AuthErrorCode: terms not accepted is an account problem. Calling it
+    // an origin refusal would point the reader at the deployment.
+    try {
+      await attempt(responding(403, { error: "auth_terms_not_accepted", detail: "accept terms to continue" }));
+      assert.fail("should have thrown");
+    } catch (error) {
+      assert.equal(error.code, "exchange_refused");
+      assert.match(error.detail, /accept terms/);
+    }
+  });
+
+  it("keeps an origin refusal distinct from an account refusal", async () => {
+    try {
+      await attempt(responding(403, { error: "permission_denied", detail: "uri is not permitted" }));
+      assert.fail("should have thrown");
+    } catch (error) {
+      assert.equal(error.code, "origin_rejected");
+    }
+  });
+
+  it("has distinct copy for the two", async () => {
+    const { sessionErrorMessage } = await vite.ssrLoadModule("/apps/web/src/lib/usePolyesterSession.ts");
+    assert.match(sessionErrorMessage("exchange_refused", "accept terms"), /rejected the sign-in/i);
+    assert.match(sessionErrorMessage("origin_rejected", "uri is not permitted"), /refused this site's origin/i);
   });
 });
 

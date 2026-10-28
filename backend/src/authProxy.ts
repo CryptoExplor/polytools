@@ -155,13 +155,31 @@ async function readJsonBody(request: Request): Promise<Json | null> {
 }
 
 /** Timestamp from the wire is `{seconds, nanos}` as JSON; surface ISO or null. */
+/**
+ * Normalises `google.protobuf.Timestamp` to ISO-8601.
+ *
+ * ProtoJSON serialises a Timestamp as an RFC 3339 **string**
+ * (`"2026-10-27T21:43:44Z"`), not as `{seconds, nanos}` — the object form is what
+ * the binary wire and some test fixtures use. Reading only the object form
+ * silently dropped every real expiry, and a null expiry made the client treat the
+ * token as usable indefinitely. Both shapes are accepted here; anything else
+ * yields null, which the client treats as "no stated expiry" rather than as an
+ * extension of the session.
+ */
 function isoFromTimestamp(value: unknown): string | null {
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+  }
   if (!value || typeof value !== "object") return null;
-  const seconds = (value as Json).seconds;
-  const numeric = typeof seconds === "string" ? Number(seconds) : seconds;
-  if (typeof numeric !== "number" || !Number.isFinite(numeric) || numeric <= 0) return null;
-  const ms = numeric * 1000;
-  const date = new Date(ms);
+
+  const raw = (value as Json).seconds;
+  const seconds = typeof raw === "string" ? Number(raw) : raw;
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return null;
+
+  const nanos = (value as Json).nanos;
+  const fraction = typeof nanos === "number" && nanos > 0 ? Math.floor(nanos / 1e6) : 0;
+  const date = new Date(seconds * 1000 + fraction);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 

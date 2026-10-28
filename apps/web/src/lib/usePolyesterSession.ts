@@ -39,6 +39,14 @@ export function sessionErrorMessage(code: LoginFailure, detail?: string): string
       return "Your wallet has not authorized this site.";
     case "malformed_signature":
       return "Your wallet returned a signature this app cannot read.";
+    case "exchange_refused":
+      // The exchange understood the request and rejected it for account reasons
+      // (terms, an already-linked Safe, a failed wallet login). Nothing about the
+      // deployment or the origin is at fault.
+      return detail
+        ? `Polyester rejected the sign-in: ${detail}`
+        : "Polyester rejected the sign-in for this account.";
+
     case "origin_rejected":
       // Three different refusals arrive here and they mean different things, so
       // the copy names the layer rather than blaming "the exchange" generally.

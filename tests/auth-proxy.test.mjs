@@ -566,6 +566,61 @@ describe("upstream refusals stay attributable", () => {
   });
 });
 
+describe("timestamps arrive the way ProtoJSON actually writes them", () => {
+  // auth_v1_auth's CreateWalletChallengeResponse.expires_at is a
+  // google.protobuf.Timestamp, which ProtoJSON serialises as an RFC 3339 string.
+  // Reading only the {seconds,nanos} object form dropped every real expiry, and a
+  // null expiry was then treated by the client as usable indefinitely.
+  const RFC = "2026-10-27T21:43:44Z";
+
+  it("passes an RFC 3339 string through as ISO-8601", async () => {
+    reset();
+    scenario = { reply: { status: 200, body: { message: MESSAGE, expiresAt: RFC } } };
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", { body: JSON.stringify({ signerAddress: SIGNER }) }),
+      env(),
+    );
+    assert.equal((await response.json()).expiresAt, "2026-10-27T21:43:44.000Z");
+  });
+
+  it("still accepts the object form the binary wire uses", async () => {
+    reset();
+    scenario = { reply: { status: 200, body: { message: MESSAGE, expiresAt: { seconds: 1793134000, nanos: 500_000_000 } } } };
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", { body: JSON.stringify({ signerAddress: SIGNER }) }),
+      env(),
+    );
+    assert.equal((await response.json()).expiresAt, new Date(1793134000_500).toISOString());
+  });
+
+  it("reports null, not a guess, for a shape it does not understand", async () => {
+    reset();
+    scenario = { reply: { status: 200, body: { message: MESSAGE, expiresAt: "not a date" } } };
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", { body: JSON.stringify({ signerAddress: SIGNER }) }),
+      env(),
+    );
+    assert.equal((await response.json()).expiresAt, null);
+  });
+
+  it("carries the login expiry through to the client", async () => {
+    reset();
+    scenario = {
+      reply: {
+        status: 200,
+        body: { accessToken: "tok", expiresAt: RFC, accountId: "1", username: "u" },
+      },
+    };
+    const response = await backend.api(
+      authRequest("/api/auth/login", {
+        body: JSON.stringify({ smartAccountAddress: SMART_ACCOUNT, signature: SIGNATURE, message: MESSAGE }),
+      }),
+      env(),
+    );
+    assert.equal((await response.json()).expiresAt, "2026-10-27T21:43:44.000Z");
+  });
+});
+
 describe("the challenge URN decides which account is logged in", () => {
   // Evidence: a working third-party client parses
   // `urn:polyester:wallet-challenge:login:0x…` out of the message and notes that
