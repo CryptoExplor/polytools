@@ -243,6 +243,37 @@ describe("3. Backend handler allowlists, Node adapter path fix, and bounded TTL 
     assert.equal(body.ok, true);
   });
 
+  it("carries a POST body through the Node adapter", async () => {
+    // Every route was a GET until wallet login arrived, so a dropped body was
+    // invisible. An empty body reaches the auth handler as invalid_body, which
+    // looks like a client bug and is really the adapter's.
+    const payload = JSON.stringify({ signerAddress: "0xabCDeF0123456789AbcdEf0123456789aBCDEF01" });
+    const fakeIncoming = {
+      url: "/api/auth/challenge",
+      method: "POST",
+      headers: { host: "localhost:8787", "content-type": "application/json" },
+      async *[Symbol.asyncIterator]() {
+        yield Buffer.from(payload, "utf8");
+      },
+    };
+    const webReq = await nodeAdapterMod.toWebRequest(fakeIncoming);
+    assert.equal(webReq.method, "POST");
+    assert.equal(await webReq.text(), payload);
+  });
+
+  it("leaves a GET without a body rather than reading a stream", async () => {
+    const fakeIncoming = {
+      url: "/api/health",
+      method: "GET",
+      headers: { host: "localhost:8787" },
+      async *[Symbol.asyncIterator]() {
+        throw new Error("a GET body must not be read");
+      },
+    };
+    const webReq = await nodeAdapterMod.toWebRequest(fakeIncoming);
+    assert.equal(webReq.body, null);
+  });
+
   it("rejects non-allowlisted depth, timeframe, side, interval, compareBy, invalid numeric/range params, and empty strings with 400 (DEF-03, DEF-11)", async () => {
     const cases = [
       "http://localhost/api/orderbook?symbol=BTC-USDT&depth=7",
