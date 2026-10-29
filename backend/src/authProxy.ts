@@ -125,7 +125,12 @@ export function resolveAuthApiOrigin(env?: Record<string, string | undefined>): 
  * adapters this app ships.
  */
 export function challengeUri(request: Request): string | null {
-  const candidates = [new URL(request.url).origin, request.headers.get("Origin") ?? ""];
+  // The browser's own `Origin` first: Polyester documents `uri` as "browser origin
+  // URI requesting the signature", which is the page the user is on, not the host
+  // answering the request. Those are the same when the backend is co-located, so
+  // the ordering was invisible — and wrong the moment the API runs on its own
+  // host, where the challenge would have been bound to the backend instead.
+  const candidates = [request.headers.get("Origin") ?? "", new URL(request.url).origin];
   for (const candidate of candidates) {
     if (!candidate) continue;
     try {
@@ -562,8 +567,15 @@ function isCrossOrigin(request: Request, originHeader: string | null): boolean {
   const fetchSite = request.headers.get("Sec-Fetch-Site");
   if (fetchSite === "same-origin") return false;
   if (!originHeader) return false;
-  const selfOrigin = challengeUri(request);
-  if (!selfOrigin) return false;
+  // Deliberately the request URL, never `challengeUri()`: that one prefers the
+  // Origin header now, which would make this comparison circular and silently
+  // treat every cross-origin caller as same-origin.
+  let selfOrigin: string;
+  try {
+    selfOrigin = new URL(request.url).origin;
+  } catch {
+    return false;
+  }
   return originHeader !== selfOrigin;
 }
 

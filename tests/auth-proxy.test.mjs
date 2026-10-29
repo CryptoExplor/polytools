@@ -566,6 +566,41 @@ describe("upstream refusals stay attributable", () => {
   });
 });
 
+describe("the challenge is bound to the page, not the host", () => {
+  it("uses the browser Origin when the backend runs on another host", async () => {
+    // The topology that actually works (see 17 §10): app on one origin, backend on
+    // another. Polyester documents `uri` as the browser origin requesting the
+    // signature, so a challenge bound to the backend host would be wrong — and the
+    // mismatch only appears when the two are not co-located.
+    reset();
+    scenario = { reply: { status: 200, body: { message: MESSAGE, expiresAt: 1 } } };
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", {
+        body: JSON.stringify({ signerAddress: SIGNER }),
+        headers: { "Content-Type": "application/json", Origin: "https://app.example" },
+      }),
+      // Split topology: the app origin must be named, which is the whole point of
+      // the allowlist. Same-origin deployments leave this empty.
+      env({ POLYTOOLS_APP_ORIGINS: "https://app.example" }),
+    );
+    assert.equal((await response.json()).uri, "https://app.example");
+    assert.equal(upstreamCalls.at(-1).body.uri, "https://app.example");
+  });
+
+  it("falls back to the request host when there is no Origin", async () => {
+    reset();
+    scenario = { reply: { status: 200, body: { message: MESSAGE, expiresAt: 1 } } };
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", {
+        body: JSON.stringify({ signerAddress: SIGNER }),
+        headers: { "Content-Type": "application/json" },
+      }),
+      env(),
+    );
+    assert.equal((await response.json()).uri, "https://polytools.example");
+  });
+});
+
 describe("timestamps arrive the way ProtoJSON actually writes them", () => {
   // auth_v1_auth's CreateWalletChallengeResponse.expires_at is a
   // google.protobuf.Timestamp, which ProtoJSON serialises as an RFC 3339 string.
