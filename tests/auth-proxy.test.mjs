@@ -628,6 +628,64 @@ describe("the challenge URN decides which account is logged in", () => {
   // challenge for a root account we did not predict.
   const ROOT = `0x${"d4".repeat(20)}`;
 
+  // Copied from Polyester's public API reference for POST /v1/auth/wallet-challenge.
+  // The address is the last colon segment, after `eip155:<chainId>`. An earlier
+  // parser read the whole remainder as the address, never matched, and fell back
+  // silently, which made the whole fix inert.
+  const DOCUMENTED = [
+    "devnet.polyester.com wants you to sign in with your Ethereum account:",
+    "0x5555555555555555555555555555555555555555",
+    "",
+    "Sign in to Polyester. This does not authorize a transaction.",
+    "",
+    "URI: https://devnet.polyester.com",
+    "Version: 1",
+    "Chain ID: 1",
+    "Nonce: 8f3a72c91b4de6058f3a72c91b4de6058f3a72c91b4de6058f3a72c91b4de605",
+    "Issued At: 2026-01-01T00:00:00Z",
+    "Expiration Time: 2026-01-01T00:05:00Z",
+    "Request ID: 8f3a72c91b4de6058f3a72c91b4de6058f3a72c91b4de6058f3a72c91b4de605",
+    "Resources:",
+    "- urn:polyester:wallet-challenge:login:eip155:888168:0x2222222222222222222222222222222222222222",
+  ].join("\n");
+
+  it("parses the documented URN shape with a chain id in it", async () => {
+    reset();
+    scenario = { reply: { status: 200, body: { message: DOCUMENTED, expiresAt: "2026-01-01T00:05:00Z" } } };
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", { body: JSON.stringify({ signerAddress: SIGNER }) }),
+      env(),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(
+      (await response.json()).smartAccountAddress,
+      "0x2222222222222222222222222222222222222222",
+      "the address after eip155:<chainId> must be extracted",
+    );
+  });
+
+  it("sends the documented URN account to login as well", async () => {
+    reset();
+    scenario = { reply: { status: 200, body: { accessToken: "tok", expiresAt: "2026-01-01T00:05:00Z", accountId: "1" } } };
+    await backend.api(
+      authRequest("/api/auth/login", {
+        body: JSON.stringify({ smartAccountAddress: SMART_ACCOUNT, signature: SIGNATURE, message: DOCUMENTED }),
+      }),
+      env(),
+    );
+    assert.equal(upstreamCalls.at(-1).body.smartAccountAddress, "0x2222222222222222222222222222222222222222");
+  });
+
+  it("still reads a bare single-segment URN", async () => {
+    reset();
+    scenario = { reply: { status: 200, body: { message: `Resources:\n- urn:polyester:wallet-challenge:login:${ROOT}`, expiresAt: 1 } } };
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", { body: JSON.stringify({ signerAddress: SIGNER }) }),
+      env(),
+    );
+    assert.equal((await response.json()).smartAccountAddress, ROOT);
+  });
+
   it("returns the URN account, not the derived one", async () => {
     reset();
     scenario = {

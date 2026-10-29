@@ -358,13 +358,21 @@ const CHALLENGE_URN = "urn:polyester:wallet-challenge:login:";
 /**
  * The account the challenge is actually for.
  *
- * A working third-party client (poly.py, examined as evidence) parses a URN line
- * out of the challenge message — `urn:polyester:wallet-challenge:login:0x…` — and
- * comments that "the smart account in the URN is what LoginWithWallet must
- * receive". The exchange can therefore issue a challenge for a different account
- * than the counterfactual Safe we derived: a root or already-registered account
- * rather than the predicted one. Echoing our own guess at login would then fail
- * for reasons that look like a signature problem but are not.
+ * The documented challenge message ends with a Resources entry of the form
+ * `- urn:polyester:wallet-challenge:login:eip155:<chainId>:<address>` (Polyester's
+ * public API reference for POST /v1/auth/wallet-challenge shows exactly this).
+ * A working third-party client parses it and notes that "the smart account in the
+ * URN is what LoginWithWallet must receive".
+ *
+ * The exchange can therefore issue a challenge for a different account than the
+ * counterfactual Safe we derived: a root or already-registered account rather than
+ * the predicted one. Echoing our own guess at login would then fail for reasons
+ * that look like a signature problem but are not.
+ *
+ * The address is the *last* colon-separated segment. An earlier version of this
+ * function read everything after `login:` as the address, which never matched the
+ * documented shape and silently fell back — the fix was inert until this was
+ * corrected against the docs.
  *
  * The message is the artefact the wallet signed, so an address inside it is the
  * authoritative one. Used only when it parses and validates; without the URN the
@@ -374,7 +382,12 @@ export function challengeAccountFromMessage(message: string): string | null {
   for (const raw of message.split("\n")) {
     const line = raw.trim().replace(/^-\s*/, "");
     if (!line.toLowerCase().startsWith(CHALLENGE_URN)) continue;
-    const candidate = line.slice(CHALLENGE_URN.length).trim();
+
+    // `login:eip155:<chainId>:<address>` — the address is the last segment. Split
+    // rather than slice so the documented namespace and chain id are tolerated and
+    // a single-segment form still works.
+    const segments = line.slice(CHALLENGE_URN.length).split(":");
+    const candidate = (segments[segments.length - 1] ?? "").trim();
     return ADDRESS_RE.test(candidate) ? candidate : null;
   }
   return null;
