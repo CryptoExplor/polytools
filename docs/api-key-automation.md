@@ -5,6 +5,10 @@
 - **R1 source:** unchanged
 - **Live authenticated reads:** still unverified in this workspace
 
+> **Start here for a local run.** `docs/wallet-first-audit/19_CONNECTION_AND_ONCHAIN_MODEL.md`
+> is the current entry point: it has the two connection modes, the exact on-chain surface,
+> and a staged test plan (Stage 0 needs no credentials, `npm run probe:polyester`).
+
 ## 1. Short answer
 
 Yes. **Polyester API keys are specifically intended to let a bot, script, or backend service authenticate non-interactively.** An API-key client does not need a wallet signature, JWT login, or browser session for each request.

@@ -23,6 +23,7 @@
     "check:sdk:live": "node scripts/check-external-content.mjs sdk --network",
     "check:performance": "node scripts/check-build-performance.mjs",
     "check:runtime": "node scripts/check-runtime.mjs",
+    "probe:polyester": "node scripts/polyester-probe.mjs",
     "check:dependencies": "node scripts/check-dependencies.mjs",
     "check:whitespace": "node scripts/check-whitespace.mjs",
     "check:contrast": "node scripts/check-contrast.mjs"
