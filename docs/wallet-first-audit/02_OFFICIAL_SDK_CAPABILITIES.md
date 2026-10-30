@@ -366,3 +366,86 @@ This audit did **not** establish, and the plan must not assume:
 7. That a **written** licence agreement exists. A Polyester team member has stated third-party use
    is acceptable (Q3), but the LLC-level written agreement the `LICENSE` contemplates has not been
    produced, and redistribution wording remains unaddressed.
+
+---
+
+## 12. The four documentation surfaces, and what each one actually answers
+
+The reason earlier conclusions here were too narrow: this project was reading one
+surface (the TypeScript SDK's shipped types) and treating it as the whole API. Polyester
+publishes **four documentation surfaces plus a canonical contract bundle**, and each one
+answers a different question.
+
+| Surface | Location | Answers |
+|---|---|---|
+| **User docs** | `testnet.polyester.com/docs/user-docs` | What the product does, account settings, creating API keys, subaccounts, permissions in the UI |
+| **Developer docs** | `/docs/developer-docs` | Architecture and semantics: auth, funds vs trading, scaled integers, public IDs, rate limits, realtime session model |
+| **SDK docs** | `/docs/sdk` + 4 repos (`Fabric-Labs/polyester-sdk-{typescript,python,go,rust}`) | Method-level capability per language, plus the alpha Python/Go/Rust SDKs that are **API-key only** and explicitly do *not* implement browser/wallet login |
+| **API playground** | `/docs/api-docs/{rest,connect}/<method>` | Per-operation method, path, **visibility** (`Public endpoint` vs `Authentication required`), auth methods, MFA, request/response schema, possible errors |
+| **Contract bundle** (not docs) | `github.com/Fabric-Labs/polyester-proto` | Ground truth: `.proto` sources, `descriptor/public.pb`, `openapi/*.json`, and generated portal artifacts — `nav.json` (every operation with a `public` flag), `streams.json` (every realtime channel with `auth`), `errors.json` |
+
+The lesson is not "read more docs". It is that **visibility is a per-operation property**,
+and only the playground and `nav.json` publish it. The SDK capability matrix says which
+*sdks* wrap a method; it never says whether the endpoint needs authentication.
+
+## 13. The public surface, counted
+
+From `nav.json` (generated 2026-10-01, `environment: public`):
+
+- **177 ConnectRPC operations (23 public) and 171 REST operations (22 public)** — the
+  same business operations exposed over two transports, so the distinct capability count
+  is in the low twenties either way. The public set is market data, VIP tiers, rate
+  limits, currency conversion, chain lifecycle flows, zipper config, layout/share
+  resolution, subaccount role *catalog* (not assignments), and wallet login/challenge.
+- **Realtime: 22 channels, 8 anonymous** (`auth: anonymous`):
+  `public:spot:orderbook:deltas:depth:{depth}:{symbolId}`,
+  `public:spot:market:trades:{symbolId}`,
+  `public:spot:market:candles:{timeframe}:{symbolId}`,
+  `public:spot:market:heatmap:{interval}:{symbolId}`,
+  `public:spot:market_overview:updates`,
+  `public:chain:lifecycle:flows(+detail)`,
+  `public:chain:zipped-asset:supply`,
+  `public:identity:updates`.
+  The remaining 14 are `private:*` and require a session or API key.
+
+**Correcting an assumption in this audit:** the WebSocket session model states that
+public clients *skip* token preparation entirely — *"Public subscriptions need no token."*
+Only `/v1/rt/token` (connection) and `/v1/rt/subscribe` (channel) are required for
+private channels. So a public order-book stream is reachable with no key, no session and
+no wallet.
+
+**Encoding is channel-specific.** The orderbook and trades channels publish a `:json`
+variant with human-readable decimal strings; the market-overview and heatmap channels are
+Protobuf-only. Do not infer a JSON shape from a Protobuf-only channel.
+
+## 14. What this changes about the app
+
+Already public and already used through `/api`: spot config, market overview, candles,
+trades, orderbook, heatmap, chain lifecycle flows, zipper deposit/withdraw config.
+
+Public and previously **unused** — the honest gap list:
+
+| Operation | Why it matters | Status |
+|---|---|---|
+| `GET /v1/vip/tiers` (`ListVIPTiers`) | The venue's whole cost curve, VIP0–VIP10, maker and taker | **now used** — `/api/fees/tiers`, `/#/fees` |
+| `GET /v1/rate-limits` | Public trading quota catalog | unused |
+| `GET /v1/spot/markets/volume-history` | 30-day volume series | unused |
+| `GET /v1/market/currency-conversion/{config,rates}` | Display-currency conversion | unused |
+| `GET /v1/auth/subaccount-roles` | Role catalog for permission tables | unused |
+| 8 anonymous realtime channels | Push instead of 2–15s polling | unused — see next |
+
+**On realtime, specifically.** The app polls (`/book` every 2s, overview every 4s). The
+exchange offers a public push stream, and the official TypeScript SDK implements it with
+the `centrifuge` client — the same package their own browser frontend uses. Adopting it is
+therefore a known-shape change, but it is **not** a drop-in: it adds `centrifuge` to the
+bundle, requires `wss://api.testnet.polyester.com` in CSP `connect-src` (an `https:`
+source does not authorise a `wss:` connection), and depends on the socket's Origin policy,
+which cannot be tested from this sandbox. It is staged rather than shipped blind.
+
+## 15. What is still not public, and will not become public by adding a fee
+
+The valuable private state is unchanged: balances, holds, open orders, order history,
+trigger orders, user trades, API keys, policies, subaccounts, address book, transfers.
+Every one needs a session (JWT) or an Ed25519 API key. No amount of public market data
+substitutes for them, and none of the 45 public operations exposes another account's
+activity.

@@ -28,6 +28,7 @@ wallet-first integration changes. Route/component facts come from `apps/web/src/
 | P9 | `/hub` | Faucet links, onboarding checklist, claim countdown | Static config + `NETWORKS` | No | none | R | Yes |
 | P10 | `/sdk` | TS/Python/Rust SDK snippets, order-input validation | Static snippets; `lib/orderConstraints.ts` | No | n/a (documentation) | R | Yes |
 | P11 | `/brand-kit` | Brand assets | Static | No | n/a | R | Yes |
+| P12 | `/fees` | Full VIP0–VIP10 maker/taker catalog, thresholds, trade-cost arithmetic | **Public REST** `GET /v1/vip/tiers` via `/api/fees/tiers` | No | `vip.listTiers` ✅ | R | Yes (new) |
 | A1 | `/account` | Balances, sampled balance/equity history, current fee rates, exports | friendly REST: `balances`, `balanceHistory`, `equityHistory`, `feeRates` | **Yes** | `balances.list`, `.getBalanceHistory`, `.getEquityHistory`, `fees.getSpotRates` ✅ | R | Yes |
 | A2 | `/account/api` | **Key setup** — vault, key creation/import, `ak_…` registration, unlock/lock/wipe | Local vault + out-of-band `testnet.polyester.com/account/api-keys` | **Yes** (it *is* the key UI) | `apiKeys.*` partially | R | Yes |
 | A3 | `/account/trade` | Account fills + actual execution fees | friendly REST `fills` (`/v1/spot/trades`) | **Yes** | `trades.list` ✅ | R | Yes |

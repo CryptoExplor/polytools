@@ -23,6 +23,7 @@ import {
   IconDashboard,
   IconExternal,
   IconFlow,
+  IconVolume,
   IconHub,
   IconInfo,
   IconKey,
@@ -84,6 +85,7 @@ const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
   {
     group: "Toolkit & Docs",
     items: [
+      { to: "/fees", label: "Fee schedule", icon: <IconVolume size={15} /> },
       { to: "/calc", label: "Calculators", icon: <IconCalc size={15} /> },
       { to: "/hub", label: "Start on testnet", icon: <IconHub size={15} /> },
       { to: "/sdk", label: "Developers: SDK", icon: <IconKey size={15} /> },
@@ -111,6 +113,7 @@ const ROUTE_META: Record<
   "/compare": { title: "Compare prices", group: "Market Data", showSymbolSelector: false },
   "/zipper": { title: "Bridge routes", group: "Cross-Chain", showSymbolSelector: false },
   "/flow": { title: "Money Movements", group: "Account", showSymbolSelector: false },
+  "/fees": { title: "Fee schedule", group: "Toolkit & Docs", showSymbolSelector: false },
   "/calc": { title: "Calculators", group: "Toolkit & Docs", showSymbolSelector: true },
   "/hub": { title: "Start on testnet", group: "Toolkit & Docs", showSymbolSelector: false },
   "/sdk": { title: "Developers: SDK", group: "Toolkit & Docs", showSymbolSelector: true },

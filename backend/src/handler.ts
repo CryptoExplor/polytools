@@ -25,6 +25,9 @@
  *   /api/flow?flowId=...
  *   /api/flow/by-tx?txHash=...
  *   /api/flow/explain?txHash=...
+ *   /api/fees/tiers            public VIP0-VIP10 maker/taker catalog
+ *   /api/account/address?signer=0x...
+ *   /api/account/balances?address=0x...
  *
  *   POST /api/auth/challenge   wallet login: obtain the message to sign
  *   POST /api/auth/login       wallet login: exchange a signature for a token
@@ -45,6 +48,7 @@ import { cached, cacheStats } from "./cache";
 import { dataFor } from "./mcpServer";
 import { deriveSmartAccount, handleAuthRoute, isAuthPath } from "./authProxy";
 import { fetchOnchainBalances } from "./onchainBalances";
+import { fetchVipFeeSchedule } from "./publicFees";
 
 export interface ApiOptions {
   /** Platform env vars (Cloudflare bindings / process.env). */
@@ -210,6 +214,18 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
       // Chain state changes slowly and the explorer is rate-limited; a short
       // shared cache also keeps us from hammering a public service.
       { "Cache-Control": "public, max-age=30" },
+    );
+  }
+  if (path === "/api/fees/tiers") {
+    const result = await fetchVipFeeSchedule({ fetchImpl: opts.fetch });
+    if (!result.ok) return error(result.status, result.code, result.detail);
+    return json(
+      result.schedule,
+      {},
+      // The catalog is published as an immutable policy version; changes are
+      // rare events carrying their own effectiveFrom, so a 5 minute cache
+      // cannot serve a stale row for long after a change.
+      { "Cache-Control": "public, max-age=300" },
     );
   }
   if (path === "/api/env") {

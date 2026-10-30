@@ -19,6 +19,7 @@ const HeatmapPage = lazy(() =>
 const Compare = lazy(() => import("./pages/Compare"));
 const Zipper = lazy(() => import("./pages/Zipper"));
 const Calc = lazy(() => import("./pages/Calc"));
+const Fees = lazy(() => import("./pages/Fees"));
 const Hub = lazy(() => import("./pages/Hub"));
 const Portfolio = lazy(() => import("./pages/Portfolio"));
 const SdkGuide = lazy(() => import("./pages/SdkGuide"));
@@ -60,6 +61,7 @@ export default function App() {
               <Route path="compare" element={<Compare />} />
               <Route path="zipper" element={<Zipper />} />
               <Route path="calc" element={<Calc />} />
+              <Route path="fees" element={<Fees />} />
               <Route path="hub" element={<Hub />} />
               <Route path="flow" element={<AccountRedirect to="/account/transactions" scope="public" />} />
               <Route path="portfolio" element={<AccountRedirect to="/account" />} />
