@@ -20,6 +20,8 @@ const PRODUCTION_CSP_DIRECTIVES = [
   "img-src 'self' data: https://assets.polyester.com",
   "media-src 'self' https://assets.polyester.com",
   // Public API facade, CoinGecko comparison, and direct signed account GETs.
+  // The on-chain balance lookup is proxied through our own /api, so no third-party
+  // explorer origin is reachable from the browser.
   "connect-src 'self' https://api.coingecko.com https://api.testnet.polyester.com https://*.workers.dev",
   "font-src 'self'",
   "manifest-src 'self'",

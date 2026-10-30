@@ -330,7 +330,14 @@ async function callConnect(
  *   which login rejects. Only `accountAddress` is taken from it — the signing
  *   always happens in the user's wallet, in the browser.
  */
-async function deriveSmartAccount(signerAddress: string): Promise<string | null> {
+/**
+ * Counterfactual smart-account address for an owner EOA.
+ *
+ * Exported for the read-only on-chain route: deriving the address needs no
+ * signature, no token and no exchange call, so asking for a balance must not
+ * require a login the exchange may never grant (see docs 17 §10).
+ */
+export async function deriveSmartAccount(signerAddress: string): Promise<string | null> {
   try {
     const [{ createPolyesterAccountSigner }, { POLYESTER_TESTNET_ENVIRONMENT }] = await Promise.all([
       import("@polyester/sdk/account-signer"),

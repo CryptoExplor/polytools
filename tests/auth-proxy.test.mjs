@@ -656,6 +656,48 @@ describe("timestamps arrive the way ProtoJSON actually writes them", () => {
   });
 });
 
+describe("the on-chain address lookup needs no login", () => {
+  // The point of this route: a user can find their own smart account without a
+  // session, because deriving it is pure computation. If the exchange never grants
+  // third-party login, this is the part of the account view that still works.
+  const get = (url) => new Request(url, { headers: { "User-Agent": "polytools-test/1.0" } });
+
+  it("derives the address for a valid EOA and touches no exchange", async () => {
+    reset();
+    const response = await backend.api(
+      get(`https://polytools.example/api/account/address?signer=${SIGNER}`),
+      env(),
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.match(body.smartAccountAddress, /^0x[0-9a-fA-F]{40}$/);
+    assert.notEqual(body.smartAccountAddress.toLowerCase(), SIGNER.toLowerCase());
+    assert.equal(upstreamCalls.length, 0, "no upstream call may be made");
+  });
+
+  it("rejects a malformed address without calling the SDK", async () => {
+    reset();
+    for (const bad of ["", "0x123", "not-an-address", `0x${"zz".repeat(20)}`]) {
+      const response = await backend.api(
+        get(`https://polytools.example/api/account/address?signer=${encodeURIComponent(bad)}`),
+        env(),
+      );
+      assert.equal(response.status, 400, bad);
+      assert.equal((await response.json()).error, "invalid_signer_address");
+    }
+    assert.equal(upstreamCalls.length, 0);
+  });
+
+  it("is cacheable, because the answer is deterministic public data", async () => {
+    reset();
+    const response = await backend.api(
+      get(`https://polytools.example/api/account/address?signer=${SIGNER}`),
+      env(),
+    );
+    assert.match(response.headers.get("Cache-Control") ?? "", /max-age=300/);
+  });
+});
+
 describe("the challenge URN decides which account is logged in", () => {
   // Evidence: a working third-party client parses
   // `urn:polyester:wallet-challenge:login:0x…` out of the message and notes that

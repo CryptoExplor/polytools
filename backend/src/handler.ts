@@ -43,11 +43,14 @@ import {
 import { applySecurityHeaders } from "../../packages/core/src/deploymentSecurity";
 import { cached, cacheStats } from "./cache";
 import { dataFor } from "./mcpServer";
-import { handleAuthRoute, isAuthPath } from "./authProxy";
+import { deriveSmartAccount, handleAuthRoute, isAuthPath } from "./authProxy";
+import { fetchOnchainBalances } from "./onchainBalances";
 
 export interface ApiOptions {
   /** Platform env vars (Cloudflare bindings / process.env). */
   env?: Record<string, string | undefined>;
+  /** Injected in tests so a route never has to reach the network for real. */
+  fetch?: typeof fetch;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -169,6 +172,45 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
   // ---- meta routes -------------------------------------------------------------
   if (path === "/api" || path === "/api/health") {
     return json({ ok: true, service: "poly-tools-backend", now: Date.now() });
+  }
+  // Read-only address lookup. Deriving a smart-account address from an owner EOA
+  // is a pure computation — no signature, no token, no exchange call — so a user
+  // can see their own on-chain account without a login the exchange may never
+  // grant. It reveals nothing that the chain does not already publish.
+  if (path === "/api/account/address") {
+    const signer = (url.searchParams.get("signer") ?? "").trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(signer)) {
+      return error(400, "invalid_signer_address");
+    }
+    const smartAccountAddress = await deriveSmartAccount(signer);
+    if (!smartAccountAddress) {
+      // The SDK is unavailable in this runtime; say so rather than guessing.
+      return error(503, "smart_account_derivation_unavailable");
+    }
+    return json(
+      { signerAddress: signer, smartAccountAddress },
+      {},
+      // Deterministic for an EOA, and public data. Safe to cache briefly.
+      { "Cache-Control": "public, max-age=300" },
+    );
+  }
+  // On-chain funding balances for a smart account. Read-only, no session: the
+  // exchange never grants third-party login, and this part of the account view is
+  // public chain data anyway. Proxied so the browser only talks to /api.
+  if (path === "/api/account/balances") {
+    const address = (url.searchParams.get("address") ?? "").trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      return error(400, "invalid_address");
+    }
+    const result = await fetchOnchainBalances(address, { fetchImpl: opts.fetch });
+    if (!result.ok) return error(result.status, result.code, result.detail);
+    return json(
+      { address: result.address, balances: result.balances },
+      {},
+      // Chain state changes slowly and the explorer is rate-limited; a short
+      // shared cache also keeps us from hammering a public service.
+      { "Cache-Control": "public, max-age=30" },
+    );
   }
   if (path === "/api/env") {
     return json({
