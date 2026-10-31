@@ -467,6 +467,85 @@ describe("streamOrderbook transport", () => {
     h.stop();
   });
 
+  /** A fake EventTarget that reports a controllable visibilityState. */
+  const makeVisibility = () => {
+    const listeners = new Set();
+    const target = {
+      visibilityState: "visible",
+      addEventListener: (_type, fn) => listeners.add(fn),
+      removeEventListener: (_type, fn) => listeners.delete(fn),
+    };
+    return {
+      target,
+      setState(state) {
+        target.visibilityState = state;
+        for (const fn of [...listeners]) fn({ type: "visibilitychange" });
+      },
+      get listenerCount() {
+        return listeners.size;
+      },
+    };
+  };
+
+  it("gives up after the failure budget, then resumes when the tab is visible again", async () => {
+    // A hidden tab is the usual reason a socket dies, so a permanent give-up
+    // would mean the page stays dead until reload.
+    const visibility = makeVisibility();
+    const h = await makeHarness({
+      maxFailures: 1,
+      retryBaseDelayMs: 5,
+      visibilityTarget: visibility.target,
+    });
+
+    // First failure: budget is 1, so this schedules one retry.
+    h.socket().drop();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const afterFirst = FakeSocket.instances.length;
+    assert.ok(afterFirst > 1, "retried once inside the budget");
+
+    // Second failure exceeds the budget: stop trying.
+    h.socket().drop();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const afterGiveUp = FakeSocket.instances.length;
+    assert.equal(h.statuses.at(-1).status, "unavailable");
+
+    // Still hidden: no reconnect.
+    visibility.setState("hidden");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(FakeSocket.instances.length, afterGiveUp, "does not retry while hidden");
+
+    // Visible again: retries immediately.
+    visibility.setState("visible");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(FakeSocket.instances.length > afterGiveUp, "reconnects when the tab returns");
+
+    h.stop();
+  });
+
+  it("does not reconnect on visibility while the stream is healthy", async () => {
+    const visibility = makeVisibility();
+    const h = await makeHarness({ visibilityTarget: visibility.target });
+    const socket = h.socket();
+    socket.open();
+    socket.deliver({ id: 1, connect: {} });
+    socket.deliver({ id: 2, subscribe: {} });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const before = FakeSocket.instances.length;
+    visibility.setState("visible");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(FakeSocket.instances.length, before);
+    h.stop();
+  });
+
+  it("removes the visibility listener on stop", async () => {
+    const visibility = makeVisibility();
+    const h = await makeHarness({ visibilityTarget: visibility.target });
+    assert.equal(visibility.listenerCount, 1);
+    h.stop();
+    assert.equal(visibility.listenerCount, 0);
+  });
+
   it("stops cleanly: no reconnect after stop()", async () => {
     const h = await makeHarness();
     const socket = h.socket();

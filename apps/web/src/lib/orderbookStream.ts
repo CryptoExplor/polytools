@@ -53,6 +53,13 @@ export interface OrderbookStreamOptions {
   WebSocketImpl?: typeof WebSocket;
   /** Consecutive failures before the session stops trying. */
   maxFailures?: number;
+  /** Base reconnect delay in ms; doubles per failure. */
+  retryBaseDelayMs?: number;
+  /**
+   * Where to listen for the page becoming visible again. Defaults to
+   * `document`; injectable so the resume behaviour can be tested without a DOM.
+   */
+  visibilityTarget?: EventTarget | null;
 }
 
 /** Where the public realtime endpoint lives. Overridable for other networks. */
@@ -74,10 +81,19 @@ export function defaultOrderbookStreamUrl(): string {
 export function streamOrderbook(options: OrderbookStreamOptions): () => void {
   const WebSocketImpl = options.WebSocketImpl ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket;
   const maxFailures = options.maxFailures ?? 5;
+  const retryBaseDelayMs = options.retryBaseDelayMs ?? 1_000;
 
   let socket: WebSocket | null = null;
   let stopped = false;
   let failureCount = 0;
+  /**
+   * True once the retry budget is exhausted.
+   *
+   * Browsers suspend or kill sockets in background tabs, so "gave up" is often
+   * really "the tab was hidden". Without a way back, a user who leaves the page
+   * for a minute returns to a permanently dead stream that only a reload fixes.
+   */
+  let gaveUp = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let commandId = 1;
   let book: StreamBook | null = null;
@@ -145,14 +161,17 @@ export function streamOrderbook(options: OrderbookStreamOptions): () => void {
     if (stopped) return;
     failureCount += 1;
     if (failureCount > maxFailures) {
+      gaveUp = true;
       options.onStatus("unavailable", "stream unavailable; showing polled data");
       return;
     }
     options.onStatus("reconnecting");
     // Capped exponential backoff with jitter, so N open tabs do not retry in
     // lockstep after a backend restart.
-    const delay = Math.min(30_000, 1_000 * 2 ** (failureCount - 1));
-    const jitter = Math.floor(Math.random() * 250);
+    const delay = Math.min(30_000, retryBaseDelayMs * 2 ** (failureCount - 1));
+    // Jitter proportional to the delay, not a fixed budget: a flat 250ms of
+    // jitter would swamp a short delay and make an early retry feel sluggish.
+    const jitter = Math.floor(Math.random() * Math.min(delay, 250));
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
@@ -272,6 +291,33 @@ export function streamOrderbook(options: OrderbookStreamOptions): () => void {
     };
   };
 
+  // Resume on visibility: a hidden tab is the most common reason the socket
+  // died, and it is the one case where retrying is clearly worth it.
+  const visibilityTarget =
+    options.visibilityTarget === undefined
+      ? (typeof document === "undefined" ? null : document)
+      : options.visibilityTarget;
+
+  const onVisibility = () => {
+    if (stopped || !gaveUp) return;
+    const state = (visibilityTarget as Document | null)?.visibilityState;
+    if (state !== undefined && state !== "visible") return;
+    gaveUp = false;
+    failureCount = 0;
+    connect();
+  };
+
+  if (visibilityTarget) {
+    visibilityTarget.addEventListener("visibilitychange", onVisibility);
+  }
+
+  const stopWithListener = () => {
+    if (visibilityTarget) {
+      visibilityTarget.removeEventListener("visibilitychange", onVisibility);
+    }
+    stop();
+  };
+
   connect();
-  return stop;
+  return stopWithListener;
 }

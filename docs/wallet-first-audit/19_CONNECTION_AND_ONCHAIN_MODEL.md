@@ -429,6 +429,21 @@ Both now have regression tests, and the wiring one was verified to fail when the
 reverted. The probe also gained a contiguity assertion, since counting publications only
 proves traffic arrived — not that it is mergeable.
 
+3. **A dead stream stayed dead.** After five consecutive failures the transport stopped
+   permanently, which is wrong for the most common cause of a dropped socket: the tab was
+   hidden and the browser suspended it. A user who left the page for a minute returned to a
+   stream only a reload could revive. It now resumes when the page becomes visible again.
+   Found while re-reading the transport, not from a probe.
+
+Two reporting fixes came out of the same pass:
+
+- **`spread 0.00bps` was ambiguous.** One-cent wide on BTC at 77k is 0.0013bp, which rounds
+  to `0.00`, and a *locked* book (bid == ask) prints the same. The probe now states the
+  spread in quote units with four decimal places, and names a locked book explicitly. A
+  reader can no longer mistake a perfectly tight market for a defect.
+- **Jitter was a flat 250ms**, which swamped short backoff delays. It is now proportional
+  to the delay.
+
 **Still unproven:** that the browser renders correctly under sustained deltas (needs a
 human), and that the socket recovers from a real mid-stream network drop (a fixture cannot
 inject one on the wire).

@@ -271,10 +271,22 @@ async function checkOrderbook() {
     const ask = Number(askPx);
     if (!(bid > 0) || !(ask > 0)) return fail("Order book shape", "non-positive price");
     if (bid > ask) return fail("Order book shape", `crossed book: bid ${bid} > ask ${ask}`);
-    const spreadBps = ((ask - bid) / ((ask + bid) / 2)) * 10_000;
+
+    // Say exactly what the spread is. Two decimals hides the difference between
+    // a genuinely tight market and a *locked* one: a one-cent spread on BTC at
+    // 77k is 0.0013bp and rounds to "0.00", while bid == ask is a different
+    // market state entirely. In both cases the old message printed "0.00bps",
+    // which reads as a defect and is not one.
+    const diff = ask - bid;
+    const spreadBps = (diff / ((ask + bid) / 2)) * 10_000;
+    const quote = diff.toLocaleString("en-US", { maximumFractionDigits: 8 });
+    const shape =
+      diff === 0
+        ? `LOCKED book (bid == ask ${bidPx})`
+        : `${quote} wide (${spreadBps.toFixed(4)}bps)`;
     return pass(
       "Order book shape",
-      `${bids.length}x${asks.length} levels, spread ${spreadBps.toFixed(2)}bps, seq ${body.bookSeq}, ${ms}ms`,
+      `${bids.length}x${asks.length} levels, ${shape}, seq ${body.bookSeq}, ${ms}ms`,
     );
   } catch (error) {
     return fail("Order book shape", error?.cause?.code ?? error?.name ?? "network error");
