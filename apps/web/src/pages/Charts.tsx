@@ -4,7 +4,7 @@
  * optional SMA(7)/SMA(25) overlays, and window statistics.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CANDLE_TIMEFRAMES,
   dec,
@@ -18,6 +18,13 @@ import {
 import { api } from "../lib/api";
 import { candlesForRequest, marketForSymbol } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
+import {
+  streamCandles,
+  upsertCandle,
+  type ChartCandle,
+  type RealtimeStatus,
+} from "../lib/candlesStream";
+import { seriesForDisplay } from "../lib/orderbookStream";
 import { useApp } from "../lib/store";
 import {
   Card,
@@ -77,6 +84,45 @@ export default function Charts() {
   );
 
   const currentData = candlesForRequest(data, symbol, tf);
+
+  // ---- public realtime refinement -------------------------------------------
+  // A running bar is republished as it moves, so the live copy replaces the
+  // polled bar with the same timestamp instead of appending a new candle.
+  const [liveCandles, setLiveCandles] = useState<ChartCandle[]>([]);
+  const [streamStatus, setStreamStatus] = useState<RealtimeStatus>("connecting");
+  const [streamDetail, setStreamDetail] = useState<string | null>(null);
+  const symbolId: number | null =
+    typeof currentData?.symbolId === "number" && currentData.symbolId > 0
+      ? currentData.symbolId
+      : null;
+
+  useEffect(() => {
+    setLiveCandles([]);
+    setStreamStatus("connecting");
+    setStreamDetail(null);
+    if (symbolId === null) return;
+
+    // A publication can land between stop() and the socket closing; applying it
+    // would draw one bar of the previous market on the new chart.
+    let active = true;
+    const stop = streamCandles({
+      symbolId,
+      timeframe: tf,
+      onCandle: (candle) => {
+        if (!active) return;
+        setLiveCandles((prev) => upsertCandle(prev, candle, 500));
+      },
+      onStatus: (status, detail) => {
+        if (!active) return;
+        setStreamStatus(status);
+        setStreamDetail(detail ?? null);
+      },
+    });
+    return () => {
+      active = false;
+      stop();
+    };
+  }, [symbolId, tf]);
   const requestIdentityError = data && !currentData
     ? "Candle response did not match the selected symbol or timeframe; it was not displayed."
     : null;
@@ -85,19 +131,35 @@ export default function Charts() {
   const stats = marketForSymbol(ov?.markets, symbol);
   const [base, quote] = splitSymbol(symbol);
 
-  const candles: CandlePoint[] = useMemo(
-    () =>
-      (currentData?.candles ?? []).map((c) => ({
-        time: c.time,
-        open: price(c.open),
-        high: price(c.high),
-        low: price(c.low),
-        close: price(c.close),
-        volume: dec(c.volume),
-        isClosed: c.isClosed,
-      })),
-    [currentData],
-  );
+  const candles: CandlePoint[] = useMemo(() => {
+    const polled = (currentData?.candles ?? []).map((c) => ({
+      time: c.time,
+      open: price(c.open),
+      high: price(c.high),
+      low: price(c.low),
+      close: price(c.close),
+      volume: dec(c.volume),
+      isClosed: c.isClosed,
+    }));
+    // A stream that gave up yields to polling rather than showing a frozen bar.
+    const live = seriesForDisplay(streamStatus, liveCandles);
+    if (!live?.length) return polled;
+    const byTime = new Map(polled.map((c) => [c.time, c]));
+    // Identical formatting to the polled path, so a live bar and a polled bar
+    // for the same price are indistinguishable downstream.
+    for (const bar of live) {
+      byTime.set(bar.time, {
+        time: bar.time,
+        open: price(bar.open),
+        high: price(bar.high),
+        low: price(bar.low),
+        close: price(bar.close),
+        volume: dec(bar.volume),
+        isClosed: bar.isClosed,
+      });
+    }
+    return [...byTime.values()].sort((a, b) => a.time - b.time);
+  }, [currentData, liveCandles, streamStatus]);
 
   const windowStats = useMemo(() => {
     if (candles.length < 1) return null;
@@ -198,7 +260,16 @@ export default function Charts() {
                 ).toFixed(2)}%`
               : "—"
           }
-          sub={`${candles.length} bars loaded`}
+          sub={
+            <span data-stream-status={streamStatus}>
+              {`${candles.length} bars loaded`}
+              {streamStatus === "live"
+                ? " · live"
+                : streamStatus === "connecting"
+                  ? " · connecting"
+                  : " · polled"}
+            </span>
+          }
         />
         <MetricCell
           label={`${tf} Window Low / High`}

@@ -582,3 +582,78 @@ are the ones worth the next five minutes: they are also the only ones no probe c
 **Version note:** the Chrome pass ran on `8590e4b`. The current tree adds the subprotocol
 request and the protobuf-framing guard, both of which change how the socket is opened, so
 the browser result does not transfer automatically — re-run the pass on the current commit.
+
+## 12. Trades and candles — the same transport, two new contracts
+
+The order-book channel is not special: the socket lifecycle (connect, `subscribe`,
+ping/pong, backoff, visibility resume, protobuf refusal) moved into
+`apps/web/src/lib/realtimeSession.ts`, and each channel is now a thin layer over
+`subscribeChannel`. `orderbookStream.ts` is the first such layer; `tradesStream.ts` and
+`candlesStream.ts` are the next two.
+
+### 12a. What each channel actually carries
+
+| Channel | Key | Per-publication state |
+| --- | --- | --- |
+| Trades | `public:spot:market:trades:{symbolId}` | one fill: `matchId`, `price`, `qty`, `side`, `executedAt` |
+| Candles | `public:spot:market:candles:{timeframe}:{symbolId}` | **the whole bar**, republished as it moves: OHLC, `volume`, `tsSec`, `isClosed` |
+
+The second row is the one that changes behaviour. A delta channel sends increments, so the
+client merges them; a candle channel sends snapshots, so the client **replaces by `tsSec`**.
+Appending instead would draw a new candle on every tick. `mergeCandle` is the single place
+that does this, and it is covered by a test that republishes the same open bar three times
+and asserts one bar remains.
+
+Trades are deduplicated by `matchId` for the same reason deltas need sequence checks:
+delivery is at-least-once, and a reconnect can replay. A tape that prints a fill twice
+reports volume that never traded.
+
+### 12b. Why the pages share one ingestion path
+
+`Tape.tsx` already had whale detection, an alert tone and desktop notifications attached to
+its polled ingest. Wiring the socket as a second, parallel ingest would have meant two
+copies of that logic drifting apart — the streamed prints would silently stop triggering
+alerts the polled ones still fired. The poll handler was therefore extracted into one
+`ingest(trades)` callback that both sources call. The static wiring test asserts exactly one
+`const ingest = useCallback` remains.
+
+`Charts.tsx` overlays live bars onto the polled series by timestamp and formats them through
+the same `price()` / `dec()` helpers, so a live bar and a polled bar for the same price are
+indistinguishable downstream.
+
+### 12c. Honesty rules applied here too
+
+- The stream **refines** polling; it never replaces it. `seriesForDisplay(status, live)`
+  returns `null` once the socket gives up, so a dead stream falls back to fresh polled data
+  instead of freezing the last frame.
+- A publication that fails validation is dropped, not displayed — and it does not tear down
+  a working subscription.
+- A publication may arrive after teardown when the symbol changes; both pages guard with an
+  `active` flag, because the trade payload carries no symbol id to check it against.
+- Each page exposes `data-stream-status` so a browser pass can assert on a selector rather
+  than on adjacent prose.
+
+### 12d. Status of this work — read before trusting it
+
+| Claim | Evidence |
+| --- | --- |
+| Frame parsing and merges are correct | unit tests (24) against the published payloads |
+| Channel strings are the published ones | pinned literally in tests, from `streams.json` |
+| The probe checks both channels | exercised against a local fake origin in four modes (pass, wrong timeframe, bad payload, quiet) |
+| The probes pass against the real origin | **not run** — this sandbox has no egress to the exchange |
+| A browser streams trades and candles | **not run** — needs the owner's machine |
+
+The timeframe token is the one genuine unknown: the public documentation shows
+`{timeframe}` as a placeholder, so `1m` is an assumption taken from the REST request. A
+wrong token does not error loudly in general — it subscribes to a channel that never
+publishes. The probe distinguishes the two cases it can (server rejection vs. silence) and
+labels silence `UNKNOWN` rather than passing it.
+
+Run sheet for the outstanding half:
+
+```
+POLYESTER_BASE=https://api.testnet.polyester.com node scripts/polyester-probe.mjs --stream
+# expect: Realtime deltas, Realtime trades, Realtime candles all PASS
+# then in the browser: /#/tape and /#/charts
+#   document.querySelector('[data-stream-status]').dataset.streamStatus === "live"
+```

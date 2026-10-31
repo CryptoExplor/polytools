@@ -46,8 +46,9 @@ const ORIGIN = process.env.POLYESTER_ORIGIN ?? "https://polytools-cc8.pages.dev"
 const TIMEOUT_MS = 15_000;
 /**
  * `handshake` (default) stops at the Upgrade response.
- * `stream` additionally subscribes to a public JSON channel and validates three
- * publications end to end. Read-only either way: no writes, no credentials.
+ * `stream` additionally subscribes to the three public JSON channels the web app
+ * uses (order-book deltas, trades, candles) and validates what arrives end to
+ * end. Read-only either way: no writes, no credentials.
  */
 const MODE = (process.argv.includes("--stream") ? "stream" : "handshake");
 
@@ -435,9 +436,8 @@ async function checkWebsocketOrigin() {
  * assumptions (sequence range, decimal-string levels). It then unsubscribes by
  * simply closing the socket — nothing is written anywhere.
  */
-function streamCheck({ host, symbolId, depth, expectMessages, timeoutMs = 20_000 }) {
+function streamCheck({ host, channel, expectMessages, timeoutMs = 20_000 }) {
   return new Promise((resolve) => {
-    const channel = `public:spot:orderbook:deltas:depth:${depth}:${symbolId}:json`;
     const received = [];
     const result = { channel, received };
     let raw = Buffer.alloc(0);
@@ -540,8 +540,7 @@ async function checkStream(symbolId, depth) {
   try {
     const outcome = await streamCheck({
       host: TARGET.hostname,
-      symbolId,
-      depth,
+      channel: `public:spot:orderbook:deltas:depth:${depth}:${symbolId}:json`,
       expectMessages: 3,
     });
     if (!outcome.ok && !outcome.received?.length) {
@@ -612,6 +611,97 @@ async function checkStream(symbolId, depth) {
   }
 }
 
+const isDecimalString = (value) => typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value);
+
+/**
+ * The public trade tape: `public:spot:market:trades:{symbolId}`.
+ *
+ * Validates the exact fields the client's parser requires, so a contract change
+ * shows up here rather than as an empty tape that looks like a quiet market.
+ */
+async function checkTradesStream(symbolId) {
+  const name = "Realtime trades";
+  const outcome = await streamCheck({
+    host: TARGET.hostname,
+    channel: `public:spot:market:trades:${symbolId}`,
+    expectMessages: 2,
+    timeoutMs: 25_000,
+  }).catch((error) => ({ ok: false, reason: error?.code ?? error?.name ?? "error" }));
+
+  const received = outcome.received ?? [];
+  if (!received.length) {
+    // Distinguish "the channel is wrong" from "nothing traded": both produce an
+    // empty list, and only the subscribe reply tells them apart.
+    return outcome.subscribed && outcome.reason === "no publications before timeout"
+      ? unknown(name, `subscribed (${outcome.channel}) but no prints in 25s — indistinguishable from a quiet market`)
+      : fail(name, outcome.reason ?? "no publications");
+  }
+
+  const problems = [];
+  for (const trade of received) {
+    if (typeof trade?.matchId !== "string" && typeof trade?.matchId !== "number") problems.push("no matchId");
+    if (!isDecimalString(trade?.price)) problems.push("price is not a decimal string");
+    if (!isDecimalString(trade?.qty)) problems.push("qty is not a decimal string");
+    if (typeof trade?.side !== "string") problems.push("no side");
+    if (typeof trade?.executedAt !== "string") problems.push("no executedAt");
+    if (problems.length) break;
+  }
+  if (problems.length) return fail(name, `${[...new Set(problems)].join("; ")} (${outcome.channel})`);
+
+  const s = received[0];
+  return pass(
+    name,
+    `${received.length} print(s) on ${outcome.channel}, e.g. ${s.side} ${s.qty} @ ${s.price} ` +
+      `at ${s.executedAt}, subprotocol ${outcome.subprotocol}`,
+  );
+}
+
+/**
+ * Live candles: `public:spot:market:candles:{timeframe}:{symbolId}`.
+ *
+ * The timeframe token is the one thing here the public docs only show as a
+ * placeholder, so a rejected subscription is the signal that it is wrong; a
+ * quiet bar is not.
+ */
+async function checkCandlesStream(symbolId, timeframe) {
+  const name = "Realtime candles";
+  const outcome = await streamCheck({
+    host: TARGET.hostname,
+    channel: `public:spot:market:candles:${timeframe}:${symbolId}`,
+    expectMessages: 2,
+    timeoutMs: 25_000,
+  }).catch((error) => ({ ok: false, reason: error?.code ?? error?.name ?? "error" }));
+
+  const received = outcome.received ?? [];
+  if (!received.length) {
+    return outcome.subscribed && outcome.reason === "no publications before timeout"
+      ? unknown(
+          name,
+          `subscribed to ${outcome.channel} but no bars in 25s — a quiet bar and a wrong timeframe token look identical`,
+        )
+      : fail(name, outcome.reason ?? "no publications");
+  }
+
+  const problems = [];
+  for (const bar of received) {
+    if (bar?.tsSec === undefined) problems.push("no tsSec");
+    for (const field of ["open", "high", "low", "close", "volume"]) {
+      if (!isDecimalString(bar?.[field])) problems.push(`${field} is not a decimal string`);
+    }
+    if (typeof bar?.isClosed !== "boolean") problems.push("isClosed is not a boolean");
+    if (problems.length) break;
+  }
+  if (problems.length) return fail(name, `${[...new Set(problems)].join("; ")} (${outcome.channel})`);
+
+  const last = received[received.length - 1];
+  return pass(
+    name,
+    `${received.length} bar(s) on ${outcome.channel}, last O ${last.open} H ${last.high} L ${last.low} ` +
+      `C ${last.close} V ${last.volume} ts ${last.tsSec}${last.isClosed ? " (closed)" : " (open)"}, ` +
+      `subprotocol ${outcome.subprotocol}`,
+  );
+}
+
 async function checkTls() {
   const started = Date.now();
   const outcome = await websocketHandshake({
@@ -636,7 +726,13 @@ async function checkTls() {
 async function main() {
   console.log(`Stage 0 probe — ${BASE}, origin ${ORIGIN}`);
   console.log(`Run ${new Date().toISOString()} with ${process.platform} node ${process.version}`);
-  console.log(`Mode: ${MODE}${MODE === "handshake" ? " (add --stream to verify delta publications)" : ""}`);
+  console.log(
+    `Mode: ${MODE}${
+      MODE === "handshake"
+        ? " (add --stream to verify delta, trade and candle publications)"
+        : " (order-book deltas, trades, candles)"
+    }`,
+  );
   console.log("Read-only: GET, OPTIONS, and a WebSocket handshake. No credentials, no writes.\n");
 
   // Order matters. If the host is not reachable from this machine, every later
@@ -665,6 +761,8 @@ async function main() {
     await checkAuthenticatedCors();
     await checkWebsocketOrigin();
     await checkStream(1, 50);
+    await checkTradesStream(1);
+    await checkCandlesStream(1, "1m");
   }
 
   const failed = results.filter((result) => result.state === "FAIL").length;

@@ -18,6 +18,7 @@ import {
 import { api } from "../lib/api";
 import { formatCompactQuoteNotional } from "../lib/format";
 import { useNow, usePollData } from "../lib/hooks";
+import { streamTrades, type RealtimeStatus } from "../lib/tradesStream";
 import { useApp } from "../lib/store";
 import {
   Card,
@@ -151,21 +152,29 @@ export default function Tape() {
     setWhales([]);
   }, [symbol]);
 
-  // Ingest new trades when poll data arrives (strictly deduplicated by matchId)
-  useEffect(() => {
-    if (!data?.trades || (data.symbol && data.symbol !== symbol)) return;
-    const isInitialSeed = seededSymbolRef.current !== symbol;
-    const {
-      threshold: curThreshold,
-      sound: curSound,
-      notify: curNotify,
-      base: curBase,
-      quote: curQuote,
-      qtyDecimals: curQtyDecimals,
-    } = prefsRef.current;
+  /**
+   * One ingestion path for both sources.
+   *
+   * The polled page and the live socket must dedupe, detect whales, sound the
+   * alert and notify identically, so this is a single function rather than two
+   * copies that drift. `matchId` is the identity, which is also what makes a
+   * replayed publication harmless.
+   */
+  const ingest = useCallback(
+    (incoming: RecentTrade[]) => {
+      if (!incoming.length) return;
+      const isInitialSeed = seededSymbolRef.current !== symbol;
+      const {
+        threshold: curThreshold,
+        sound: curSound,
+        notify: curNotify,
+        base: curBase,
+        quote: curQuote,
+        qtyDecimals: curQtyDecimals,
+      } = prefsRef.current;
 
-    const fresh: TapeRow[] = [];
-    for (const t of [...data.trades].reverse()) {
+      const fresh: TapeRow[] = [];
+      for (const t of [...incoming].reverse()) {
       if (seenRef.current.has(t.matchId)) continue;
       seenRef.current.add(t.matchId);
       const px = price(t.price);
@@ -205,9 +214,60 @@ export default function Tape() {
             /* ignore notification error */
           }
         }
+        }
       }
-    }
-  }, [data, symbol, showToastMsg]);
+    },
+    [symbol, showToastMsg],
+  );
+
+  // Polled history and the live socket both feed the same ingest.
+  useEffect(() => {
+    if (!data?.trades || (data.symbol && data.symbol !== symbol)) return;
+    ingest(data.trades);
+  }, [data, symbol, ingest]);
+
+  // ---- public realtime refinement -------------------------------------------
+  // The socket makes the tape feel live; polling remains the floor if it dies.
+  const [streamStatus, setStreamStatus] = useState<RealtimeStatus>("connecting");
+  const [streamDetail, setStreamDetail] = useState<string | null>(null);
+  const symbolId: number | null =
+    typeof data?.symbolId === "number" && data.symbolId > 0 ? data.symbolId : null;
+
+  useEffect(() => {
+    setStreamStatus("connecting");
+    setStreamDetail(null);
+    if (symbolId === null) return;
+
+    // The trade payload carries no symbol id, so a print that lands during
+    // teardown cannot be checked against the new market — it is dropped.
+    let active = true;
+    const stop = streamTrades({
+      symbolId,
+      onTrade: (trade) => {
+        if (!active) return;
+        // Same shape the polled path produces, so whale detection and dedupe
+        // cannot diverge between sources.
+        ingest([
+          {
+            matchId: trade.matchId,
+            sideLabel: trade.side,
+            price: trade.price,
+            qty: trade.qty,
+            tsMs: trade.tsMs,
+          },
+        ]);
+      },
+      onStatus: (status, detail) => {
+        if (!active) return;
+        setStreamStatus(status);
+        setStreamDetail(detail ?? null);
+      },
+    });
+    return () => {
+      active = false;
+      stop();
+    };
+  }, [symbolId, ingest]);
 
   const stats = useMemo(() => {
     let buyCount = 0;
@@ -277,7 +337,30 @@ export default function Tape() {
     <div className="page-stack">
       <PageHeader
         title={`Trades · ${symbol}`}
-        badge={<Pill kind="accent">{rows.length} recent trades</Pill>}
+        badge={
+          <div className="row-flex">
+            <Pill kind="accent">{rows.length} recent trades</Pill>
+            {/* Live vs polled are different claims; the tape says which. */}
+            <span data-stream-status={streamStatus}>
+              {streamStatus === "live" ? (
+                <Pill kind="up" liveDot title={streamDetail ?? "Streaming prints from the public trade channel"}>
+                  Live
+                </Pill>
+              ) : streamStatus === "connecting" ? (
+                <Pill kind="info" title="Opening the public stream; polled data below">
+                  Connecting
+                </Pill>
+              ) : (
+                <Pill
+                  kind={streamStatus === "reconnecting" ? "warn" : "info"}
+                  title={streamDetail ?? "Stream unavailable; polling every 1.5s"}
+                >
+                  Polling
+                </Pill>
+              )}
+            </span>
+          </div>
+        }
         subtitle="Recent public trades on this market, newest first. Public data — not your fills."
         actions={
           <div className="row-flex">
