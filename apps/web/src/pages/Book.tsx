@@ -18,7 +18,7 @@ import {
   type StreamBook,
 } from "@poly/core";
 import { api } from "../lib/api";
-import { streamOrderbook, type StreamStatus } from "../lib/orderbookStream";
+import { bookForDisplay, streamOrderbook, type StreamStatus } from "../lib/orderbookStream";
 import { formatCompactQuoteNotional } from "../lib/format";
 import { marketForSymbol, orderbookForRequest } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
@@ -155,7 +155,9 @@ export default function Book() {
 
   const book = useMemo(() => {
     if (!currentData) return null;
-    const levels = liveBook ?? { bids: currentData.bids ?? [], asks: currentData.asks ?? [] };
+    // A stream that gave up leaves a frozen book; polling is live by then.
+    const streamed = bookForDisplay(streamStatus, liveBook);
+    const levels = streamed ?? { bids: currentData.bids ?? [], asks: currentData.asks ?? [] };
     const bids = (levels.bids ?? [])
       .map((l) => ({
         rawPrice: l.price,

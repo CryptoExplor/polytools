@@ -567,6 +567,32 @@ describe("streamOrderbook transport", () => {
  * against `null`, returns early, and the socket is never opened at all — the UI
  * silently polls forever while every unit test stays green.
  */
+describe("frozen book yields to polling", () => {
+  const load = async () => vite.ssrLoadModule("/apps/web/src/lib/orderbookStream.ts");
+
+  it("renders the streamed book while the socket may still recover", async () => {
+    const { bookForDisplay } = await load();
+    const live = { bookSeq: "9" };
+    for (const status of ["connecting", "live", "reconnecting"]) {
+      assert.equal(bookForDisplay(status, live), live, status);
+    }
+  });
+
+  it("drops a streamed book once the stream has given up", async () => {
+    // A frozen book under a "Polling" label is the exact quiet inaccuracy the
+    // rest of this app refuses to ship: the numbers stop moving but the UI
+    // implies they are being refreshed.
+    const { bookForDisplay } = await load();
+    assert.equal(bookForDisplay("unavailable", { bookSeq: "9" }), null);
+  });
+
+  it("is null-safe before any book exists", async () => {
+    const { bookForDisplay } = await load();
+    assert.equal(bookForDisplay("live", null), null);
+    assert.equal(bookForDisplay("unavailable", null), null);
+  });
+});
+
 describe("Book page stream wiring", () => {
   it("re-runs the subscribe effect when the symbol id arrives", async () => {
     const { readFileSync } = await import("node:fs");
@@ -587,5 +613,13 @@ describe("Book page stream wiring", () => {
     // Depending on `data` would re-subscribe on every poll; the whole response
     // object changes identity every 2s.
     assert.ok(!/\bdata\b/.test(deps[1]), "the effect must not depend on the polled response object");
+
+    // And the render path must route the streamed book through the availability
+    // rule, or a dead stream freezes the ladder.
+    assert.match(page, /bookForDisplay\(streamStatus, liveBook\)/);
+    assert.ok(
+      !/liveBook \?\?/.test(page),
+      "the levels must not read liveBook directly, bypassing bookForDisplay",
+    );
   });
 });

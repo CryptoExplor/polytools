@@ -36,6 +36,22 @@ import {
 
 export type StreamStatus = "connecting" | "live" | "reconnecting" | "unavailable";
 
+/**
+ * Which book to render, given the stream's state.
+ *
+ * Once the stream has given up, a streamed book is a *frozen* snapshot: the
+ * socket is gone, so the levels will never change again. Rendering it beneath a
+ * "Polling" label claims the numbers are being refreshed when they are not —
+ * the polled book is the live one at that point. So an abandoned stream must
+ * yield to polling rather than sit in front of it.
+ *
+ * During `connecting` and `reconnecting` the last known book is still the best
+ * information available and the stream may resume at any moment, so it stays.
+ */
+export function bookForDisplay<T>(status: StreamStatus, live: T | null): T | null {
+  return status === "unavailable" ? null : live;
+}
+
 export interface StreamSnapshot {
   bookSeq: string;
   bids: { price: string; qty: string }[];

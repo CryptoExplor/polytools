@@ -572,15 +572,19 @@ async function checkStream(symbolId, depth) {
       if (typeof value === "string" && /^\d+$/.test(value)) return value;
       return null;
     };
+    // Print each publication's full range, not just its end. "503→505" reads as
+    // a skipped sequence, but it is contiguous when that delta starts at 504 —
+    // and the passing and failing lines were otherwise identical, which makes a
+    // green result impossible to audit.
     const chain = [];
     let breakAt = null;
     for (let i = 0; i < outcome.received.length; i += 1) {
       const delta = outcome.received[i];
       const end = seq(delta);
-      chain.push(end ?? "?");
+      const start = seq({ bookSeqEnd: delta.bookSeqStart });
+      chain.push(start === null || end === null ? "?" : `${start}-${end}`);
       if (i === 0 || delta.reset === true || breakAt !== null) continue;
       const prev = seq(outcome.received[i - 1]);
-      const start = seq({ bookSeqEnd: delta.bookSeqStart });
       if (prev === null || start === null) {
         breakAt = i;
         continue;
@@ -592,13 +596,13 @@ async function checkStream(symbolId, depth) {
     }
 
     const summary =
-      `${outcome.received.length} publication(s) seq ${chain.join("→")}, ` +
+      `${outcome.received.length} publication(s) seq ${chain.join(" → ")}, ` +
       `${levels.length} levels, subprotocol ${outcome.subprotocol}`;
 
     if (breakAt !== null) {
       return fail(
         "Realtime deltas",
-        `sequence gap between publication ${breakAt - 1} and ${breakAt} (${summary}) — ` +
+        `GAP before publication ${breakAt} (${summary}) — ` +
           "the client re-snapshots on this, so frequent gaps would mean constant refetching",
       );
     }

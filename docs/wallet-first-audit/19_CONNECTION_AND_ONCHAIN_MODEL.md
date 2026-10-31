@@ -444,6 +444,19 @@ Two reporting fixes came out of the same pass:
 - **Jitter was a flat 250ms**, which swamped short backoff delays. It is now proportional
   to the delay.
 
+4. **A dead stream froze the ladder.** When the stream gave up, `liveBook` stayed in state
+   and the render path read `liveBook ?? polled`, so the table showed a *frozen* book under
+   a "Polling" pill — the label said refreshed, the numbers said otherwise. Now routed
+   through `bookForDisplay(status, liveBook)`, which yields to polling once the stream is
+   `unavailable` and keeps the last known book while it is `connecting` or `reconnecting`.
+
+A reporting fix came from the owner's third live run:
+
+- **`seq ...503→...505` read as a gap but was contiguous**, because that delta covered
+  504–505. The passing and failing lines were therefore identical, which makes a green
+  result impossible to audit. The probe now prints each publication's full range —
+  `502-502 → 503-503 → 504-505` — so an extension and a hole are visibly different.
+
 **Still unproven:** that the browser renders correctly under sustained deltas (needs a
 human), and that the socket recovers from a real mid-stream network drop (a fixture cannot
 inject one on the wire).
@@ -451,3 +464,34 @@ inject one on the wire).
 **One correction to the run report:** the channel is keyed by the exchange's **numeric**
 symbol id, so it is `public:spot:orderbook:deltas:depth:50:1:json` — not `depth:50:BTC-USDT:json`
 as the summary states. Subscribing with the ticker string is not the published channel name.
+
+---
+
+## 9. Browser pass — the exact commands
+
+Ports differ by mode, and only one of them exercises the CSP. Both are stated so the result
+is not misread.
+
+| Mode | Command | URL | Applies the CSP? |
+| --- | --- | --- | --- |
+| Dev (HMR, `/api` proxied) | `npm run dev` | `http://localhost:5173/#/book` | **No** — `_headers`/`vercel.json` are static-host artifacts, and `index.html` carries no meta CSP |
+| Preview (built bundle) | `npm run preview` | `http://localhost:4173/#/book` | **No** — same reason |
+| Deployed (Pages / Vercel) | — | the deployed host | **Yes** — this is the only place the `wss:` allowance is actually enforced |
+
+**Consequence:** a browser pass on `5173` or `4173` proves the socket, the merge and the UI.
+It does **not** prove the CSP line, because nothing is enforcing it locally. The CSP is
+covered separately by `tests/deployment-security.test.mjs`, which asserts the exact set of
+websocket origins.
+
+### What to look for
+
+| Observation | Expected | If it is not |
+| --- | --- | --- |
+| Pill after load | `Connecting` → `Live` within a second or two | stuck on `Connecting` = socket never opened |
+| Ladder under load | quantities mutate, no visible flicker | flicker → throttle `setLiveBook` to animation frames |
+| Wi-Fi off for 10s | `Live` → `Polling` → back to `Live` on restore | stays `Polling` = give-up path, check `maxFailures` |
+| Tab backgrounded >30s, then returned | resumes without a reload | dead until reload = the `visibilitychange` path regressed |
+| Depth switch 50 → 10 → 50 | re-subscribes, book stays coherent, no cross-product levels | levels from another depth appearing = identity guard failed |
+
+The last one matters most: switching depth changes the channel, and a delta from the old
+depth applied to the new book would look plausible and be wrong.
