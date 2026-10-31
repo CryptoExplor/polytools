@@ -395,6 +395,78 @@ describe("streamOrderbook transport", () => {
     h.stop();
   });
 
+  it("buffers deltas that arrive before the snapshot, then replays them", async () => {
+    // Live traffic publishes within milliseconds of the subscribe reply, so a
+    // snapshot that resolves later would otherwise lose the first updates and
+    // turn the next delta into a phantom sequence gap.
+    let releaseSnapshot;
+    const gate = new Promise((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    const h = await makeHarness({
+      snapshot: async () => {
+        await gate;
+        return snapshot();
+      },
+    });
+    const socket = h.socket();
+    socket.open();
+    socket.deliver({ id: 1, connect: {} });
+    socket.deliver({ id: 2, subscribe: {} });
+
+    // Delta arrives while the snapshot is still in flight.
+    socket.deliver({
+      push: {
+        channel: "public:spot:orderbook:deltas:depth:50:1:json",
+        pub: { data: delta({ bookSeqStart: 101, bookSeqEnd: 101, bids: [["100.0", "7"]] }) },
+      },
+    });
+    assert.equal(h.books.length, 0, "nothing is published before the snapshot");
+
+    releaseSnapshot();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Snapshot first (seq 100), then the buffered delta applied on top.
+    assert.equal(h.books.length, 2);
+    assert.equal(h.books[0].bookSeq, "100");
+    assert.equal(h.books[1].bookSeq, "101");
+    assert.equal(h.books[1].bids.find((l) => l.price === "100.0").qty, "7");
+    h.stop();
+  });
+
+  it("discards a buffered delta the snapshot already covers", async () => {
+    let releaseSnapshot;
+    const gate = new Promise((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    const h = await makeHarness({
+      // The snapshot is newer than the delta that raced it.
+      snapshot: async () => {
+        await gate;
+        return { ...snapshot(), bookSeq: "105" };
+      },
+    });
+    const socket = h.socket();
+    socket.open();
+    socket.deliver({ id: 1, connect: {} });
+    socket.deliver({ id: 2, subscribe: {} });
+    socket.deliver({
+      push: {
+        channel: "public:spot:orderbook:deltas:depth:50:1:json",
+        pub: { data: delta({ bookSeqStart: 101, bookSeqEnd: 101, bids: [["100.0", "7"]] }) },
+      },
+    });
+
+    releaseSnapshot();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Only the snapshot is published; the stale buffered delta is dropped and
+    // does not roll the book back to 101.
+    assert.equal(h.books.length, 1);
+    assert.equal(h.books[0].bookSeq, "105");
+    h.stop();
+  });
+
   it("stops cleanly: no reconnect after stop()", async () => {
     const h = await makeHarness();
     const socket = h.socket();
@@ -403,5 +475,38 @@ describe("streamOrderbook transport", () => {
     socket.onclose?.({});
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(FakeSocket.instances.length, countBefore);
+  });
+});
+
+/**
+ * The page wiring, asserted statically.
+ *
+ * This exists because the bug it guards against is invisible to a transport
+ * test: `streamOrderbook` works perfectly on its own, but the Book page only
+ * learns the exchange's numeric `symbolId` from the first polled response. If
+ * that value is not a dependency of the subscribe effect, the effect runs once
+ * against `null`, returns early, and the socket is never opened at all — the UI
+ * silently polls forever while every unit test stays green.
+ */
+describe("Book page stream wiring", () => {
+  it("re-runs the subscribe effect when the symbol id arrives", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const { resolve } = await import("node:path");
+    const root = fileURLToPath(new URL("..", import.meta.url));
+    const page = readFileSync(resolve(root, "apps/web/src/pages/Book.tsx"), "utf8")
+      .replace(/\r\n/g, "\n");
+
+    // The id is hoisted to a primitive so it can be a dependency by value.
+    assert.match(page, /const symbolId: number \| null =/);
+
+    const effect = page.slice(page.indexOf("const stop = streamOrderbook({"));
+    const deps = /\}, \[([^\]]*)\]\);/.exec(effect.slice(effect.indexOf("return stop;")));
+    assert.ok(deps, "the effect has a dependency array");
+    assert.match(deps[1], /symbolId/, "the subscribe effect depends on symbolId");
+
+    // Depending on `data` would re-subscribe on every poll; the whole response
+    // object changes identity every 2s.
+    assert.ok(!/\bdata\b/.test(deps[1]), "the effect must not depend on the polled response object");
   });
 });

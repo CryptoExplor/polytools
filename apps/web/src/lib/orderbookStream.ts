@@ -83,6 +83,16 @@ export function streamOrderbook(options: OrderbookStreamOptions): () => void {
   let book: StreamBook | null = null;
   let channel = "";
   let resnapshotInFlight = false;
+  /**
+   * Deltas that arrived while no book existed yet (the snapshot request is
+   * still in flight). Dropping these was the original behaviour and it is
+   * wrong under live traffic: the first publications arrive within milliseconds
+   * of the subscribe reply, so the very first updates would be lost and the
+   * next delta would look like a sequence gap. Bounded, because a snapshot that
+   * never returns must not grow memory without limit.
+   */
+  let pending: OrderbookDelta[] = [];
+  const MAX_PENDING = 256;
 
   const send = (payload: string) => {
     if (socket && socket.readyState === 1) {
@@ -96,6 +106,7 @@ export function streamOrderbook(options: OrderbookStreamOptions): () => void {
 
   const stop = () => {
     stopped = true;
+    pending = [];
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = null;
     if (socket) {
@@ -121,6 +132,7 @@ export function streamOrderbook(options: OrderbookStreamOptions): () => void {
       if (stopped) return;
       book = createStreamBook(fresh);
       options.onBook(book);
+      flushPending();
     } catch {
       // The caller still has polled data; report rather than invent a book.
       options.onStatus("unavailable", reason);
@@ -147,15 +159,11 @@ export function streamOrderbook(options: OrderbookStreamOptions): () => void {
     }, delay + jitter);
   };
 
-  const handleDelta = (data: unknown) => {
-    if (!book) return;
-    let delta: OrderbookDelta;
-    try {
-      delta = parseOrderbookDelta(data, options.symbolId);
-    } catch {
-      // A malformed publication is not worth tearing the socket down over, but
-      // it does mean the book can no longer be trusted to be current.
-      void resnapshot("malformed update; refetching");
+  /** Applies one parsed delta to the local book, or reacts to why it cannot. */
+  const applyDelta = (delta: OrderbookDelta) => {
+    if (!book) {
+      pending.push(delta);
+      if (pending.length > MAX_PENDING) pending = pending.slice(-MAX_PENDING);
       return;
     }
     const result = applyOrderbookDelta(book, delta);
@@ -168,8 +176,36 @@ export function streamOrderbook(options: OrderbookStreamOptions): () => void {
       options.onStatus("reconnecting", "sequence gap; refetching");
       void resnapshot("sequence gap");
     }
-    // "stale" is expected after a reconnect replay: the update is already in
-    // our state, so dropping it silently is correct.
+    // "stale" is expected after a reconnect replay or when a buffered delta is
+    // already covered by a newer snapshot: the update is in our state already,
+    // so dropping it silently is correct.
+  };
+
+  /**
+   * Replays deltas that arrived before the snapshot landed.
+   *
+   * A delta the snapshot already covers is stale by sequence and is discarded
+   * by `applyDelta`; anything newer applies in order. That is why the snapshot
+   * must be taken *before* flushing — it is the baseline those deltas advance.
+   */
+  const flushPending = () => {
+    if (!pending.length) return;
+    const queued = pending;
+    pending = [];
+    for (const delta of queued) applyDelta(delta);
+  };
+
+  const handleDelta = (data: unknown) => {
+    let delta: OrderbookDelta;
+    try {
+      delta = parseOrderbookDelta(data, options.symbolId);
+    } catch {
+      // A malformed publication is not worth tearing the socket down over, but
+      // it does mean the book can no longer be trusted to be current.
+      void resnapshot("malformed update; refetching");
+      return;
+    }
+    applyDelta(delta);
   };
 
   const connect = () => {

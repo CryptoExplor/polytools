@@ -550,15 +550,47 @@ async function checkStream(symbolId, depth) {
     if (problems.length) {
       return fail("Realtime deltas", `${problems.join("; ")} (subprotocol ${outcome.subprotocol})`);
     }
-    const advancing = outcome.received.filter(
-      (delta) => typeof delta.bookSeqEnd === "number" || typeof delta.bookSeqEnd === "string",
-    ).length;
-    return pass(
-      "Realtime deltas",
-      `${advancing} publication(s), seq ${first.bookSeqStart}→${first.bookSeqEnd}, ` +
-        `${levels.length} levels, subprotocol ${outcome.subprotocol}` +
-        `${outcome.reason ? ` (${outcome.reason})` : ""}`,
-    );
+    // Contiguity is what the client's merge actually depends on: each delta's
+    // range must begin where the previous one ended (or be a reset). Counting
+    // publications proves traffic arrived; this proves the traffic is
+    // mergeable, which is the property a gap makes expensive.
+    const seq = (delta) => {
+      const value = delta?.bookSeqEnd;
+      if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return String(value);
+      if (typeof value === "string" && /^\d+$/.test(value)) return value;
+      return null;
+    };
+    const chain = [];
+    let breakAt = null;
+    for (let i = 0; i < outcome.received.length; i += 1) {
+      const delta = outcome.received[i];
+      const end = seq(delta);
+      chain.push(end ?? "?");
+      if (i === 0 || delta.reset === true || breakAt !== null) continue;
+      const prev = seq(outcome.received[i - 1]);
+      const start = seq({ bookSeqEnd: delta.bookSeqStart });
+      if (prev === null || start === null) {
+        breakAt = i;
+        continue;
+      }
+      // start must be <= prev+1: a reset legitimately jumps, a plain delta may
+      // not. Gaps are only a problem when the client cannot tell it happened.
+      const expectedMax = String(BigInt(prev) + 1n);
+      if (BigInt(start) > BigInt(expectedMax)) breakAt = i;
+    }
+
+    const summary =
+      `${outcome.received.length} publication(s) seq ${chain.join("→")}, ` +
+      `${levels.length} levels, subprotocol ${outcome.subprotocol}`;
+
+    if (breakAt !== null) {
+      return fail(
+        "Realtime deltas",
+        `sequence gap between publication ${breakAt - 1} and ${breakAt} (${summary}) — ` +
+          "the client re-snapshots on this, so frequent gaps would mean constant refetching",
+      );
+    }
+    return pass("Realtime deltas", summary);
   } catch (error) {
     return unknown("Realtime deltas", error?.code ?? error?.name ?? "error");
   }

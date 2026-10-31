@@ -93,6 +93,14 @@ export default function Book() {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const [streamDetail, setStreamDetail] = useState<string | null>(null);
   const liveIdentity = useRef<string>("");
+  // The channel is keyed by the exchange's numeric symbol id, which only
+  // arrives with the first polled response. Pulling it out as a primitive lets
+  // the effect depend on the *value* — so it re-runs once when the id appears,
+  // and not once per poll (which would tear the socket down every 2s). Keying
+  // the dependency on `data` itself, or omitting it entirely, silently leaves
+  // the stream unstarted on first mount.
+  const symbolId: number | null =
+    typeof data?.symbolId === "number" && data.symbolId > 0 ? data.symbolId : null;
 
   const fetchSnapshot = useCallback(async () => {
     const fresh = await api.orderbook(symbol, depth);
@@ -108,8 +116,7 @@ export default function Book() {
     setStreamStatus("connecting");
     setStreamDetail(null);
 
-    const symbolId = data?.symbolId;
-    if (typeof symbolId !== "number" || symbolId <= 0) return;
+    if (symbolId === null) return;
 
     const stop = streamOrderbook({
       symbolId,
@@ -126,10 +133,7 @@ export default function Book() {
       },
     });
     return stop;
-    // `data?.symbolId` is intentionally not a dependency: re-subscribing on
-    // every poll would tear the socket down every two seconds.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, depth, fetchSnapshot]);
+  }, [symbol, depth, symbolId, fetchSnapshot]);
 
   // A stale streamed book must not outlive the polled book it was built from.
   useEffect(() => {

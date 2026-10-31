@@ -385,7 +385,7 @@ The delta path is tested at three levels, only one of which touches the real exc
 | --- | --- | --- |
 | Unit (`tests/orderbook-stream.test.mjs`, 25 tests) | frame interpretation, SET semantics, zero-quantity removal, stale replay, gap detection, reset, backoff, clean stop | **yes** |
 | Fixture server | the probe's `--stream` mode against a Centrifuged-shaped local server: 3 publications validated; a deliberately wrong payload (numeric levels) correctly FAILED | **yes** |
-| Live (`npm run probe:polyester -- --stream`) | the real channel accepts our subscribe and publishes contract-shaped deltas | **no — egress blocked here** |
+| Live (`npm run probe:polyester -- --stream`) | the real channel accepts our subscribe and publishes contract-shaped **and contiguous** deltas | **no here — run 2026-10-31 by the owner: PASS** |
 
 Run the live one yourself before trusting the UI:
 
@@ -403,6 +403,36 @@ If the subprotocol negotiated is not a JSON variant, or the levels are not
 `[price, qty]` decimal-string pairs, the check fails and the app's streaming path should be
 treated as unverified for that environment — the polled book still works.
 
-**Still unproven even after a passing stream probe:** that the browser UI renders correctly
-under sustained deltas (needs a human), and that the socket survives a real network blip
-(the fixture cannot inject a mid-stream drop on the wire).
+### 8a. The live run, and the two bugs it did not catch
+
+The owner's live run on 2026-10-31 came back **9 pass, 0 fail, 0 unknown**, including 3 real
+delta publications (`seq 10924726→10924728`) with decimal-string levels. The exchange
+channel, the Centrifugo handshake, and the payload shape are therefore proven on the wire.
+
+It did **not** prove the feature works, and two real bugs were found by reading the code
+against that evidence:
+
+1. **The stream never started.** The subscribe effect read `data?.symbolId` but did not
+   list it as a dependency, so on first mount — when `data` is still `null` — the effect
+   returned early and never re-ran once the first polled response arrived. Every unit test
+   passed, because the transport is correct; only the *wiring* was dead. Fixed by hoisting
+   the id to a primitive and depending on the value, which subscribes once when the id
+   appears rather than once per poll.
+2. **The first deltas were dropped.** Deltas arriving while the snapshot request was in
+   flight hit `if (!book) return` and vanished, so the next delta looked like a sequence gap
+   and forced a re-snapshot. Live traffic publishes within milliseconds of the subscribe
+   reply, so this was the *common* path, not an edge case. Now buffered (bounded at 256) and
+   replayed after the snapshot lands; a buffered delta the snapshot already covers is
+   discarded as stale.
+
+Both now have regression tests, and the wiring one was verified to fail when the fix is
+reverted. The probe also gained a contiguity assertion, since counting publications only
+proves traffic arrived — not that it is mergeable.
+
+**Still unproven:** that the browser renders correctly under sustained deltas (needs a
+human), and that the socket recovers from a real mid-stream network drop (a fixture cannot
+inject one on the wire).
+
+**One correction to the run report:** the channel is keyed by the exchange's **numeric**
+symbol id, so it is `public:spot:orderbook:deltas:depth:50:1:json` — not `depth:50:BTC-USDT:json`
+as the summary states. Subscribing with the ticker string is not the published channel name.
