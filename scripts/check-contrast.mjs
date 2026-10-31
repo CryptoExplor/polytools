@@ -85,9 +85,13 @@ export function parseThemeBlock(source, marker) {
 }
 
 export function readThemes(css) {
+  // Normalise here, not at the call sites. The markers below are written with
+  // LF, so a CRLF checkout makes the dark block unfindable — and every caller
+  // that passes raw file contents would hit it, not just main().
+  const normalized = css.replace(/\r\n/g, "\n");
   return {
-    dark: parseThemeBlock(css, ':root,\n[data-theme="dark"]'),
-    light: parseThemeBlock(css, '[data-theme="light"]'),
+    dark: parseThemeBlock(normalized, ':root,\n[data-theme="dark"]'),
+    light: parseThemeBlock(normalized, '[data-theme="light"]'),
   };
 }
 

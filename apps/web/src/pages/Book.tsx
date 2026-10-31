@@ -4,7 +4,7 @@
  * liquidity imbalance gauge, spread telemetry, and automatic wall detection.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BOOK_DEPTHS,
   dec,
@@ -15,8 +15,10 @@ import {
   spreadBps,
   wallIndexes,
   type BookDepth,
+  type StreamBook,
 } from "@poly/core";
 import { api } from "../lib/api";
+import { streamOrderbook, type StreamStatus } from "../lib/orderbookStream";
 import { formatCompactQuoteNotional } from "../lib/format";
 import { marketForSymbol, orderbookForRequest } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
@@ -35,6 +37,38 @@ import {
 } from "../components/ui";
 import { DepthChart } from "../components/DepthChart";
 
+/**
+ * Says how the book is being kept current.
+ *
+ * This exists because "live" and "polled" are different claims. A pill that
+ * says Live while the socket is actually dead would be the exact kind of quiet
+ * inaccuracy this app is not allowed to ship.
+ */
+function StreamPill({ status, detail }: { status: StreamStatus; detail: string | null }) {
+  if (status === "live") {
+    return (
+      <Pill kind="up" liveDot title={detail ?? "Streaming updates from the public delta channel"}>
+        Live
+      </Pill>
+    );
+  }
+  if (status === "connecting") {
+    return <Pill kind="info" title="Opening the public stream; polled data below">Connecting</Pill>;
+  }
+  if (status === "reconnecting") {
+    return (
+      <Pill kind="warn" title={detail ?? "Reconnecting; showing the last known book"}>
+        Polling
+      </Pill>
+    );
+  }
+  return (
+    <Pill kind="info" title={detail ?? "Stream unavailable; polling every 2s"}>
+      Polling
+    </Pill>
+  );
+}
+
 export default function Book() {
   const { symbol, setSymbol, assetByCode, pairBySymbol } = useApp();
   const [depth, setDepth] = useState<BookDepth>(50);
@@ -51,6 +85,57 @@ export default function Book() {
     refresh,
   } = usePollData(() => api.orderbook(symbol, depth), 2000, [symbol, depth]);
 
+  // ---- public realtime refinement -------------------------------------------
+  // Polling stays the source of truth; the socket only refines it. `liveBook`
+  // is kept separate from polled data so a dropped socket degrades to the last
+  // polled book instead of freezing a stale stream on screen.
+  const [liveBook, setLiveBook] = useState<StreamBook | null>(null);
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
+  const [streamDetail, setStreamDetail] = useState<string | null>(null);
+  const liveIdentity = useRef<string>("");
+
+  const fetchSnapshot = useCallback(async () => {
+    const fresh = await api.orderbook(symbol, depth);
+    return { bookSeq: fresh.bookSeq, bids: fresh.bids, asks: fresh.asks };
+  }, [symbol, depth]);
+
+  useEffect(() => {
+    // Any change of market or depth invalidates the local book outright: deltas
+    // for one symbol must never be merged into another symbol's book.
+    const identity = `${symbol}:${depth}`;
+    liveIdentity.current = identity;
+    setLiveBook(null);
+    setStreamStatus("connecting");
+    setStreamDetail(null);
+
+    const symbolId = data?.symbolId;
+    if (typeof symbolId !== "number" || symbolId <= 0) return;
+
+    const stop = streamOrderbook({
+      symbolId,
+      depth,
+      snapshot: fetchSnapshot,
+      onBook: (book) => {
+        if (liveIdentity.current !== identity) return;
+        setLiveBook(book);
+      },
+      onStatus: (status, detail) => {
+        if (liveIdentity.current !== identity) return;
+        setStreamStatus(status);
+        setStreamDetail(detail ?? null);
+      },
+    });
+    return stop;
+    // `data?.symbolId` is intentionally not a dependency: re-subscribing on
+    // every poll would tear the socket down every two seconds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, depth, fetchSnapshot]);
+
+  // A stale streamed book must not outlive the polled book it was built from.
+  useEffect(() => {
+    if (!data) setLiveBook(null);
+  }, [data]);
+
   const currentData = orderbookForRequest(data, symbol, depth);
   const requestIdentityError = data && !currentData
     ? "Order-book response did not match the selected symbol or depth; it was not displayed."
@@ -66,14 +151,15 @@ export default function Book() {
 
   const book = useMemo(() => {
     if (!currentData) return null;
-    const bids = (currentData.bids ?? [])
+    const levels = liveBook ?? { bids: currentData.bids ?? [], asks: currentData.asks ?? [] };
+    const bids = (levels.bids ?? [])
       .map((l) => ({
         rawPrice: l.price,
         price: price(l.price),
         qty: dec(l.qty),
       }))
       .sort((a, b) => b.price - a.price);
-    const asks = (currentData.asks ?? [])
+    const asks = (levels.asks ?? [])
       .map((l) => ({
         rawPrice: l.price,
         price: price(l.price),
@@ -148,6 +234,7 @@ export default function Book() {
         subtitle="Resting bids and asks waiting to match. Public data — not your orders."
         actions={
           <div className="row-flex">
+            <StreamPill status={streamStatus} detail={streamDetail} />
             <div className="seg-group" role="group" aria-label="Order book depth levels">
               {([10, 20, 50, 100] as BookDepth[]).map((d) =>
                 BOOK_DEPTHS.includes(d) ? (

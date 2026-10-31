@@ -44,6 +44,12 @@ const SOCKET_PORT = Number(TARGET.port) || (SECURE ? 443 : 80);
 /** A realistic deploy origin: the kind of host a static Pages build uses. */
 const ORIGIN = process.env.POLYESTER_ORIGIN ?? "https://polytools-cc8.pages.dev";
 const TIMEOUT_MS = 15_000;
+/**
+ * `handshake` (default) stops at the Upgrade response.
+ * `stream` additionally subscribes to a public JSON channel and validates three
+ * publications end to end. Read-only either way: no writes, no credentials.
+ */
+const MODE = (process.argv.includes("--stream") ? "stream" : "handshake");
 
 const results = [];
 
@@ -166,6 +172,67 @@ function websocketHandshake({ host, path, origin, protocol }) {
     socket.on("close", () => finish({ error: "closed_before_response" }));
     socket.setTimeout(TIMEOUT_MS, () => finish({ error: "timeout" }));
   });
+}
+
+/* ------------------------------------------------- text frames over tcp ---- */
+
+/**
+ * Minimal RFC 6455 framing, enough to subscribe to a public JSON channel.
+ *
+ * Written by hand rather than pulled from a dependency for one reason: no
+ * WebSocket client was available and adding one for a diagnostic script would
+ * change the app's dependency surface. Client frames must be masked (section
+ * 5.3); server frames arrive unmasked.
+ */
+function encodeTextFrame(text) {
+  const payload = Buffer.from(text, "utf8");
+  const mask = randomBytes(4);
+  const length = payload.length;
+  let header;
+  if (length < 126) {
+    header = Buffer.alloc(2);
+    header[1] = 0x80 | length;
+  } else if (length < 65536) {
+    header = Buffer.alloc(4);
+    header[1] = 0x80 | 126;
+    header.writeUInt16BE(length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[1] = 0x80 | 127;
+    header.writeBigUInt64BE(BigInt(length), 2);
+  }
+  header[0] = 0x81; // FIN + text
+  const masked = Buffer.allocUnsafe(length);
+  for (let i = 0; i < length; i += 1) masked[i] = payload[i] ^ mask[i % 4];
+  return Buffer.concat([header, mask, masked]);
+}
+
+function decodeFrames(buffer) {
+  const messages = [];
+  let offset = 0;
+  while (buffer.length - offset >= 2) {
+    const first = buffer[offset];
+    const second = buffer[offset + 1];
+    const opcode = first & 0x0f;
+    const masked = (second & 0x80) !== 0;
+    let length = second & 0x7f;
+    let cursor = offset + 2;
+    if (length === 126) {
+      if (buffer.length - cursor < 2) break;
+      length = buffer.readUInt16BE(cursor);
+      cursor += 2;
+    } else if (length === 127) {
+      if (buffer.length - cursor < 8) break;
+      length = Number(buffer.readBigUInt64BE(cursor));
+      cursor += 8;
+    }
+    if (masked) cursor += 4;
+    if (buffer.length - cursor < length) break;
+    const payload = buffer.subarray(cursor, cursor + length);
+    if (opcode === 0x1) messages.push(payload.toString("utf8"));
+    offset = cursor + length;
+  }
+  return { messages, rest: buffer.subarray(offset) };
 }
 
 /* ---------------------------------------------------------------- checks ---- */
@@ -347,6 +414,156 @@ async function checkWebsocketOrigin() {
   );
 }
 
+/**
+ * Subscribes to the public order-book delta channel and validates what arrives.
+ *
+ * This is the only check that proves the *whole* streaming path rather than a
+ * handshake: it opens the socket, sends the Centrifugo connect and subscribe
+ * commands, waits for publications, and asserts each one satisfies the merge
+ * assumptions (sequence range, decimal-string levels). It then unsubscribes by
+ * simply closing the socket — nothing is written anywhere.
+ */
+function streamCheck({ host, symbolId, depth, expectMessages, timeoutMs = 20_000 }) {
+  return new Promise((resolve) => {
+    const channel = `public:spot:orderbook:deltas:depth:${depth}:${symbolId}:json`;
+    const received = [];
+    const result = { channel, received };
+    let raw = Buffer.alloc(0);
+    let settled = false;
+
+    const finish = (outcome) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve({ ...result, ...outcome });
+    };
+
+    const connectOptions = { host, port: SOCKET_PORT };
+    const onConnect = () => {
+      const lines = [
+        `GET /connection/websocket HTTP/1.1`,
+        `Host: ${host}`,
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
+        "Sec-WebSocket-Version: 13",
+        "Sec-WebSocket-Protocol: centrifuge-json",
+        `Origin: ${ORIGIN}`,
+        "",
+        "",
+      ];
+      socket.write(lines.join("\r\n"));
+    };
+
+    const socket = SECURE
+      ? tls.connect({ ...connectOptions, servername: host, ALPNProtocols: ["http/1.1"] }, onConnect)
+      : net.connect(connectOptions, onConnect);
+
+    let upgraded = false;
+
+    socket.on("data", (chunk) => {
+      raw = Buffer.concat([raw, chunk]);
+      if (!upgraded) {
+        const headEnd = raw.indexOf("\r\n\r\n");
+        if (headEnd === -1) return;
+        const head = raw.subarray(0, headEnd).toString("utf8");
+        const statusLine = head.split("\r\n")[0] ?? "";
+        if (!statusLine.includes("101")) {
+          return finish({ ok: false, reason: `upgrade refused: ${statusLine}` });
+        }
+        const subprotocol = /^sec-websocket-protocol:\s*(.+)$/im.exec(head)?.[1]?.trim() ?? null;
+        result.subprotocol = subprotocol;
+        upgraded = true;
+        raw = raw.subarray(headEnd + 4);
+        if (!subprotocol || !subprotocol.includes("json")) {
+          return finish({
+            ok: false,
+            reason: `server negotiated "${subprotocol ?? "none"}", not a JSON subprotocol`,
+          });
+        }
+        socket.write(encodeTextFrame(JSON.stringify({ id: 1, connect: {} })));
+      }
+
+      const { messages, rest } = decodeFrames(raw);
+      raw = rest;
+      for (const text of messages) {
+        let frame;
+        try {
+          frame = JSON.parse(text);
+        } catch {
+          continue;
+        }
+        if (frame.connect !== undefined) {
+          socket.write(encodeTextFrame(JSON.stringify({ id: 2, subscribe: { channel } })));
+          continue;
+        }
+        if (frame.subscribe !== undefined) {
+          result.subscribed = true;
+          continue;
+        }
+        if (frame.push?.pub?.data !== undefined) {
+          received.push(frame.push.pub.data);
+          if (received.length >= expectMessages) {
+            return finish({ ok: true });
+          }
+        }
+        if (frame.error !== undefined) {
+          return finish({ ok: false, reason: `server error ${frame.error.code ?? ""} ${frame.error.message ?? ""}`.trim() });
+        }
+      }
+    });
+
+    socket.on("error", (error) => finish({ ok: false, reason: error.code ?? "socket error" }));
+    socket.setTimeout(timeoutMs, () =>
+      finish({
+        ok: received.length > 0,
+        reason: received.length > 0 ? `only ${received.length} publication(s)` : "no publications before timeout",
+      }),
+    );
+  });
+}
+
+async function checkStream(symbolId, depth) {
+  if (MODE !== "stream") return;
+  try {
+    const outcome = await streamCheck({
+      host: TARGET.hostname,
+      symbolId,
+      depth,
+      expectMessages: 3,
+    });
+    if (!outcome.ok && !outcome.received?.length) {
+      return unknown("Realtime deltas", outcome.reason ?? "no publications");
+    }
+
+    const first = outcome.received[0];
+    const problems = [];
+    if (typeof first.symbolId !== "number" && typeof first.symbolId !== "string") {
+      problems.push("no symbolId");
+    }
+    if (first.bookSeqEnd === undefined) problems.push("no bookSeqEnd");
+    const levels = [...(first.bids ?? []), ...(first.asks ?? [])];
+    if (!levels.length) problems.push("no price levels");
+    if (levels.some((level) => !Array.isArray(level) || typeof level[0] !== "string")) {
+      problems.push("levels are not [price, qty] decimal strings");
+    }
+    if (problems.length) {
+      return fail("Realtime deltas", `${problems.join("; ")} (subprotocol ${outcome.subprotocol})`);
+    }
+    const advancing = outcome.received.filter(
+      (delta) => typeof delta.bookSeqEnd === "number" || typeof delta.bookSeqEnd === "string",
+    ).length;
+    return pass(
+      "Realtime deltas",
+      `${advancing} publication(s), seq ${first.bookSeqStart}→${first.bookSeqEnd}, ` +
+        `${levels.length} levels, subprotocol ${outcome.subprotocol}` +
+        `${outcome.reason ? ` (${outcome.reason})` : ""}`,
+    );
+  } catch (error) {
+    return unknown("Realtime deltas", error?.code ?? error?.name ?? "error");
+  }
+}
+
 async function checkTls() {
   const started = Date.now();
   const outcome = await websocketHandshake({
@@ -371,6 +588,7 @@ async function checkTls() {
 async function main() {
   console.log(`Stage 0 probe — ${BASE}, origin ${ORIGIN}`);
   console.log(`Run ${new Date().toISOString()} with ${process.platform} node ${process.version}`);
+  console.log(`Mode: ${MODE}${MODE === "handshake" ? " (add --stream to verify delta publications)" : ""}`);
   console.log("Read-only: GET, OPTIONS, and a WebSocket handshake. No credentials, no writes.\n");
 
   // Order matters. If the host is not reachable from this machine, every later
@@ -386,6 +604,7 @@ async function main() {
       "Public CORS",
       "Private CORS",
       "Realtime origin gate",
+      "Realtime deltas",
     ]) {
       unknown(name, `skipped — ${TARGET.hostname} not reachable from here`);
     }
@@ -397,6 +616,7 @@ async function main() {
     await checkPublicCors();
     await checkAuthenticatedCors();
     await checkWebsocketOrigin();
+    await checkStream(1, 50);
   }
 
   const failed = results.filter((result) => result.state === "FAIL").length;

@@ -69,11 +69,24 @@ describe("P2-9 centralized production security policy", () => {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: https://assets.polyester.com",
       "media-src 'self' https://assets.polyester.com",
-      "connect-src 'self' https://api.coingecko.com https://api.testnet.polyester.com https://*.workers.dev",
+      "connect-src 'self' https://api.coingecko.com https://api.testnet.polyester.com wss://api.testnet.polyester.com https://*.workers.dev",
       "manifest-src 'self'",
     ]) {
       assert.ok(csp.includes(directive), directive);
     }
+    // A `wss:` source only appeared when the public order-book stream was
+    // adopted, and it is only safe because it names one host. Replace the old
+    // blanket "no wss at all" ban with the rule that actually matters: the set
+    // of websocket origins is exactly the exchange endpoint, never a wildcard
+    // and never a second host.
+    const wsSources = csp
+      .split(";")
+      .map((directive) => directive.trim())
+      .filter((directive) => directive.startsWith("connect-src"))
+      .flatMap((directive) => directive.split(/\s+/).filter((token) => token.startsWith("wss:")));
+    assert.deepEqual(wsSources, ["wss://api.testnet.polyester.com"]);
+    assert.ok(!csp.includes("wss://*"), "no wildcard websocket origin");
+    assert.ok(!csp.includes("ws:"), "no cleartext websocket origin");
     assert.ok(!csp.includes("unsafe-eval"));
     assert.ok(!csp.includes("script-src 'self' 'unsafe-inline'"));
     assert.equal(security.SECURITY_HEADERS["X-Content-Type-Options"], "nosniff");
@@ -89,7 +102,9 @@ describe("P2-9 centralized production security policy", () => {
 
     // WebCrypto does not require a Permissions-Policy exemption or network CSP source.
     assert.ok(!security.PERMISSIONS_POLICY.includes("publickey-credentials"));
-    assert.ok(!csp.includes("wss:"));
+    // The websocket-origin rule is asserted once, above, as an exact set rather
+    // than a blanket ban. A blanket ban here would have to be deleted the moment
+    // a socket was wanted, which is how a guard quietly stops guarding.
   });
 
   it("keeps Vercel and Cloudflare Pages static headers exactly aligned", () => {

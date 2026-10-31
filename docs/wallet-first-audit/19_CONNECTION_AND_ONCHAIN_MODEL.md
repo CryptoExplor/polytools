@@ -278,9 +278,24 @@ default for everything authenticated. Three reasons, none of them CORS:
    public reads and says nothing about whether a long-lived API secret belongs in a bundle —
    see §5.
 
-**What is now genuinely available, and unbuilt:** realtime. The socket handshake succeeds
-from a browser origin, so the 2s polling on `/#/book` can be replaced by the published
-delta channel. That change is not free, and it is not a drop-in:
+**What is now built:** realtime for the public order book. The 2s polling on `/#/book` is
+now refined by the published delta channel, with polling retained as the floor:
+
+| Piece | Where |
+| --- | --- |
+| Centrifugo frame layer (connect/subscribe/push/heartbeat/error) | `packages/core/src/centrifuge.ts` |
+| Delta parsing, SET semantics, sequence gap detection | `packages/core/src/orderbookStream.ts` |
+| Browser transport, backoff, re-snapshot, give-up | `apps/web/src/lib/orderbookStream.ts` |
+| UI status: Live / Connecting / Polling | `apps/web/src/pages/Book.tsx` (`StreamPill`) |
+| CSP `wss:` source | `_headers`, `vercel.json`, `deploymentSecurity.ts` |
+| Live verification of the delta flow | `npm run probe:polyester -- --stream` |
+
+What it does **not** do: it never claims Live while the socket is down, it never merges a
+delta across a sequence gap (it re-snapshots), and it stops retrying after five consecutive
+failures. Polling stays the source of truth, so a dead socket degrades to a 2s book rather
+than a frozen one.
+
+The change set that was previously listed as a proposal:
 
 | Required | Detail |
 | --- | --- |
@@ -305,14 +320,29 @@ Measured on 2026-10-31 — the middle column is no longer hypothetical:
 | `Private CORS` | **PASS** — but see the caveat below | not a reason to put a key in the browser |
 | `TLS`, `REST`, `Order book`, `VIP catalog`, `Rate limit` | **PASS** | no contract drift; `/#/fees` and `/#/book` shapes are still valid |
 
-**The `Private CORS` caveat.** The probe reports PASS in two different situations — an
-allow-origin header (browser may send signing headers) and its absence (browser may not,
-keep reads server-side). The 2026-10-31 run recorded the check as passing but not which of
-the two it was. That distinction decides whether a browser *could* hold a key, so it is
-worth re-reading that single line of output before anyone plans around it. Either way the
-policy answer stands: **an API secret does not go in a browser bundle**, because the
-credential is long-lived and the bundle is public. The technical permission would not
-create the policy permission.
+**The `Private CORS` caveat is resolved.** The captured line was:
+
+```text
+[PASS] Private CORS — preflight 200, allow-origin *, allow-headers DNT,User-Agent,
+X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,
+X-API-KEY-ID,X-API-TIMESTAMP,X-API-SIGNATURE,X-API-NONCE
+```
+
+So the exchange **explicitly whitelists the API-key signing headers for browser origins**,
+plus `X-API-NONCE`. That is a deliberate invitation, not an accident.
+
+It still does not put a key in the browser. The credential is long-lived, the bundle is
+public, and a leaked key is not scoped to the session that leaked it. The technical
+permission removes a blocker for a *future* design in which the browser signs with an
+ephemeral, memory-only key; it does not make a bundled secret safe today.
+
+> **Open question worth one message to the exchange:** the CORS list names
+> `X-API-NONCE`, but the documented API-key scheme in
+> [`docs/api-key-automation.md`](../api-key-automation.md) and our implementation
+> (`packages/core/src/account/signer.ts`) use `X-API-TIMESTAMP` with a freshness window
+> and no nonce header. Either nonce is an optional stronger replay guard or the CORS list
+> is wider than the contract. **Not assumed either way** — do not add a header the contract
+> does not define.
 
 | Outcome | Meaning | Action |
 | --- | --- | --- |
@@ -344,3 +374,35 @@ create the policy permission.
   (**Stage 2** — never executed here).
 - Whether Polyester will ever expose order delegation or a per-order fee. Nothing in the
   published contracts does today; §3c is the evidence.
+
+---
+
+## 8. Verifying the stream, and what remains unproven
+
+The delta path is tested at three levels, only one of which touches the real exchange:
+
+| Level | What it proves | Ran here |
+| --- | --- | --- |
+| Unit (`tests/orderbook-stream.test.mjs`, 25 tests) | frame interpretation, SET semantics, zero-quantity removal, stale replay, gap detection, reset, backoff, clean stop | **yes** |
+| Fixture server | the probe's `--stream` mode against a Centrifuged-shaped local server: 3 publications validated; a deliberately wrong payload (numeric levels) correctly FAILED | **yes** |
+| Live (`npm run probe:polyester -- --stream`) | the real channel accepts our subscribe and publishes contract-shaped deltas | **no — egress blocked here** |
+
+Run the live one yourself before trusting the UI:
+
+```bash
+npm run probe:polyester -- --stream
+```
+
+Expected on success:
+
+```text
+[PASS] Realtime deltas — 3 publication(s), seq 1000→1003, 40 levels, subprotocol centrifuge-json
+```
+
+If the subprotocol negotiated is not a JSON variant, or the levels are not
+`[price, qty]` decimal-string pairs, the check fails and the app's streaming path should be
+treated as unverified for that environment — the polled book still works.
+
+**Still unproven even after a passing stream probe:** that the browser UI renders correctly
+under sustained deltas (needs a human), and that the socket survives a real network blip
+(the fixture cannot inject a mid-stream drop on the wire).
