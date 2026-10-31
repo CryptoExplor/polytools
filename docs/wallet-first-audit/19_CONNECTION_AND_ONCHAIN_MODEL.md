@@ -562,8 +562,8 @@ document.querySelector("[data-stream-status]").dataset.streamStatus
 
 The Chrome run *did* produce evidence that the socket connected — a `connect` reply
 carrying a client id and version, and a subscribe to the `:json` channel — so the socket
-path is genuinely exercised. What is not yet established is the pill's own state, and two
-of the four resilience checks.
+path is genuinely exercised. The pill's own state and the resilience checks were settled in
+the later pass on `bb80b30`; see the table below.
 
 ### What the pass covered, and what it did not
 
@@ -571,17 +571,17 @@ of the four resilience checks.
 | --- | --- |
 | Socket opens, subscribes, renders a live ladder | **covered** (connect reply + subscribe observed) |
 | Depth switch 50 → 10 → 50 re-subscribes cleanly | **covered** (DOM interaction) |
-| Stream pill reads `Live` | **not established** — the cited text belongs to the topbar |
-| Network drop → `Polling` → recovery | **not run** |
-| Background tab >30s → resume | **not run** |
-| Deployed CSP actually permits the socket | **not run** (dev server enforces no CSP) |
+| Stream pill reads `Live` | **covered** on `bb80b30` — asserted on the `data-stream-status` selector (§12d) |
+| Background tab → resume | **covered** on `bb80b30` |
+| Recovery after a transport drop | **covered** on `bb80b30`, once the harness stopped conflating a depth switch with a drop (§12e) |
+| Deployed CSP actually permits the socket | **not run** (dev server enforces no CSP; covered only by `tests/deployment-security.test.mjs`) |
 
-Those three are the paths that were written *because* they are hard to get right, so they
-are the ones worth the next five minutes: they are also the only ones no probe can reach.
+The one row still unverified is the deployed build, and it cannot be settled locally: the
+dev and preview servers enforce no CSP, so only a real static-host deployment answers it.
 
-**Version note:** the Chrome pass ran on `8590e4b`. The current tree adds the subprotocol
-request and the protobuf-framing guard, both of which change how the socket is opened, so
-the browser result does not transfer automatically — re-run the pass on the current commit.
+**Version note:** the first pass ran on `8590e4b`. The later pass ran on `bb80b30`, which
+adds the subprotocol request, the protobuf-framing guard and both new channels, so the
+current result supersedes the earlier one rather than extending it.
 
 ## 12. Trades and candles — the same transport, two new contracts
 
@@ -633,27 +633,69 @@ indistinguishable downstream.
 - Each page exposes `data-stream-status` so a browser pass can assert on a selector rather
   than on adjacent prose.
 
-### 12d. Status of this work — read before trusting it
+### 12d. Status of this work
 
 | Claim | Evidence |
 | --- | --- |
 | Frame parsing and merges are correct | unit tests (24) against the published payloads |
 | Channel strings are the published ones | pinned literally in tests, from `streams.json` |
 | The probe checks both channels | exercised against a local fake origin in four modes (pass, wrong timeframe, bad payload, quiet) |
-| The probes pass against the real origin | **not run** — this sandbox has no egress to the exchange |
-| A browser streams trades and candles | **not run** — needs the owner's machine |
+| `1m` is a valid timeframe token | **verified against the exchange** — subscribed and received open bars |
+| The browser streams trades and candles | **verified in headless Chrome** on `bb80b30` |
 
-The timeframe token is the one genuine unknown: the public documentation shows
-`{timeframe}` as a placeholder, so `1m` is an assumption taken from the REST request. A
-wrong token does not error loudly in general — it subscribes to a channel that never
-publishes. The probe distinguishes the two cases it can (server rejection vs. silence) and
-labels silence `UNKNOWN` rather than passing it.
-
-Run sheet for the outstanding half:
+**Live probe, owner-run (2026-10-31), `bb80b30`, 11 pass / 0 fail / 0 unknown:**
 
 ```
-POLYESTER_BASE=https://api.testnet.polyester.com node scripts/polyester-probe.mjs --stream
-# expect: Realtime deltas, Realtime trades, Realtime candles all PASS
-# then in the browser: /#/tape and /#/charts
-#   document.querySelector('[data-stream-status]').dataset.streamStatus === "live"
+| Realtime deltas  | PASS | 3 publication(s) seq 11024697-11024698 → …4698-…4701 → …4701-…4705 |
+| Realtime trades  | PASS | 2 print(s) on public:spot:market:trades:1, e.g. BUY 0.00016392 @ 77666.96
+|                  |      | at 2026-10-31T19:11:21.737259907Z                                     |
+| Realtime candles | PASS | 2 bar(s) on public:spot:market:candles:1m:1, last O 77615.37 H 77700.83
+|                  |      | L 77566.8 C 77666.96 V 0.86795818 ts 1793473860 (open)                |
 ```
+
+Two useful cross-checks on that log, since a green line is only worth what can be audited:
+
+- `ts 1793473860` is `2026-10-31T19:11:00Z` and is exact-minute aligned, 22 s before the
+  trade print in the line above it — the two channels are describing the same minute, and
+  the bar is correctly `isClosed: false` while still forming.
+- The trade timestamp carries nine fractional digits
+  (`…19:11:21.737259907Z`), so `parseExecutedAt`'s truncation is exercised by real traffic,
+  not only by fixtures.
+
+**Browser pass, owner-run, headless Chromium (`bb80b30`, dev server):** `/#/book`,
+`/#/tape` and `/#/charts` all reached `data-stream-status="live"` (T+20s, T+19s, T+17s),
+with 30 ladder rows, 26 ingested prints and 140 bars respectively; visibility resume held
+`live` without a reload. This closes the row that was outstanding for the order book and
+the two rows that were outstanding for the new channels.
+
+### 12e. The `connecting` / `reconnecting` question, answered
+
+The loose end from §11 — a drop-recovery log that read `connecting` where the code emits
+`reconnecting` — has a mundane cause, and it is in the harness rather than the transport:
+the simulated drop was triggered by clicking the depth selector. That mutates `depth`,
+which is a dependency of the subscribe effect in `Book.tsx`, so the effect tore down and
+re-ran, and a re-run starts at `failureCount === 0`.
+
+The code makes the two states genuinely distinct and mutually exclusive:
+
+| Emission | Where | Meaning |
+| --- | --- | --- |
+| `connecting` | `connect()`, `failureCount === 0` | a fresh stream was mounted |
+| `reconnecting` | `scheduleReconnect()`, and `connect()` with a non-zero count | an established stream lost its transport |
+
+Closing a socket directly, without touching React state, does produce `reconnecting` and
+the warning pill. Because the distinction cost a hand-trace to settle, it is now pinned by
+tests in both directions: a drop after `live` must never re-emit `connecting`, and a fresh
+stream must open with `connecting`. Reverting `scheduleReconnect` to emit `connecting`
+fails the first of those.
+
+### 12f. `X-API-NONCE` — deliberately still absent
+
+The private CORS preflight advertises `X-API-NONCE` in `access-control-allow-headers`. That
+list states which headers a browser is *permitted* to send; it does not state which headers
+the server *requires*, and it is not evidence that unsigned or nonce-less requests are
+rejected. Nothing in the signer changes on this basis.
+
+What would justify the header: an authenticated call rejected with an error naming the
+nonce, or exchange documentation stating it is mandatory. Until then the signer stays as it
+is, and `X-API-NONCE` stays out of the request path.

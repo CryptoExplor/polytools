@@ -475,6 +475,38 @@ describe("streamOrderbook transport", () => {
     h.stop();
   });
 
+  it("never says `connecting` for a drop it already reported as `live`", async () => {
+    // Resolving a real question the browser pass could not settle by eye: a log
+    // showed `connecting` after a drop, which the reconnect path never emits.
+    // The distinction is worth pinning because the two states mean opposite
+    // things to whoever reads the pill — `connecting` means a fresh mount,
+    // `reconnecting` means an existing session lost its transport. Without this
+    // test the only way to tell them apart is to trace the page by hand.
+    const h = await makeHarness();
+    const socket = h.socket();
+    socket.open();
+    socket.deliver({ id: 1, connect: {} });
+    socket.deliver({ id: 2, subscribe: {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(h.statuses.some((s) => s.status === "live"));
+
+    const beforeDrop = h.statuses.length;
+    socket.drop();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const afterDrop = h.statuses.slice(beforeDrop).map((s) => s.status);
+    assert.ok(afterDrop.includes("reconnecting"), `saw ${afterDrop.join(",")}`);
+    assert.ok(!afterDrop.includes("connecting"), `re-emitted connecting: ${afterDrop.join(",")}`);
+    h.stop();
+  });
+
+  it("does say `connecting` for a stream that has not connected yet", async () => {
+    // The other half of the contract: a fresh stream is not reconnecting.
+    const h = await makeHarness();
+    assert.equal(h.statuses[0].status, "connecting");
+    h.stop();
+  });
+
   it("stays silent when the constructor throws", async () => {
     const throwing = class {
       constructor() {
