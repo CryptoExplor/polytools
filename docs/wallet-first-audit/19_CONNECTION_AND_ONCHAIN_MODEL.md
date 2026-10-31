@@ -3,9 +3,14 @@
 **Purpose:** the single entry point for a local agent to (a) understand how an account
 connection works, (b) run every check that is safe to run, and (c) report evidence.
 
-**Status:** written from the published contracts and docs. Nothing in Stages 1–2 has been
-executed here — this sandbox has no egress to `api.testnet.polyester.com`, so every
-network result below is something your agent must produce, not something already proven.
+**Status:** written from the published contracts and docs.
+
+**Stage 0 has been run.** On 2026-10-31 the owner's local agent executed
+`npm run probe:polyester` against `https://api.testnet.polyester.com` from commit
+`c8d298a` on Windows, Node v24.18.0: **8 checks pass, 0 fail, 0 unknown.** The measured
+values are recorded in §4a. This sandbox has no egress to the exchange, so those results
+are the owner's, not this workspace's — and Stage 1 (wallet login) and Stage 2 (API-key
+reads) remain unexecuted.
 
 ---
 
@@ -27,12 +32,15 @@ browser  →  /api/*  (our backend)  →  api.testnet.polyester.com
 That is deliberate: the CSP `connect-src` stays small, one shared cache absorbs poll
 traffic, and the backend can hold things the browser should not.
 
-Whether a *direct* browser→exchange connection is even possible is a **CORS question that
-has never been answered**. It is not a preference we can simply adopt; if the exchange does
-not return `Access-Control-Allow-Origin` for our origin, the browser throws before it sees
-a byte. Stage 0 check **A4** answers it in one request.
+Whether a *direct* browser→exchange connection is possible was a **CORS question**. It has
+now been measured, and the answer is yes for public data:
 
-Do not "just switch to direct" first and discover this. Test, then decide.
+- `OPTIONS /v1/orderbook/BTC-USDT` → **204** with `Access-Control-Allow-Origin: *`
+- the same GET with `Origin:` set → the header is present on the response
+- `WS /connection/websocket` with `Origin: https://polytools-cc8.pages.dev` → **101**
+
+So "direct" is now a real option rather than a blocked one. It is still **not** the default,
+and the reason is no longer CORS — see §4b for what would actually have to change.
 
 ### 1b. Orders are never written on-chain
 
@@ -238,15 +246,78 @@ made by you in writing, not a step in a test plan.
 
 ---
 
+### 4a. Stage 0 results (2026-10-31, owner's machine)
+
+| Check | Result | Measured |
+| --- | --- | --- |
+| `TLS + DNS` | PASS | first response byte in ~2.4s |
+| `REST reachable` | PASS | `GET /v1/spot/config` 200 in ~2.6s |
+| `Order book shape` | PASS | uncrossed, decimal strings, ~1.75s |
+| `VIP catalog` | PASS | 11 contiguous tiers |
+| `Rate-limit catalog` | PASS | JSON object |
+| `Public CORS` | PASS | preflight 204, `Access-Control-Allow-Origin: *` |
+| `Private CORS` | PASS | see the caveat in §5 |
+| `Realtime origin gate` | PASS | **101 Switching Protocols** with our deploy origin |
+
+### 4b. What these results do and do not change
+
+**They do change this:** a browser can reach the exchange directly, and the public socket
+accepts a browser origin. Both of the blockers named in the previous revision of this
+document are gone.
+
+**They do not change this:** the app still goes through `/api`, and that is still the right
+default for everything authenticated. Three reasons, none of them CORS:
+
+1. **The proxy is where the cache lives.** One shared cache absorbs every visitor's polling
+   instead of each tab asking the exchange itself. On a page that refreshes every 2s, that
+   is the difference between one upstream request per TTL and one per tab.
+2. **`connect-src` stays small.** Direct calls mean listing the exchange in the CSP. That is
+   a deployment security decision, not a free win, and it should be taken only for the calls
+   that need it.
+3. **Authenticated calls stay server-side regardless.** A wildcard allow-origin is fine for
+   public reads and says nothing about whether a long-lived API secret belongs in a bundle —
+   see §5.
+
+**What is now genuinely available, and unbuilt:** realtime. The socket handshake succeeds
+from a browser origin, so the 2s polling on `/#/book` can be replaced by the published
+delta channel. That change is not free, and it is not a drop-in:
+
+| Required | Detail |
+| --- | --- |
+| CSP | add `wss://api.testnet.polyester.com` to `connect-src` (an `https:` source does not cover a `wss:` connection) |
+| Client | either the `centrifuge` package (what the official TypeScript SDK uses) or a small protocol client; public channels need no token |
+| Channel | `public:spot:orderbook:deltas:depth:{depth}:{symbolId}:json` — decimal-string payloads, `bookSeqStart`/`bookSeqEnd`/`reset` |
+| Snapshot | unary `GET /v1/orderbook/{symbol}` first, then apply deltas; a `bookSeq` gap means re-snapshot |
+| Fallback | polling must remain for browsers or networks where the socket fails |
+| Bundle | the current initial-JS budget has ~80kB gzip of headroom, so this fits — but it is a budget change, not a silent one |
+
+That is a scoped, testable change worth its own commit rather than being smuggled in with a
+documentation update.
+
 ## 5. Decision gates
+
+Measured on 2026-10-31 — the middle column is no longer hypothetical:
+
+| Gate | Measured | Consequence |
+| --- | --- | --- |
+| `Public CORS` | **PASS** — `allow-origin: *`, preflight 204 | a browser **may** read public market data directly |
+| `Realtime origin gate` | **PASS** — 101 with our deploy origin | a browser socket **is** possible; CSP must still list `wss://api.testnet.polyester.com`, because an `https:` source does not authorise `wss:` |
+| `Private CORS` | **PASS** — but see the caveat below | not a reason to put a key in the browser |
+| `TLS`, `REST`, `Order book`, `VIP catalog`, `Rate limit` | **PASS** | no contract drift; `/#/fees` and `/#/book` shapes are still valid |
+
+**The `Private CORS` caveat.** The probe reports PASS in two different situations — an
+allow-origin header (browser may send signing headers) and its absence (browser may not,
+keep reads server-side). The 2026-10-31 run recorded the check as passing but not which of
+the two it was. That distinction decides whether a browser *could* hold a key, so it is
+worth re-reading that single line of output before anyone plans around it. Either way the
+policy answer stands: **an API secret does not go in a browser bundle**, because the
+credential is long-lived and the bundle is public. The technical permission would not
+create the policy permission.
 
 | Outcome | Meaning | Action |
 | --- | --- | --- |
-| `Public CORS` PASS with `*` or our origin | direct browser reads are technically possible | still optional — weigh against cache control and CSP simplicity |
 | `Public CORS` FAIL | the browser cannot reach the exchange | keep the `/api` proxy; this is permanent, not a bug |
-| `Realtime origin gate` PASS (101) | a browser socket is possible | would additionally need `wss://api.testnet.polyester.com` in CSP `connect-src` — an `https:` source does **not** authorise `wss:` |
 | `Realtime origin gate` FAIL | sockets are server-only or origin-gated | stay on polling; a WS proxy through our worker is a new moving part and needs its own review |
-| `Private CORS` PASS | a browser *may* send signing headers | **do not** put a key in the browser anyway (custody); this only removes a technical blocker, not the policy one |
 | Stage 2 all-denied | the key's policies are too narrow | fix policies in the Polyester UI; do not widen scopes to make a test pass |
 
 ---

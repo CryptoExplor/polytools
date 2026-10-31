@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { describe, it, before, after } from "node:test";
+import { fileURLToPath } from "node:url";
 import { createServer as createVite } from "vite";
 
 const SMART = `0x${"a1".repeat(20)}`;
@@ -18,7 +19,8 @@ let explorer;
 
 before(async () => {
   vite = await createVite({
-    root: new URL("..", import.meta.url).pathname,
+    // fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/...".
+    root: fileURLToPath(new URL("..", import.meta.url)),
     server: { middlewareMode: true },
     appType: "custom",
     logLevel: "error",

@@ -127,7 +127,8 @@ export function auditStyles(css) {
 }
 
 function main() {
-  const css = readFileSync(`${ROOT}/apps/web/src/styles.css`, "utf8");
+  // Normalised so the token scan behaves identically on a CRLF checkout.
+  const css = readFileSync(`${ROOT}/apps/web/src/styles.css`, "utf8").replace(/\r\n/g, "\n");
   const results = auditStyles(css);
   const failures = results.filter((result) => !result.ok);
   const byToken = new Map();

@@ -1,8 +1,11 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
-const rootDir = new URL("..", import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..." and
+// Vite then fails to resolve the SSR root.
+const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const BASE_NOW = 1_700_000_000_000;
 let vite;
 let AccountSessionOwner;

@@ -439,8 +439,14 @@ exchange offers a public push stream, and the official TypeScript SDK implements
 the `centrifuge` client — the same package their own browser frontend uses. Adopting it is
 therefore a known-shape change, but it is **not** a drop-in: it adds `centrifuge` to the
 bundle, requires `wss://api.testnet.polyester.com` in CSP `connect-src` (an `https:`
-source does not authorise a `wss:` connection), and depends on the socket's Origin policy,
-which cannot be tested from this sandbox. It is staged rather than shipped blind.
+source does not authorise a `wss:` connection), and depends on the socket's Origin policy.
+
+**The Origin question is now answered.** On 2026-10-31 the owner's Stage 0 probe
+(`npm run probe:polyester`) got `101 Switching Protocols` from
+`wss://api.testnet.polyester.com/connection/websocket` with a browser origin attached, and
+`Access-Control-Allow-Origin: *` on public REST. Both public paths are open to a browser.
+Realtime is therefore staged for scope and CSP reasons, not because a gate failed — the
+change set is listed in `19_CONNECTION_AND_ONCHAIN_MODEL.md` §4b.
 
 ## 15. What is still not public, and will not become public by adding a fee
 

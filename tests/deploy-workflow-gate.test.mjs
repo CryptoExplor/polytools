@@ -2,9 +2,15 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+// Normalise line endings: a Windows checkout with core.autocrlf turns LF into
+// CRLF, and every pattern below is written against LF. Without this the gate
+// fails on Windows for a reason that has nothing to do with deployment.
+const readWorkflow = async (path) =>
+  (await readFile(new URL(path, import.meta.url), "utf8")).replace(/\r\n/g, "\n");
+
 const [ciWorkflow, pagesWorkflow] = await Promise.all([
-  readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"),
-  readFile(new URL("../.github/workflows/pages.yml", import.meta.url), "utf8"),
+  readWorkflow("../.github/workflows/ci.yml"),
+  readWorkflow("../.github/workflows/pages.yml"),
 ]);
 
 describe("Pages deployment verification gate", () => {
