@@ -274,6 +274,20 @@ export function streamOrderbook(options: OrderbookStreamOptions): () => void {
 
     ws.onopen = () => {
       if (stopped) return;
+      // Refuse a framing we cannot decode. The handshake check in the probe
+      // proves this endpoint will happily negotiate `centrifuge-protobuf` when
+      // asked, and binary frames would parse as null here — a stream that looks
+      // connected and silently never updates. Empty is accepted because a
+      // server that ignores the request may still be sending text JSON.
+      const negotiated = (ws.protocol ?? "").toLowerCase();
+      if (negotiated.includes("proto")) {
+        options.onStatus(
+          "unavailable",
+          `server negotiated "${ws.protocol}"; this client decodes JSON frames only`,
+        );
+        stop();
+        return;
+      }
       send(connectCommand(commandId++));
     };
 

@@ -450,12 +450,19 @@ Two reporting fixes came out of the same pass:
    through `bookForDisplay(status, liveBook)`, which yields to polling once the stream is
    `unavailable` and keeps the last known book while it is `connecting` or `reconnecting`.
 
-5. **The browser asked for no subprotocol.** The probe opens the socket with
-   `Sec-WebSocket-Protocol: centrifuge-json` and the server negotiates it; the browser
-   transport passed no subprotocol argument at all, leaving the framing to the server's
-   default. Every probe therefore passed while the browser path rested on an unverified
-   assumption — the exact asymmetry a wire test cannot see, because the wire test is the
-   thing doing it correctly. It now requests `centrifuge-json` on every attempt.
+5. **The browser asked for no subprotocol — and it still worked.** The probe opens the
+   socket with `Sec-WebSocket-Protocol: centrifuge-json`; the browser transport passed no
+   subprotocol at all. **Correction to the first version of this note:** I claimed that would
+   fail in a browser. A real Chrome run on the preceding commit showed frames flowing
+   without it, so that claim was wrong — the server's default framing is JSON and a missing
+   request is harmless. Requesting it is now explicit rather than assumed, but it is
+   hardening, not a bug fix.
+6. **Binary framing would have failed silently.** The same endpoint negotiates
+   `centrifuge-protobuf` when asked — the handshake check in the probe does exactly that
+   and gets a 101. Opening the socket without pinning JSON therefore risked a connection
+   that looks healthy and never updates, because binary frames parse as `null` here. The
+   transport now refuses a protobuf negotiation and reports why. Empty negotiation is still
+   accepted, because that is the case the Chrome run actually exercised.
 
 A reporting fix came from the owner's third live run:
 
@@ -530,3 +537,48 @@ the exact ranges above.
 
 A delta can also span many sequences in one publication (`10939004-10939011` is eight), so
 "one publication, one sequence" is not a safe assumption either.
+
+---
+
+## 11. Reading the browser pass correctly
+
+The first browser report cited `"Backend connected · Updated …"` as evidence that the
+stream pill said Live. **It is not that element.** That string is emitted by the topbar in
+`Layout.tsx`, and it reports *REST* health (`/api/health`) — it is green whenever polling
+works, whether or not the socket was ever opened.
+
+| Element | Location | What it actually means |
+| --- | --- | --- |
+| "Backend connected · Updated …" | `Layout.tsx` topbar | the HTTP backend answered; says nothing about the socket |
+| Stream pill (`Live` / `Connecting` / `Polling`) | `Book.tsx` page header, beside the depth buttons | the realtime channel's state |
+
+To make this unambiguous, the pill's wrapper now carries
+`data-stream-status="connecting|live|reconnecting|unavailable"`, so a pass can assert on a
+selector instead of reading nearby text:
+
+```js
+document.querySelector("[data-stream-status]").dataset.streamStatus
+```
+
+The Chrome run *did* produce evidence that the socket connected — a `connect` reply
+carrying a client id and version, and a subscribe to the `:json` channel — so the socket
+path is genuinely exercised. What is not yet established is the pill's own state, and two
+of the four resilience checks.
+
+### What the pass covered, and what it did not
+
+| Check | Status |
+| --- | --- |
+| Socket opens, subscribes, renders a live ladder | **covered** (connect reply + subscribe observed) |
+| Depth switch 50 → 10 → 50 re-subscribes cleanly | **covered** (DOM interaction) |
+| Stream pill reads `Live` | **not established** — the cited text belongs to the topbar |
+| Network drop → `Polling` → recovery | **not run** |
+| Background tab >30s → resume | **not run** |
+| Deployed CSP actually permits the socket | **not run** (dev server enforces no CSP) |
+
+Those three are the paths that were written *because* they are hard to get right, so they
+are the ones worth the next five minutes: they are also the only ones no probe can reach.
+
+**Version note:** the Chrome pass ran on `8590e4b`. The current tree adds the subprotocol
+request and the protobuf-framing guard, both of which change how the socket is opened, so
+the browser result does not transfer automatically — re-run the pass on the current commit.

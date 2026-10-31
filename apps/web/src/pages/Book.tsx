@@ -240,7 +240,15 @@ export default function Book() {
         subtitle="Resting bids and asks waiting to match. Public data — not your orders."
         actions={
           <div className="row-flex">
-            <StreamPill status={streamStatus} detail={streamDetail} />
+            {/*
+              data-stream-status makes the browser pass checkable by selector
+              instead of by reading nearby text. A previous pass reported the
+              topbar's "Backend connected" pill as evidence that this one said
+              Live; they are different elements with different meanings.
+            */}
+            <span data-stream-status={streamStatus}>
+              <StreamPill status={streamStatus} detail={streamDetail} />
+            </span>
             <div className="seg-group" role="group" aria-label="Order book depth levels">
               {([10, 20, 50, 100] as BookDepth[]).map((d) =>
                 BOOK_DEPTHS.includes(d) ? (

@@ -323,6 +323,8 @@ describe("streamOrderbook transport", () => {
     constructor(url, protocols) {
       this.url = url;
       this.protocols = protocols;
+      // What the server negotiated; a real browser sets this from the response.
+      this.protocol = "centrifuge-json";
       this.readyState = 0;
       this.sent = [];
       FakeSocket.instances.push(this);
@@ -411,6 +413,30 @@ describe("streamOrderbook transport", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.ok(FakeSocket.instances.length > 1, "reconnected");
     assert.deepEqual(h.socket().protocols, ["centrifuge-json"]);
+    h.stop();
+  });
+
+  it("refuses a protobuf framing it cannot decode", async () => {
+    // The same endpoint negotiates `centrifuge-protobuf` when asked, and binary
+    // frames would parse as null here: a stream that looks connected and never
+    // updates. Fail loudly instead of silently rendering a frozen book.
+    const h = await makeHarness();
+    const socket = h.socket();
+    socket.protocol = "centrifuge-protobuf";
+    socket.open();
+
+    assert.equal(socket.sent.length, 0, "does not proceed to a connect command");
+    assert.equal(h.statuses.at(-1).status, "unavailable");
+    assert.match(String(h.statuses.at(-1).detail), /decodes JSON frames only/);
+    h.stop();
+  });
+
+  it("accepts an empty negotiation, which still carries text JSON", async () => {
+    const h = await makeHarness();
+    const socket = h.socket();
+    socket.protocol = "";
+    socket.open();
+    assert.equal(socket.sent[0], '{"id":1,"connect":{}}');
     h.stop();
   });
 
