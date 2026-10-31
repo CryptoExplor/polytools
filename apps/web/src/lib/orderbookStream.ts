@@ -34,6 +34,9 @@ import {
   type StreamBook,
 } from "@poly/core";
 
+/** The subprotocol that carries JSON frames; the `:proto` channels need another. */
+export const JSON_SUBPROTOCOL = "centrifuge-json";
+
 export type StreamStatus = "connecting" | "live" | "reconnecting" | "unavailable";
 
 /**
@@ -71,6 +74,8 @@ export interface OrderbookStreamOptions {
   maxFailures?: number;
   /** Base reconnect delay in ms; doubles per failure. */
   retryBaseDelayMs?: number;
+  /** Subprotocols to request; defaults to the JSON variant. */
+  subprotocols?: string[];
   /**
    * Where to listen for the page becoming visible again. Defaults to
    * `document`; injectable so the resume behaviour can be tested without a DOM.
@@ -252,7 +257,15 @@ export function streamOrderbook(options: OrderbookStreamOptions): () => void {
 
     let ws: WebSocket;
     try {
-      ws = new WebSocketImpl(options.wsUrl ?? defaultOrderbookStreamUrl());
+      // Request the JSON subprotocol explicitly. The channel we use is the
+      // `:json` variant, and live verification proved the server negotiates
+      // whatever is asked for. Opening the socket with no subprotocol leaves
+      // the framing to the server's default — which is unverified, and would
+      // fail here while every probe (which does ask) kept passing.
+      ws = new WebSocketImpl(
+        options.wsUrl ?? defaultOrderbookStreamUrl(),
+        options.subprotocols ?? [JSON_SUBPROTOCOL],
+      );
     } catch {
       scheduleReconnect();
       return;

@@ -210,6 +210,60 @@ describe("applyOrderbookDelta", () => {
   });
 });
 
+describe("live range convention", () => {
+  // Ranges captured from a real run on 2026-10-31:
+  //   10939000-10939003 → 10939003-10939004 → 10939004-10939011
+  // Consecutive ranges SHARE a sequence number rather than being strictly
+  // adjacent, so a client that assumes start === prevEnd + 1 would report a
+  // false gap, and one that assumes no overlap might double-count under
+  // increment semantics. SET semantics makes the overlap harmless; this pins it.
+  const LIVE_RANGES = [
+    [10939000, 10939003],
+    [10939003, 10939004],
+    [10939004, 10939011],
+  ];
+
+  it("applies the full live chain without reporting a gap", () => {
+    let book = core.createStreamBook({ bookSeq: "10939000", bids: [], asks: [] });
+    for (const [start, end] of LIVE_RANGES) {
+      const parsed = core.parseOrderbookDelta(
+        delta({
+          bookSeqStart: start,
+          bookSeqEnd: end,
+          bids: [["100.0", String(end - 10938999)]],
+        }),
+        SYMBOL_ID,
+      );
+      const result = core.applyOrderbookDelta(book, parsed);
+      assert.equal(result.status, "applied", `${start}-${end}`);
+      book = result.book;
+    }
+    assert.equal(book.bookSeq, "10939011");
+    // The shared boundary sequence appears in two ranges; SET semantics means
+    // the level holds the last stated quantity, never a sum.
+    assert.equal(book.bids.find((l) => l.price === "100.0").qty, "12");
+  });
+
+  it("treats a shared boundary as contiguous, not as a gap", () => {
+    const book = core.createStreamBook({ bookSeq: "10939003", bids: [], asks: [] });
+    // start === current seq: already covered at the boundary, still advances.
+    const result = core.applyOrderbookDelta(
+      book,
+      core.parseOrderbookDelta(delta({ bookSeqStart: 10939003, bookSeqEnd: 10939004 }), SYMBOL_ID),
+    );
+    assert.equal(result.status, "applied");
+  });
+
+  it("still catches a genuine hole in that convention", () => {
+    const book = core.createStreamBook({ bookSeq: "10939004", bids: [], asks: [] });
+    const result = core.applyOrderbookDelta(
+      book,
+      core.parseOrderbookDelta(delta({ bookSeqStart: 10939006, bookSeqEnd: 10939011 }), SYMBOL_ID),
+    );
+    assert.equal(result.status, "gap");
+  });
+});
+
 describe("centrifuge frames", () => {
   it("builds commands the server expects", () => {
     assert.equal(core.connectCommand(1), '{"id":1,"connect":{}}');
@@ -266,8 +320,9 @@ describe("streamOrderbook transport", () => {
   class FakeSocket {
     static instances = [];
     static OPEN = 1;
-    constructor(url) {
+    constructor(url, protocols) {
       this.url = url;
+      this.protocols = protocols;
       this.readyState = 0;
       this.sent = [];
       FakeSocket.instances.push(this);
@@ -338,6 +393,24 @@ describe("streamOrderbook transport", () => {
     assert.equal(h.books.at(-1).bookSeq, "101");
     assert.equal(h.books.at(-1).bids.find((l) => l.price === "100.0").qty, "9");
 
+    h.stop();
+  });
+
+  it("requests the JSON subprotocol on every connection attempt", async () => {
+    // The probe asks for `centrifuge-json` and the server negotiates it; a
+    // browser that opens with no subprotocol leaves framing to an unverified
+    // default. That asymmetry is invisible to any probe, so it is pinned here.
+    const h = await makeHarness();
+    assert.deepEqual(h.socket().protocols, ["centrifuge-json"]);
+    h.stop();
+  });
+
+  it("re-requests the subprotocol when it reconnects", async () => {
+    const h = await makeHarness({ maxFailures: 3, retryBaseDelayMs: 5 });
+    h.socket().drop();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.ok(FakeSocket.instances.length > 1, "reconnected");
+    assert.deepEqual(h.socket().protocols, ["centrifuge-json"]);
     h.stop();
   });
 

@@ -450,6 +450,13 @@ Two reporting fixes came out of the same pass:
    through `bookForDisplay(status, liveBook)`, which yields to polling once the stream is
    `unavailable` and keeps the last known book while it is `connecting` or `reconnecting`.
 
+5. **The browser asked for no subprotocol.** The probe opens the socket with
+   `Sec-WebSocket-Protocol: centrifuge-json` and the server negotiates it; the browser
+   transport passed no subprotocol argument at all, leaving the framing to the server's
+   default. Every probe therefore passed while the browser path rested on an unverified
+   assumption — the exact asymmetry a wire test cannot see, because the wire test is the
+   thing doing it correctly. It now requests `centrifuge-json` on every attempt.
+
 A reporting fix came from the owner's third live run:
 
 - **`seq ...503→...505` read as a gap but was contiguous**, because that delta covered
@@ -495,3 +502,31 @@ websocket origins.
 
 The last one matters most: switching depth changes the channel, and a delta from the old
 depth applied to the new book would look plausible and be wrong.
+
+---
+
+## 10. Delta range convention — observed, not assumed
+
+Two live runs on 2026-10-31 produced these ranges:
+
+```text
+10939000-10939003 → 10939003-10939004 → 10939004-10939011
+```
+
+Consecutive ranges **share a boundary sequence**: the first ends at 10939003 and the second
+*starts* at 10939003. That is overlap, not strict adjacency (which would be
+`prevEnd + 1`). It matters, because the two conventions imply different client code:
+
+| Assumption | Consequence if wrong |
+| --- | --- |
+| Strict adjacency (`start === prevEnd + 1`) | reporting a false gap on every update, i.e. re-snapshotting constantly |
+| Disjoint ranges, no shared sequence | expecting `start > prevEnd`, and reading a shared boundary as a duplicate |
+
+The client accepts **both** because gap detection compares against `prevEnd + 1` as an upper
+bound: `start <= prevEnd + 1` is contiguous. The shared sequence number is then harmless
+because the merge uses SET semantics — a level's quantity is replaced, never summed, so a
+sequence applied twice cannot double-count. That combination is pinned by a test built from
+the exact ranges above.
+
+A delta can also span many sequences in one publication (`10939004-10939011` is eight), so
+"one publication, one sequence" is not a safe assumption either.
