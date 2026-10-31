@@ -10,7 +10,7 @@
  *  - exposes clean, CORS-open GET JSON endpoints the static frontend can call
  *  - caches hot routes at the edge of the isolate (TTL per endpoint)
  *
- * Routes (all GET):
+ * Routes (GET unless noted):
  *   /api/health
  *   /api/env
  *   /api/markets
@@ -25,6 +25,13 @@
  *   /api/flow?flowId=...
  *   /api/flow/by-tx?txHash=...
  *   /api/flow/explain?txHash=...
+ *   /api/fees/tiers            public VIP0-VIP10 maker/taker catalog
+ *   /api/account/address?signer=0x...
+ *   /api/account/balances?address=0x...
+ *
+ *   POST /api/auth/challenge   wallet login: obtain the message to sign
+ *   POST /api/auth/login       wallet login: exchange a signature for a token
+ *                              (same-origin only, never cached, never logged)
  */
 
 import {
@@ -39,10 +46,15 @@ import {
 import { applySecurityHeaders } from "../../packages/core/src/deploymentSecurity";
 import { cached, cacheStats } from "./cache";
 import { dataFor } from "./mcpServer";
+import { deriveSmartAccount, handleAuthRoute, isAuthPath } from "./authProxy";
+import { fetchOnchainBalances } from "./onchainBalances";
+import { fetchVipFeeSchedule } from "./publicFees";
 
 export interface ApiOptions {
   /** Platform env vars (Cloudflare bindings / process.env). */
   env?: Record<string, string | undefined>;
+  /** Injected in tests so a route never has to reach the network for real. */
+  fetch?: typeof fetch;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -59,10 +71,20 @@ const VALID_SIDES = new Set<string>(["buy", "sell"]);
 const VALID_COMPARE_BY = new Set<string>(["networkFee", "depositMinAmount"]);
 const VALID_LOOKUP_KIND = new Set<string>(["source", "any"]);
 
-/** Resolve the primary endpoint, honoring a mainnet-only deployment override. */
+/**
+ * Resolve the primary endpoint, honoring a mainnet-only deployment override.
+ *
+ * A blank value must count as absent. `??` alone selects an empty `MCP_URL`
+ * (a common way to leave a var "declared but unset" in wrangler.toml), which
+ * then resolves to the testnet default and silently wins over a valid
+ * `MCP_URL_MAINNET` — so the deployment would keep serving testnet data.
+ */
 export function resolveBackendMcpUrl(env?: Record<string, string | undefined>): string {
-  return resolveMcpUrl("testnet", env?.MCP_URL ?? env?.MCP_URL_MAINNET) ||
-    resolveMcpUrl("mainnet", env?.MCP_URL_MAINNET);
+  const primary = env?.MCP_URL?.trim();
+  if (primary) return resolveMcpUrl("testnet", primary);
+  const mainnet = env?.MCP_URL_MAINNET?.trim();
+  if (mainnet) return resolveMcpUrl("mainnet", mainnet);
+  return resolveMcpUrl("testnet");
 }
 
 class ValidationError extends Error {
@@ -136,6 +158,10 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
+  // Wallet login is the only non-GET surface, and it is deliberately narrow:
+  // two fixed paths, same-origin only, no account state. See authProxy.ts.
+  if (isAuthPath(path)) return handleAuthRoute(request, path, opts);
+
   if (request.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -150,6 +176,57 @@ export async function api(request: Request, opts: ApiOptions = {}): Promise<Resp
   // ---- meta routes -------------------------------------------------------------
   if (path === "/api" || path === "/api/health") {
     return json({ ok: true, service: "poly-tools-backend", now: Date.now() });
+  }
+  // Read-only address lookup. Deriving a smart-account address from an owner EOA
+  // is a pure computation — no signature, no token, no exchange call — so a user
+  // can see their own on-chain account without a login the exchange may never
+  // grant. It reveals nothing that the chain does not already publish.
+  if (path === "/api/account/address") {
+    const signer = (url.searchParams.get("signer") ?? "").trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(signer)) {
+      return error(400, "invalid_signer_address");
+    }
+    const smartAccountAddress = await deriveSmartAccount(signer);
+    if (!smartAccountAddress) {
+      // The SDK is unavailable in this runtime; say so rather than guessing.
+      return error(503, "smart_account_derivation_unavailable");
+    }
+    return json(
+      { signerAddress: signer, smartAccountAddress },
+      {},
+      // Deterministic for an EOA, and public data. Safe to cache briefly.
+      { "Cache-Control": "public, max-age=300" },
+    );
+  }
+  // On-chain funding balances for a smart account. Read-only, no session: the
+  // exchange never grants third-party login, and this part of the account view is
+  // public chain data anyway. Proxied so the browser only talks to /api.
+  if (path === "/api/account/balances") {
+    const address = (url.searchParams.get("address") ?? "").trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      return error(400, "invalid_address");
+    }
+    const result = await fetchOnchainBalances(address, { fetchImpl: opts.fetch });
+    if (!result.ok) return error(result.status, result.code, result.detail);
+    return json(
+      { address: result.address, balances: result.balances },
+      {},
+      // Chain state changes slowly and the explorer is rate-limited; a short
+      // shared cache also keeps us from hammering a public service.
+      { "Cache-Control": "public, max-age=30" },
+    );
+  }
+  if (path === "/api/fees/tiers") {
+    const result = await fetchVipFeeSchedule({ fetchImpl: opts.fetch });
+    if (!result.ok) return error(result.status, result.code, result.detail);
+    return json(
+      result.schedule,
+      {},
+      // The catalog is published as an immutable policy version; changes are
+      // rare events carrying their own effectiveFrom, so a 5 minute cache
+      // cannot serve a stale row for long after a change.
+      { "Cache-Control": "public, max-age=300" },
+    );
   }
   if (path === "/api/env") {
     return json({

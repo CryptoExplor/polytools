@@ -129,6 +129,13 @@ export class AccountSessionOwner {
   private readonly unbindVault: () => void;
   private state: AccountSessionOwnerState;
   private inFlight: InFlightLoad | null = null;
+  /**
+   * Number of cursor-history imports currently paging. While one runs, a
+   * visibility refresh would publish a snapshot with a fresh `period.endTime`
+   * (it is derived from `now`), so the import's `mergeImportedHistory` would be
+   * discarded on the endTime check and the paged work would be silently lost.
+   */
+  private historyImports = 0;
   private active = false;
   private disposed = false;
 
@@ -190,11 +197,27 @@ export class AccountSessionOwner {
     return period.lastAttemptAtMs === null || atMs - period.lastAttemptAtMs > ACCOUNT_DATA_FRESHNESS_MS;
   }
 
-  /** Explicit consent is required before visibility refresh can do any work. */
+  /**
+   * Explicit consent is required before visibility refresh can do any work.
+   *
+   * A running cursor import holds visibility refresh off: a refresh would
+   * replace the snapshot the import intends to merge into.
+   */
   refreshIfActivated(secureContext: boolean): Promise<void> {
+    if (this.historyImports > 0) return Promise.resolve();
     const range = this.state.range;
     if (!this.state.activated || !this.shouldRefreshOnVisibility(range)) return Promise.resolve();
     return this.load({ explicit: false, secureContext, range });
+  }
+
+  /** Mark the start of a cursor-history import so visibility refresh stands down. */
+  beginHistoryImport(): void {
+    this.historyImports += 1;
+  }
+
+  /** Mark the end of a cursor-history import; safe to call more times than `begin`. */
+  endHistoryImport(): void {
+    this.historyImports = Math.max(0, this.historyImports - 1);
   }
 
   /**
@@ -292,6 +315,7 @@ export class AccountSessionOwner {
   dispose(): void {
     if (this.disposed) return;
     this.cancelLoad();
+    this.historyImports = 0;
     this.disposed = true;
     this.unbindVault();
     this.coordinator.dispose();

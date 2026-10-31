@@ -711,6 +711,9 @@ export function AccountAnalytics({
     setPendingExport(null);
     setLocalError(null);
     setImportNotice(null);
+    // Hold visibility refresh off for the duration: a refresh publishes a new
+    // period.endTime, and the merge below is rejected when the period moved.
+    owner.beginHistoryImport();
     try {
       const result = await coordinator.importCursorHistory({
         period,
@@ -732,13 +735,18 @@ export function AccountAnalytics({
         setLocalError(`${failed.code}: Cursor import did not finish. The previous snapshot remains visible; ${errorText(failed)}`);
         return;
       }
-      owner.mergeImportedHistory(sessionIdentity, period, result);
+      if (!owner.mergeImportedHistory(sessionIdentity, period, result)) {
+        setImportNotice(
+          "Import finished, but the visible snapshot changed while it ran, so the paged rows were not merged. Re-run the import to retry.",
+        );
+      }
     } catch (error) {
       if (isCurrent()) {
         const safe = account.safeAccountError(error);
         setLocalError(`${safe.code}: Cursor import did not finish. The previous snapshot remains visible; ${errorText(safe)}`);
       }
     } finally {
+      owner.endHistoryImport();
       if (importRequestRef.current === controller) {
         importRequestRef.current = null;
         setImporting(false);

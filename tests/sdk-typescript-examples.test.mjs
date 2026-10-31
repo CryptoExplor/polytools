@@ -49,6 +49,82 @@ describe("pinned TypeScript SDK generated examples", () => {
         keyIdInput: "ak_test_key_id",
       }),
     }));
+    const details = typecheckExamples(examples);
+    assert.equal(details.length, 0, details.join("\n"));
+  });
+
+  it("still typechecks when user input contains quotes, backslashes, and newlines", () => {
+    // Every interpolated value is copied out of the UI into a snippet. A value
+    // with a quote used to end the generated string literal early.
+    // `streamTf` stays a valid enum member: the SDK types it as a union, so a
+    // bogus value is rejected by the compiler rather than by quoting.
+    const hostile = {
+      symbol: 'BTC"USDT\\',
+      streamTf: "1m",
+      orderQty: '1"',
+      orderPrice: "5\\000",
+      keyIdInput: 'ak_x"y\\z',
+    };
+    const examples = ["market", "stream", "trade"].map((step) => ({
+      name: `hostile-${step}`,
+      source: buildTypeScriptSdkExample({
+        step,
+        orderSide: "buy",
+        ...hostile,
+      }),
+    }));
+    const details = typecheckExamples(examples);
+    assert.equal(details.length, 0, details.join("\n"));
+
+    const trade = examples.find((example) => example.name === "hostile-trade").source;
+    // The values survive as literals instead of terminating the snippet.
+    assert.ok(trade.includes('qty: "1\\""'), "a quote in the quantity must be escaped");
+    assert.ok(trade.includes('requireSymbolIdByPairSymbol("BTC\\"USDT\\\\")'));
+    assert.ok(trade.includes('ak_x\\"y\\\\z'), "a quote in the key ID must be escaped");
+    // The environment-variable form must keep its own literal quotes.
+    assert.ok(trade.includes('process.env.POLYESTER_API_KEY_ID ?? "'));
+    assert.ok(!/qty: "1""/.test(trade), "an unescaped quote would still be present");
+  });
+
+  it("documents that the secret must be 0x-prefixed hex", () => {
+    const trade = buildTypeScriptSdkExample({
+      step: "trade",
+      symbol: "BTC-USDT",
+      streamTf: "1m",
+      orderSide: "buy",
+      orderQty: "0.001",
+      orderPrice: "50000",
+      keyIdInput: "ak_test_key_id",
+    });
+    // evmHexToBytes() rejects a bare hex string, so the example must say so and
+    // normalize the value rather than passing the env var straight through.
+    assert.match(trade, /0x-prefixed/);
+    assert.match(trade, /Invalid hex value/);
+    assert.match(trade, /evmHexToBytes\("0x" \+ /);
+    assert.doesNotMatch(trade, /evmHexToBytes\(process\.env/);
+  });
+
+  it("keeps the generated snippets free of unescaped interpolations", () => {
+    const rendered = ["market", "stream", "trade"].map((step) => buildTypeScriptSdkExample({
+      step,
+      symbol: "BTC-USDT",
+      streamTf: "1m",
+      orderSide: "buy",
+      orderQty: "0.001",
+      orderPrice: "50000",
+      keyIdInput: "ak_test_key_id",
+    })).join("\n");
+    assert.ok(rendered.includes('requireSymbolIdByPairSymbol("BTC-USDT")'));
+    assert.ok(rendered.includes('qty: "0.001"'));
+    assert.ok(rendered.includes('price: "50000"'));
+  });
+});
+
+/**
+ * Compile the generated snippets in memory with the same strict options as the
+ * app, returning formatted diagnostics instead of throwing.
+ */
+function typecheckExamples(examples) {
     const virtualFiles = new Map(examples.map(({ name, source }) => [
       resolve(virtualDir, `${name}.ts`),
       source,
@@ -78,12 +154,10 @@ describe("pinned TypeScript SDK generated examples", () => {
 
     const program = ts.createProgram({ rootNames: [...virtualFiles.keys()], options, host });
     const diagnostics = ts.getPreEmitDiagnostics(program);
-    const details = diagnostics.map((diagnostic) => {
+    return diagnostics.map((diagnostic) => {
       const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
       if (!diagnostic.file || diagnostic.start === undefined) return message;
       const location = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
       return `${diagnostic.file.fileName}:${location.line + 1}:${location.character + 1} ${message}`;
-    }).join("\n");
-    assert.equal(diagnostics.length, 0, details);
-  });
-});
+    });
+}

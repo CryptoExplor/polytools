@@ -7,3 +7,8 @@ export * from "./format";
 export * from "./poll";
 export * as vault from "./account/index";
 export * as account from "./account/index";
+export * from "./vipFees";
+export * from "./orderbookStream";
+export * from "./centrifuge";
+export * from "./tradesStream";
+export * from "./candlesStream";

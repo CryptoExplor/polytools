@@ -10,6 +10,18 @@ import { api } from "../src/handler";
 
 const PORT = Number(process.env.PORT ?? 8787);
 
+const BODYLESS_METHODS = new Set(["GET", "HEAD"]);
+/** Auth payloads are a few hundred bytes; anything near this is not one. */
+const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * Converts an incoming Node request to a Web `Request`.
+ *
+ * The body has to be read explicitly. An earlier version passed only method and
+ * headers, which was invisible while every route was a GET — the first POST route
+ * (wallet login) would have arrived empty and been rejected as `invalid_body`.
+ * `duplex` is not needed because the body is buffered before construction.
+ */
 export async function toWebRequest(req: IncomingMessage): Promise<Request> {
   const host = req.headers.host ?? "localhost";
   const rawUrl = req.url ?? "/";
@@ -20,7 +32,22 @@ export async function toWebRequest(req: IncomingMessage): Promise<Request> {
   for (const [k, v] of Object.entries(req.headers)) {
     if (typeof v === "string") headers.set(k, v);
   }
-  return new Request(`http://${host}${path}`, { method: req.method, headers });
+
+  const method = (req.method ?? "GET").toUpperCase();
+  let body: Uint8Array | undefined;
+  if (!BODYLESS_METHODS.has(method)) {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of req) {
+      const buf = chunk as Buffer;
+      size += buf.length;
+      if (size > MAX_BODY_BYTES) throw new Error("request body too large");
+      chunks.push(buf);
+    }
+    if (chunks.length) body = Buffer.concat(chunks);
+  }
+
+  return new Request(`http://${host}${path}`, { method, headers, body });
 }
 
 async function send(res: ServerResponse, webRes: Response): Promise<void> {
@@ -35,9 +62,12 @@ export function createNodeServer() {
     toWebRequest(req)
       .then((webReq) => api(webReq, { env: process.env }))
       .then((webRes) => send(res, webRes))
-      .catch((err) => {
-        res.statusCode = 500;
-        res.end(JSON.stringify({ error: String(err) }));
+      .catch((err: unknown) => {
+        const message = String(err instanceof Error ? err.message : err);
+        const tooLarge = message.includes("request body too large");
+        res.statusCode = tooLarge ? 413 : 500;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: tooLarge ? "payload_too_large" : "internal_error" }));
       });
   });
 }

@@ -18,6 +18,7 @@ import type {
   OrderbookResult,
   RecentTradesResult,
   SpotMarketsResult,
+  VipFeeSchedule,
 } from "@poly/core";
 import {
   isWireSamplePayload,
@@ -186,4 +187,5 @@ export const api = {
     get<LifecycleResult>("/flow/by-tx", { txHash, lookupKind }),
   flowExplain: (txHash: string, lookupKind: "source" | "any" = "any") =>
     get<LifecycleResult>("/flow/explain", { txHash, lookupKind }),
+  feesTiers: () => get<VipFeeSchedule>("/fees/tiers"),
 };

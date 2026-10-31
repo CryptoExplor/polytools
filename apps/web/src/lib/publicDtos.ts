@@ -5,6 +5,7 @@ import type {
   RecentTradesResult,
   SpotMarketsResult,
 } from "@poly/core";
+import { parseVipFeeSchedule } from "@poly/core";
 
 type JsonObject = Record<string, unknown>;
 type RequestParams = Record<string, string | number | undefined>;
@@ -300,6 +301,10 @@ export function decodePublicApiResponse<T>(
       return validateCandles(value, params) as T;
     case "/trades":
       return validateRecentTrades(value, params) as T;
+    case "/fees/tiers":
+      // Shared parser, so a malformed catalog is rejected in the browser with
+      // the same rules the backend applied before it cached the response.
+      return parseVipFeeSchedule(value) as T;
     default:
       return value as T;
   }

@@ -263,8 +263,53 @@ function devApiPlugin(): Plugin {
                 ) => Promise<Response>;
               };
               const path = `/api${req.url ?? "/"}`;
-              const webReq = new Request(`http://localhost${path}`, {
+              // Forward the body and headers. This middleware used to build a
+              // Request from the method alone, so any POST arrived with an
+              // empty body and no Origin/Content-Type/Sec-Fetch-Site — every
+              // POST route worked in production and could never work in dev.
+              // Cap before buffering: the handler's own limit is checked after
+              // the body is in memory. Dev only, but a laptop should not be the
+              // place an unbounded upload is discovered.
+              const MAX_DEV_BODY = 1_048_576;
+              const declared = Number(req.headers["content-length"] ?? "0");
+              if (Number.isFinite(declared) && declared > MAX_DEV_BODY) {
+                res.statusCode = 413;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: "payload_too_large" }));
+                return;
+              }
+              const chunks: Buffer[] = [];
+              let buffered = 0;
+              for await (const chunk of req) {
+                buffered += (chunk as Buffer).length;
+                if (buffered > MAX_DEV_BODY) {
+                  res.statusCode = 413;
+                  res.setHeader("Content-Type", "application/json");
+                  res.end(JSON.stringify({ error: "payload_too_large" }));
+                  return;
+                }
+                chunks.push(chunk as Buffer);
+              }
+              const raw = Buffer.concat(chunks);
+              const headers = new Headers();
+              for (const [name, value] of Object.entries(req.headers)) {
+                if (!value) continue;
+                // Rewritten by Request, or derived from the buffered body.
+                if (name === "host" || name === "connection" || name === "content-length") continue;
+                headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+              }
+              // Use the host the browser actually addressed. A fixed
+              // `localhost` here made the request URL disagree with the Origin
+              // header, which both mislabelled same-origin calls as cross-origin
+              // and bound login challenges to the wrong `uri` in development.
+              // From the raw request: `headers` above deliberately drops `host`
+              // because Request recomputes it from the URL.
+              const rawHost = req.headers.host;
+              const host = typeof rawHost === "string" && rawHost ? rawHost : "localhost";
+              const webReq = new Request(`http://${host}${path}`, {
                 method: req.method ?? "GET",
+                headers,
+                body: raw.length > 0 ? raw : undefined,
               });
               const webRes = await api(webReq, { env: process.env });
               const fb = devWireSampleFallbackForStatus(new URL(webReq.url), webRes.status);

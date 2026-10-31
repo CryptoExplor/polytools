@@ -15,6 +15,7 @@ import {
   telemetryFallback,
 } from "../lib/telemetry";
 import { useApp } from "../lib/store";
+import { OnchainAccountCard } from "../components/OnchainAccountCard";
 import {
   Card,
   Countdown,
@@ -385,6 +386,8 @@ export default function Hub() {
           })}
         </div>
       </Card>
+
+      <OnchainAccountCard />
 
       {/* Connection & Environment Diagnostics (FEAT-11) */}
       <Card

@@ -19,6 +19,18 @@ The SPA uses hash routes so deep links work on static hosts. Account features ar
 `/account`; the older `/flow` and `/portfolio` links redirect to account sections, while `/book`
 remains a public market-data route.
 
+### Wallet connection
+
+The topbar can connect a supported injected EOA wallet (any EIP-1193 provider) and shows the
+connected address and chain. It handles rejected requests, missing providers, account switches and
+chain switches.
+
+**A connected wallet is not a login.** It proves nothing about exchange authentication or account
+authorization, and wallet state is stored separately from the passphrase-encrypted API-key vault.
+No signature is ever requested, no transaction is ever sent, and disconnecting only clears local
+state — wallets expose no site revocation, so use your wallet's own settings to disconnect there.
+Private account data still requires the API-key vault.
+
 | Area | Route | What it provides |
 |---|---|---|
 | Account overview | `/#/account` | Authenticated balances, sampled balance/equity history, current fee rates, and explicitly confirmed exports; no unsupported P&L |
@@ -148,9 +160,14 @@ the optional notification bot, never for account custody or signing. Account rea
 
 ## Mainnet switch
 
-1. When an official **public MCP** mainnet endpoint is announced, configure it in
-   `packages/core/src/config.ts` and/or `MCP_URL_MAINNET` on the backend. `MCP_URL` remains the
-   primary override when both are set.
+1. When an official **public MCP** mainnet endpoint is announced, set **`MCP_URL_MAINNET`** (or
+   `MCP_URL`) on the backend. `MCP_URL` remains the primary override when both are set, and a blank
+   `MCP_URL` counts as unset.
+
+   **Editing `NETWORKS.mainnet.mcpUrl` in `packages/core/src/config.ts` alone does not move the
+   public service.** The backend resolves the *primary* endpoint first, and the default testnet URL
+   is non-empty, so it wins; the mainnet entry only feeds the `MCP_URL_MAINNET` fallback. Change the
+   backend variable, not just the config constant.
 2. Redeploy the public-data service. The UI environment badge reports the public `apiEnv` returned
    by that service; it does not select the private account API network.
 3. Private account reads currently use the official Polyester Testnet REST endpoint only. Mainnet

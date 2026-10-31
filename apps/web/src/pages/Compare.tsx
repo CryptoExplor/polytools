@@ -53,8 +53,8 @@ export function CompareEmptyState({
   if (allRowsCount > 0) {
     return (
       <EmptyState
-        title="No matches right now"
-        description="No usable CoinGecko USD price right now. Missing, unmapped, non-USD, and invalid prices are never matches."
+        title="No comparable prices right now"
+        description="Rows are unmatched when either feed lacks a usable price: Polyester may have no price at all, and CoinGecko values may be missing, unmapped, non-USD, or invalid. Such invalid prices are never matches, and neither feed alone is blamed."
         action={<button type="button" className="btn sm" onClick={onShowAll}>Show All Listed</button>}
       />
     );

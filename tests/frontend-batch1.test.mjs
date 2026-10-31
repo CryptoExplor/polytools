@@ -20,7 +20,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
-const source = (path) => readFileSync(resolve(rootDir, path), "utf8");
+// Normalised so a Windows checkout (CRLF) asserts the same as a Unix one.
+const source = (path) => readFileSync(resolve(rootDir, path), "utf8").replace(/\r\n/g, "\n");
 const render = (element) => renderToStaticMarkup(element);
 
 const PAGE_FILES = [

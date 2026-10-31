@@ -23,6 +23,7 @@ import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import { roundToTick, validateOrderDraft } from "../lib/orderConstraints";
 import { validateCanonicalRequest } from "../lib/canonicalRequest";
+import { ApiSurfaceTable } from "../components/ApiSurfaceTable";
 import {
   Card,
   CopyButton,
@@ -179,8 +180,8 @@ export default function SdkGuide() {
 pip install "polyester-sdk==0.1.0a55"
 
 # Testnet Endpoints (configured automatically via POLYESTER_TESTNET_ENVIRONMENT):
-#   API:       https://api-testnet.polyester.com
-#   WebSocket: wss://api-testnet.polyester.com`;
+#   API:       https://api.testnet.polyester.com
+#   WebSocket: wss://api.testnet.polyester.com`;
       }
       if (step === "market") {
         return `import asyncio
@@ -392,7 +393,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         />
         <MetricCell
           label="Testnet API Host"
-          value="api-testnet.polyester.com"
+          value="api.testnet.polyester.com"
           sub="ConnectRPC + WS Protobuf"
         />
         <MetricCell
@@ -1148,6 +1149,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             </span>
           </div>
         </Card>
+      </div>
+
+      <div className="mt-4">
+        <ApiSurfaceTable />
       </div>
     </div>
   );

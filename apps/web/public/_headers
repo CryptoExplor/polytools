@@ -1,6 +1,6 @@
 # Cloudflare Pages static responses. /api Functions use the same shared policy.
 /*
-  Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://assets.polyester.com; media-src 'self' https://assets.polyester.com; connect-src 'self' https://api.coingecko.com https://api.testnet.polyester.com https://*.workers.dev; font-src 'self'; manifest-src 'self'
+  Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://assets.polyester.com; media-src 'self' https://assets.polyester.com; connect-src 'self' https://api.coingecko.com https://api.testnet.polyester.com wss://api.testnet.polyester.com https://*.workers.dev; font-src 'self'; manifest-src 'self'
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: accelerometer=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), display-capture=(), fullscreen=(self), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(self), serial=(), usb=()
