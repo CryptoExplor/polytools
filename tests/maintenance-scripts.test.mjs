@@ -223,3 +223,60 @@ describe("P3-4/P3-6 measured build and repository assurance helpers", () => {
     assert.ok(!files.includes("apps/web/dist/index.html"), "ignored build output must be excluded");
   });
 });
+
+describe("AGENTS.md stays true to the repository", () => {
+  const agents = source("AGENTS.md");
+
+  it("gives every hard rule a check marker", () => {
+    // The file's own rule is "a rule without a check is a wish". Without this,
+    // a rule added later could silently omit its gate and nobody would notice.
+    // Rules wrap across lines and their check sits at the end, so they are
+    // parsed as blocks: a numbered heading up to the next heading or section.
+    const lines = agents.split("\n");
+    const rules = [];
+    let current = null;
+    for (const line of lines) {
+      if (/^\d+\.\s\*\*/.test(line)) {
+        if (current) rules.push(current);
+        current = line;
+      } else if (/^##\s/.test(line)) {
+        if (current) rules.push(current);
+        current = null;
+      } else if (current) {
+        current += ` ${line.trim()}`;
+      }
+    }
+    if (current) rules.push(current);
+
+    assert.ok(rules.length >= 20, `expected the numbered hard rules, found ${rules.length}`);
+    for (const rule of rules) {
+      assert.match(rule, /\*check:\*/, `rule has no check: ${rule.slice(0, 60)}`);
+    }
+  });
+
+  it("only names test files and gates that exist", () => {
+    const named = [...agents.matchAll(/`(tests\/[a-z0-9-]+\.test\.mjs|scripts\/[a-z0-9-]+\.mjs)`/g)].map(
+      (match) => match[1],
+    );
+    assert.ok(named.length > 0, "AGENTS.md should reference its gates");
+    for (const path of new Set(named)) {
+      assert.doesNotThrow(() => source(path), `${path} is referenced but missing`);
+    }
+  });
+
+  it("names only scripts that package.json actually wires", () => {
+    const scripts = JSON.parse(source("package.json")).scripts;
+    const invoked = [...agents.matchAll(/npm run ([a-z:]+)/g)].map((match) => match[1]);
+    for (const name of new Set(invoked)) {
+      assert.ok(scripts[name], `npm run ${name} is documented but not defined`);
+    }
+  });
+
+  it("states the rename compatibility rule with the real persisted values", () => {
+    // A brand rename is exactly when someone finds-and-replaces these.
+    for (const value of ["polytools-account-vault", "polytools-public-cache", "poly-tools:"]) {
+      assert.ok(agents.includes(value), `AGENTS.md must name ${value} as frozen`);
+    }
+    assert.match(agents, /never claim browser or exchange verification you did not run/i);
+  });
+});
