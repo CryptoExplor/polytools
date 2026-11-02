@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { NETWORKS, fmtAgo } from "@poly/core";
+import { NETWORKS, PERSISTED_WEB_STORAGE_KEYS, fmtAgo } from "@polyap/core";
 import { useApp } from "../lib/store";
 import { useNow } from "../lib/hooks";
 import {
@@ -12,6 +12,7 @@ import { Pill, SymbolSelect } from "./ui";
 import { GlossaryDrawer } from "./Glossary";
 import { PublicCacheStatus } from "./PublicCacheStatus";
 import { WireSampleNotice } from "./WireSampleNotice";
+import { WalletButton } from "./WalletButton";
 import {
   IconActivity,
   IconBook,
@@ -22,6 +23,7 @@ import {
   IconDashboard,
   IconExternal,
   IconFlow,
+  IconVolume,
   IconHub,
   IconInfo,
   IconKey,
@@ -49,7 +51,8 @@ interface NavItem {
   icon: ReactNode;
 }
 
-const INTRO_STORAGE_KEY = "poly-tools:intro:v1";
+// Persisted identifier (packages/core/src/persistedIdentifiers.ts). DO NOT RENAME.
+const INTRO_STORAGE_KEY = PERSISTED_WEB_STORAGE_KEYS.intro;
 
 const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
   {
@@ -83,6 +86,7 @@ const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
   {
     group: "Toolkit & Docs",
     items: [
+      { to: "/fees", label: "Fee schedule", icon: <IconVolume size={15} /> },
       { to: "/calc", label: "Calculators", icon: <IconCalc size={15} /> },
       { to: "/hub", label: "Start on testnet", icon: <IconHub size={15} /> },
       { to: "/sdk", label: "Developers: SDK", icon: <IconKey size={15} /> },
@@ -110,6 +114,7 @@ const ROUTE_META: Record<
   "/compare": { title: "Compare prices", group: "Market Data", showSymbolSelector: false },
   "/zipper": { title: "Bridge routes", group: "Cross-Chain", showSymbolSelector: false },
   "/flow": { title: "Money Movements", group: "Account", showSymbolSelector: false },
+  "/fees": { title: "Fee schedule", group: "Toolkit & Docs", showSymbolSelector: false },
   "/calc": { title: "Calculators", group: "Toolkit & Docs", showSymbolSelector: true },
   "/hub": { title: "Start on testnet", group: "Toolkit & Docs", showSymbolSelector: false },
   "/sdk": { title: "Developers: SDK", group: "Toolkit & Docs", showSymbolSelector: true },
@@ -174,7 +179,7 @@ export function Layout() {
   const now = useNow(2000);
 
   const meta = ROUTE_META[loc.pathname] ?? {
-    title: "PolyTools",
+    title: "Polyap",
     group: "Workspace",
     showSymbolSelector: false,
   };
@@ -297,7 +302,7 @@ export function Layout() {
 
   useEffect(() => {
     const prefix = meta.showSymbolSelector ? `${symbol} · ` : "";
-    document.title = `${prefix}${meta.title} — PolyTools`;
+    document.title = `${prefix}${meta.title} — Polyap`;
   }, [meta.title, meta.showSymbolSelector, symbol]);
 
   useEffect(() => {
@@ -371,7 +376,7 @@ export function Layout() {
           >
             <img src="/favicon.svg" alt="Polyester symbol" className="logo-img" />
             <span className="brand-meta">
-              <span>PolyTools</span>
+              <span>Polyap</span>
               <span className="brand-sub">
                 {brandCopiedNote ? `✓ ${brandCopiedNote}` : "Read-only"}
               </span>
@@ -473,7 +478,7 @@ export function Layout() {
             <a href={NETWORKS.testnet.appUrl} target="_blank" rel="noreferrer">
               Polyester ↗
             </a>
-            . No wallet or login.
+            . No login required for public data.
           </div>
         </div>
       </aside>
@@ -502,6 +507,8 @@ export function Layout() {
           <div className="spacer" />
 
           <div className="topbar-controls">
+            <WalletButton />
+
             {meta.showSymbolSelector && (
               <SymbolSelect
                 value={symbol}
@@ -601,10 +608,10 @@ export function Layout() {
         <main id="main-workspace" className="content" tabIndex={-1}>
           {wireSampleUsed && <WireSampleNotice />}
           {!introDismissed && (
-            <section className="intent-bar" aria-label="About PolyTools">
+            <section className="intent-bar" aria-label="About Polyap">
               <div className="intent-bar-copy">
                 <span className="intent-eyebrow">Read-only toolkit · Testnet</span>
-                <strong>PolyTools is a read-only map of Polyester.</strong>{" "}
+                <strong>Polyap is a read-only map of Polyester.</strong>{" "}
                 <span>
                   Watch live prices, order book depth, trades, and bridge fees without
                   connecting a wallet. It never places orders or touches funds.
@@ -639,7 +646,7 @@ export function Layout() {
 
         <footer className="foot">
           <span>
-            PolyTools · Read-only companion for Polyester ·{" "}
+            Polyap · Read-only companion for Polyester ·{" "}
             {meta.group === "Account" ? (
               "Account amounts retain exact API decimal strings"
             ) : (

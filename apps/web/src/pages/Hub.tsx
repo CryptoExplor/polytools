@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { NETWORKS, fmtTimeUTC } from "@poly/core";
+import { NETWORKS, PERSISTED_WEB_STORAGE_KEYS, fmtTimeUTC } from "@polyap/core";
 import { useNow } from "../lib/hooks";
 import {
   formatBooleanTelemetry,
@@ -15,6 +15,7 @@ import {
   telemetryFallback,
 } from "../lib/telemetry";
 import { useApp } from "../lib/store";
+import { OnchainAccountCard } from "../components/OnchainAccountCard";
 import {
   Card,
   Countdown,
@@ -149,7 +150,8 @@ const CHECKLIST: CheckItem[] = [
   },
 ];
 
-const STORE_KEY = "poly-tools:hub-checklist";
+// Persisted identifier (packages/core/src/persistedIdentifiers.ts). DO NOT RENAME.
+const STORE_KEY = PERSISTED_WEB_STORAGE_KEYS.hubChecklist;
 
 /** Compute timestamp (ms) of the next 00:00:00 UTC midnight relative to `nowMs`. */
 function nextReset(nowMs = Date.now()): number {
@@ -346,7 +348,7 @@ export default function Hub() {
       {/* Interactive Checklist */}
       <Card
         title="Testnet Onboarding Checklist"
-        subtitle="Stored only in this browser. PolyTools cannot see whether you actually claimed."
+        subtitle="Stored only in this browser. Polyap cannot see whether you actually claimed."
       >
         <div>
           {CHECKLIST.map((c) => {
@@ -385,6 +387,8 @@ export default function Hub() {
           })}
         </div>
       </Card>
+
+      <OnchainAccountCard />
 
       {/* Connection & Environment Diagnostics (FEAT-11) */}
       <Card

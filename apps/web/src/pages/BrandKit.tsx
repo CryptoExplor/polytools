@@ -211,7 +211,7 @@ export function BrandKitPage() {
             <div className="row-flex" style={{ gap: 6 }}>
               <a
                 href="/favicon.svg"
-                download="polytools-favicon.svg"
+                download="polyap-favicon.svg"
                 className="btn sm ghost"
               >
                 Download Favicon SVG

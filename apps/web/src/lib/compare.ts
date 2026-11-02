@@ -1,4 +1,4 @@
-import { price, splitSymbol, type MarketOverviewEntry } from "@poly/core";
+import { price, splitSymbol, type MarketOverviewEntry } from "@polyap/core";
 import { COINGECKO_IDS, type CgPrices } from "./coingecko";
 
 export type ComparePriceBasis = "index" | "last";

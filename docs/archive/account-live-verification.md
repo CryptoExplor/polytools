@@ -2,6 +2,9 @@
 
 This checklist is a **manual release gate**, not a record of completed live verification. The coding environment did not use a private key or make an authenticated request.
 
+> Run the credential-free checks first: `npm run probe:polyester`. Details and the
+> full staged plan are in `wallet-first-audit/19_CONNECTION_AND_ONCHAIN_MODEL.md`.
+
 ## Safety boundaries
 
 - Use only your own disposable Polyester **testnet** key, created and revoked in the official UI.

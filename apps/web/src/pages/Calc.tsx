@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useId, useMemo, useReducer, useState, type ReactNode } from "react";
-import { fmtNum, price, splitSymbol } from "@poly/core";
+import { fmtNum, price, splitSymbol } from "@polyap/core";
 import { api } from "../lib/api";
 import {
   converterPriceReducer,

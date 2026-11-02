@@ -5,7 +5,7 @@
     "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
-      "@poly/core": ["../../packages/core/src/index.ts"]
+      "@polyap/core": ["../../packages/core/src/index.ts"]
     }
   },
   "include": ["src", "../../packages/core/src"]

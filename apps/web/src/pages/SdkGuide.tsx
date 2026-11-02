@@ -15,7 +15,7 @@ import {
   splitSymbol,
   vault,
   type CandleTimeframe,
-} from "@poly/core";
+} from "@polyap/core";
 import { api } from "../lib/api";
 import { buildTypeScriptSdkExample } from "../lib/sdkTypescriptExamples";
 import { marketForSymbol } from "../lib/marketIdentity";
@@ -23,6 +23,7 @@ import { usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import { roundToTick, validateOrderDraft } from "../lib/orderConstraints";
 import { validateCanonicalRequest } from "../lib/canonicalRequest";
+import { ApiSurfaceTable } from "../components/ApiSurfaceTable";
 import {
   Card,
   CopyButton,
@@ -179,8 +180,8 @@ export default function SdkGuide() {
 pip install "polyester-sdk==0.1.0a55"
 
 # Testnet Endpoints (configured automatically via POLYESTER_TESTNET_ENVIRONMENT):
-#   API:       https://api-testnet.polyester.com
-#   WebSocket: wss://api-testnet.polyester.com`;
+#   API:       https://api.testnet.polyester.com
+#   WebSocket: wss://api.testnet.polyester.com`;
       }
       if (step === "market") {
         return `import asyncio
@@ -392,7 +393,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         />
         <MetricCell
           label="Testnet API Host"
-          value="api-testnet.polyester.com"
+          value="api.testnet.polyester.com"
           sub="ConnectRPC + WS Protobuf"
         />
         <MetricCell
@@ -404,7 +405,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
       <div className="notice warn" role="note">
         <div>
-          <strong>PolyTools does not run this code.</strong> These snippets are examples you
+          <strong>Polyap does not run this code.</strong> These snippets are examples you
           copy into your own project. Running the order examples places real orders on
           testnet and may cancel them again — nothing here executes on your behalf.
         </div>
@@ -1111,7 +1112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     <Pill kind="info">JSON-RPC / SSE</Pill>
                   </td>
                   <td className="align-left muted">
-                    PolyTools analytics terminal &amp; AI/agent read-only inspection
+                    Polyap analytics terminal &amp; AI/agent read-only inspection
                   </td>
                 </tr>
                 <tr>
@@ -1148,6 +1149,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             </span>
           </div>
         </Card>
+      </div>
+
+      <div className="mt-4">
+        <ApiSurfaceTable />
       </div>
     </div>
   );

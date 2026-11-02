@@ -1,8 +1,11 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
-const rootDir = new URL("..", import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..." and
+// Vite then fails to resolve the SSR root.
+const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const BASE_NOW = 1_700_000_000_000;
 let vite;
 let AccountSessionOwner;
@@ -206,6 +209,110 @@ describe("Portfolio-owned account session store", () => {
       now += 1_000;
       await owner.load({ explicit: true, secureContext: true, range: "30d" });
       assert.equal(calls.loadAll, 3, "manual refresh bypasses the age threshold");
+    } finally {
+      owner.dispose();
+    }
+  });
+
+  it("holds visibility refresh off while a cursor import is paging", async () => {
+    let now = BASE_NOW;
+    const { coordinator, calls } = fakeCoordinator({}, () => now);
+    const owner = new AccountSessionOwner({
+      vault: fakeVault(),
+      coordinator,
+      now: () => now,
+      fetchCatalog: async () => fakeCatalog(now),
+    });
+    try {
+      owner.setActive(true);
+      await owner.load({ explicit: true, secureContext: true, range: "30d" });
+      assert.equal(calls.loadAll, 1);
+      const periodBefore = owner.getSnapshot().periods["30d"].snapshot.period;
+
+      // Data goes stale mid-import; without a hold this publishes a new
+      // period.endTime and the import's merge is then rejected.
+      now += ACCOUNT_DATA_FRESHNESS_MS + 1;
+      assert.equal(owner.isRangeStale("30d"), true);
+
+      owner.beginHistoryImport();
+      await owner.refreshIfActivated(true);
+      assert.equal(calls.loadAll, 1, "visibility must not load during an import");
+      assert.deepEqual(
+        owner.getSnapshot().periods["30d"].snapshot.period,
+        periodBefore,
+        "the snapshot the import will merge into must survive",
+      );
+
+      // Manual refresh is an explicit user action and still runs.
+      await owner.load({ explicit: true, secureContext: true, range: "30d" });
+      assert.equal(calls.loadAll, 2, "an explicit refresh is not held off");
+
+      owner.endHistoryImport();
+      now += ACCOUNT_DATA_FRESHNESS_MS + 1;
+      await owner.refreshIfActivated(true);
+      assert.equal(calls.loadAll, 3, "visibility refresh resumes after the import");
+    } finally {
+      owner.dispose();
+    }
+  });
+
+  it("releases the import hold when an import ends or the owner is disposed", async () => {
+    let now = BASE_NOW;
+    const { coordinator, calls } = fakeCoordinator({}, () => now);
+    const owner = new AccountSessionOwner({
+      vault: fakeVault(),
+      coordinator,
+      now: () => now,
+      fetchCatalog: async () => fakeCatalog(now),
+    });
+    try {
+      owner.setActive(true);
+      await owner.load({ explicit: true, secureContext: true, range: "30d" });
+
+      // Nested holds must not leak a permanent block.
+      owner.beginHistoryImport();
+      owner.beginHistoryImport();
+      owner.endHistoryImport();
+      now += ACCOUNT_DATA_FRESHNESS_MS + 1;
+      await owner.refreshIfActivated(true);
+      assert.equal(calls.loadAll, 1, "one remaining hold still blocks visibility refresh");
+
+      owner.endHistoryImport();
+      owner.endHistoryImport(); // extra calls are harmless
+      await owner.refreshIfActivated(true);
+      assert.equal(calls.loadAll, 2, "the hold is released exactly once per begin");
+    } finally {
+      owner.dispose();
+    }
+  });
+
+  it("reports a dropped merge when the snapshot period moved during the import", async () => {
+    const { coordinator } = fakeCoordinator({});
+    const owner = new AccountSessionOwner({
+      vault: fakeVault(),
+      coordinator,
+      now: () => BASE_NOW,
+      fetchCatalog: async () => fakeCatalog(BASE_NOW),
+    });
+    try {
+      owner.setActive(true);
+      await owner.load({ explicit: true, secureContext: true, range: "30d" });
+      const snapshotPeriod = owner.getSnapshot().periods["30d"].snapshot.period;
+      const identity = owner.captureSessionIdentity();
+      assert.ok(identity, "an unlocked session has an identity");
+
+      // The period captured when the import started no longer matches.
+      const movedPeriod = { ...snapshotPeriod, endTime: new Date(BASE_NOW + 1000).toISOString() };
+      assert.equal(
+        owner.mergeImportedHistory(identity, movedPeriod, { period: movedPeriod }),
+        false,
+        "a moved period must be reported, not silently merged",
+      );
+      assert.equal(
+        owner.mergeImportedHistory(identity, snapshotPeriod, { period: snapshotPeriod }),
+        true,
+        "the matching period still merges",
+      );
     } finally {
       owner.dispose();
     }

@@ -7,7 +7,7 @@ assignees: ""
 ---
 
 **Which tool/page?**
-(dashboard / book / tape / charts / compare / zipper / calc / hub / flow / vault / backend)
+(dashboard / book / tape / charts / heatmap / compare / zipper / calc / fees / hub / sdk / account / wallet / backend)
 
 **What happened?**
 

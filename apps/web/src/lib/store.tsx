@@ -13,7 +13,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { PairInfo, SpotMarketsResult, AssetInfo } from "@poly/core";
+import { PERSISTED_WEB_STORAGE_KEYS } from "@polyap/core";
+import type { PairInfo, SpotMarketsResult, AssetInfo } from "@polyap/core";
 import {
   api,
   hasUsedWireSamples,
@@ -72,9 +73,10 @@ interface AppState {
 
 const Ctx = createContext<AppState | null>(null);
 
-const SYMBOL_KEY = "poly-tools:symbol";
-const THEME_KEY = "poly-tools:theme";
-const WATCH_KEY = "poly-tools:watch:v1";
+// Persisted identifiers (packages/core/src/persistedIdentifiers.ts). DO NOT RENAME.
+const SYMBOL_KEY = PERSISTED_WEB_STORAGE_KEYS.symbol;
+const THEME_KEY = PERSISTED_WEB_STORAGE_KEYS.theme;
+const WATCH_KEY = PERSISTED_WEB_STORAGE_KEYS.watch;
 
 function loadInitialTheme(): ThemeMode {
   try {

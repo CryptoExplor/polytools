@@ -1,18 +1,18 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { liveTestAllowed } from "./live-test-gate.mjs";
 
-// Local owner-only usage: POLYTOOLS_LIVE_TEST=1 node scripts/live-test.mjs
+// Local owner-only usage: POLYAP_LIVE_TEST=1 node scripts/live-test.mjs
+// (the legacy POLYTOOLS_LIVE_TEST=1 is still accepted as a fallback).
 // Requires a gitignored .env with PUBLIC_KEY, PRIVATE_KEY, and KEY_ID.
 // Never run this script in CI, a shared preview, or a deployed web process.
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
-const ci = /^(?:1|true)$/i.test(process.env.CI ?? "") ||
-  /^(?:1|true)$/i.test(process.env.GITHUB_ACTIONS ?? "");
 
 // This is an owner-controlled live runner, not an npm test or CI job.
 // The opt-in is checked before reading .env or creating any network client.
-if (ci || process.env.POLYTOOLS_LIVE_TEST !== "1") {
-  console.error("Refusing live verification. Run only locally with POLYTOOLS_LIVE_TEST=1; CI is not supported.");
+if (!liveTestAllowed(process.env)) {
+  console.error("Refusing live verification. Run only locally with POLYAP_LIVE_TEST=1; CI is not supported.");
   process.exit(1);
 }
 

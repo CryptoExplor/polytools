@@ -8,7 +8,9 @@ import { MemoryRouter } from "react-router-dom";
 import { createServer } from "vite";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
-const source = (path) => readFileSync(`${rootDir}/${path}`, "utf8");
+// Normalised so a Windows checkout (CRLF) asserts the same as a Unix one.
+const source = (path) =>
+  readFileSync(`${rootDir}/${path}`, "utf8").replace(/\r\n/g, "\n");
 const render = (element) => renderToStaticMarkup(element);
 
 let vite;
@@ -104,7 +106,7 @@ describe("P3-1 small copy, empty states, and clipboard outcomes", () => {
 
   it("labels Zipper config and deposit estimates without independent verification claims", () => {
     const zipper = source("apps/web/src/pages/Zipper.tsx");
-    assert.ok(zipper.includes("not independently verified by PolyTools"));
+    assert.ok(zipper.includes("not independently verified by Polyap"));
     assert.ok(!zipper.includes("Verified contract addresses"));
     assert.ok(zipper.includes("Illustrative Deposit Net"));
     assert.ok(zipper.includes("checks the deposit minimum only"));

@@ -6,8 +6,8 @@
  * source/SSR tests pin the page contract: no sub-tick formatting, no snippet
  * and no copy action while the draft is invalid, and a stated reason.
  *
- * Not covered here — and only provable in a browser (checks 20-23 in
- * docs/frontend-audit/REMAINING_WORK.md): that the notice is visible without
+ * Not covered here — and only provable in a browser (checks 24-28 in
+ * docs/TESTING.md (manual browser pass)): that the notice is visible without
  * scrolling at 390 px, that the disabled copy button reads correctly to a
  * screen reader, and that a copied snippet matches the pair constraints.
  */
@@ -233,7 +233,7 @@ describe("SDK page contract", () => {
   });
 
   it("keeps the mutation warning above the generator", () => {
-    const warning = page.indexOf("PolyTools does not run this code.");
+    const warning = page.indexOf("Polyap does not run this code.");
     const generator = page.indexOf("Interactive SDK Code Generator");
     assert.ok(warning >= 0 && warning < generator);
   });
@@ -259,7 +259,7 @@ describe("SDK page contract", () => {
         React.createElement(AppProvider, null, React.createElement(SdkGuide)),
       ),
     ).replace(/<!-- -->/g, "");
-    assert.ok(html.includes("PolyTools does not run this code."));
+    assert.ok(html.includes("Polyap does not run this code."));
     assert.ok(html.includes("npm install @polyester/sdk@0.31.0"), "the install step pins the verified package version");
     assert.ok(html.includes("separate written agreement"), "the registry license restriction is disclosed");
     assert.ok(!html.includes("No snippet until this order is valid."), "the default step is not an order step");

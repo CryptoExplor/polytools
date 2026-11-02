@@ -26,10 +26,17 @@ import {
   type VaultEntrySummary,
   type VaultStorage,
 } from "./vaultStorage";
+import {
+  PERSISTED_LEGACY_VAULT_STORAGE_KEY,
+  PERSISTED_VAULT_CHANNEL_NAME,
+  PERSISTED_VAULT_CONTROL_STORAGE_KEY,
+  PERSISTED_VAULT_KEYPAIR_CHALLENGE,
+} from "../persistedIdentifiers";
 
-export const LEGACY_STORAGE_KEY = "poly-tools:vault:v1";
-export const VAULT_CONTROL_STORAGE_KEY = "poly-tools:vault:v2:event";
-export const VAULT_CHANNEL_NAME = "polytools-account-vault-control";
+// Persisted identifiers: values live in ../persistedIdentifiers.ts. DO NOT RENAME.
+export const LEGACY_STORAGE_KEY = PERSISTED_LEGACY_VAULT_STORAGE_KEY;
+export const VAULT_CONTROL_STORAGE_KEY = PERSISTED_VAULT_CONTROL_STORAGE_KEY;
+export const VAULT_CHANNEL_NAME = PERSISTED_VAULT_CHANNEL_NAME;
 export const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 export const PBKDF2_ITERATIONS = 600_000;
 export const POLYESTER_API_KEYS_URL =
@@ -378,7 +385,7 @@ async function importVerifiedSigner(
       false,
       ["verify"],
     );
-    const challenge = new TextEncoder().encode("PolyTools vault key-pair verification v1");
+    const challenge = new TextEncoder().encode(PERSISTED_VAULT_KEYPAIR_CHALLENGE);
     const signature = await crypto.subtle.sign({ name: "Ed25519" }, privateKey, challenge);
     const valid = await crypto.subtle.verify(
       { name: "Ed25519" },

@@ -69,11 +69,24 @@ describe("P2-9 centralized production security policy", () => {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: https://assets.polyester.com",
       "media-src 'self' https://assets.polyester.com",
-      "connect-src 'self' https://api.coingecko.com https://api.testnet.polyester.com https://*.workers.dev",
+      "connect-src 'self' https://api.coingecko.com https://api.testnet.polyester.com wss://api.testnet.polyester.com https://*.workers.dev",
       "manifest-src 'self'",
     ]) {
       assert.ok(csp.includes(directive), directive);
     }
+    // A `wss:` source only appeared when the public order-book stream was
+    // adopted, and it is only safe because it names one host. Replace the old
+    // blanket "no wss at all" ban with the rule that actually matters: the set
+    // of websocket origins is exactly the exchange endpoint, never a wildcard
+    // and never a second host.
+    const wsSources = csp
+      .split(";")
+      .map((directive) => directive.trim())
+      .filter((directive) => directive.startsWith("connect-src"))
+      .flatMap((directive) => directive.split(/\s+/).filter((token) => token.startsWith("wss:")));
+    assert.deepEqual(wsSources, ["wss://api.testnet.polyester.com"]);
+    assert.ok(!csp.includes("wss://*"), "no wildcard websocket origin");
+    assert.ok(!csp.includes("ws:"), "no cleartext websocket origin");
     assert.ok(!csp.includes("unsafe-eval"));
     assert.ok(!csp.includes("script-src 'self' 'unsafe-inline'"));
     assert.equal(security.SECURITY_HEADERS["X-Content-Type-Options"], "nosniff");
@@ -89,7 +102,9 @@ describe("P2-9 centralized production security policy", () => {
 
     // WebCrypto does not require a Permissions-Policy exemption or network CSP source.
     assert.ok(!security.PERMISSIONS_POLICY.includes("publickey-credentials"));
-    assert.ok(!csp.includes("wss:"));
+    // The websocket-origin rule is asserted once, above, as an exact set rather
+    // than a blanket ban. A blanket ban here would have to be deleted the moment
+    // a socket was wanted, which is how a guard quietly stops guarding.
   });
 
   it("keeps Vercel and Cloudflare Pages static headers exactly aligned", () => {
@@ -104,6 +119,38 @@ describe("P2-9 centralized production security policy", () => {
     const pagesHeaders = parsePagesHeaders(source("apps/web/public/_headers"));
     assert.deepEqual(pagesHeaders, security.SECURITY_HEADERS);
     assert.ok(source("apps/web/public/_headers").startsWith("# Cloudflare Pages"));
+  });
+
+  it("permits the websocket origin the browser actually defaults to", () => {
+    // The policy names one host by hand; the client derives its URL from config.
+    // Nothing connects the two, so changing the default endpoint without
+    // touching the policy would produce a socket the browser silently blocks —
+    // the page would sit on "Polling" with every unit test green. The live
+    // deployment confirmed this is the enforced path: a foreign wss origin is
+    // rejected by connect-src and reported as a securitypolicyviolation.
+    const client = source("apps/web/src/lib/realtimeSession.ts");
+    const fallback = /wss:\/\/[^"`\s]+/.exec(client);
+    assert.ok(fallback, "realtimeSession must declare a literal default websocket URL");
+    const socketOrigin = new URL(fallback[0]).origin;
+
+    const connectSrc = security.PRODUCTION_CONTENT_SECURITY_POLICY.split(";")
+      .map((directive) => directive.trim())
+      .find((directive) => directive.startsWith("connect-src"));
+    const allowedWs = connectSrc
+      .split(/\s+/)
+      .filter((token) => token.startsWith("wss:") || token.startsWith("ws:"))
+      .map((token) => new URL(token.replace(/\/$/, "")).origin);
+
+    assert.ok(
+      allowedWs.includes(socketOrigin),
+      `${socketOrigin} is not permitted by connect-src (${allowedWs.join(", ")})`,
+    );
+    // A build-time override can point somewhere else; that requires a policy
+    // change, so it must be visible rather than silently broken.
+    assert.ok(
+      client.includes("VITE_POLYESTER_WS_URL"),
+      "an override must keep its documented name, since changing hosts means changing the CSP",
+    );
   });
 
   it("clones responses without losing status, body, cache, or custom headers", async () => {
@@ -212,7 +259,7 @@ describe("P2-9 production build and development transform", () => {
   });
 
   it("emits the limited meta fallback and static headers in a real production build", async () => {
-    const outDir = mkdtempSync(join(tmpdir(), "polytools-p2-9-build-"));
+    const outDir = mkdtempSync(join(tmpdir(), "polyap-p2-9-build-"));
     try {
       await build({
         root: webDir,

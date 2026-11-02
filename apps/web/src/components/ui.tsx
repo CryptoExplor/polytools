@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { fmtAgo, splitSymbol } from "@poly/core";
+import { fmtAgo, splitSymbol } from "@polyap/core";
 import { useApp } from "../lib/store";
 import { useNow } from "../lib/hooks";
 import { useDialogFocus } from "../lib/dialogFocus";

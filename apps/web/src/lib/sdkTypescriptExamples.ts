@@ -10,6 +10,29 @@ export interface TypeScriptSdkExampleOptions {
   keyIdInput: string;
 }
 
+/**
+ * Render a value as a TypeScript string literal.
+ *
+ * Every user-supplied value below is interpolated into generated code that the
+ * reader copies. Inserting raw text between quotes lets a `"` end the literal
+ * early and a `\` change how it parses, so a hostile or merely odd value
+ * (a symbol with a quote, a quantity typed as `12"`) would emit a snippet that
+ * fails to compile or silently carries a different value. `JSON.stringify`
+ * produces a valid literal for any input and leaves ordinary values unchanged.
+ */
+function tsString(value: string): string {
+  return JSON.stringify(value);
+}
+
+/**
+ * Escape a value for insertion *inside* an existing double-quoted literal or a
+ * single-line comment in the generated code, where wrapping it in a full
+ * literal of its own would break the surrounding snippet.
+ */
+function tsBody(value: string): string {
+  return JSON.stringify(value).slice(1, -1);
+}
+
 /** Single source for the TypeScript code shown in the SDK quickstart. */
 export function buildTypeScriptSdkExample({
   step,
@@ -42,10 +65,10 @@ const client = new PolyesterClient({
   environment: POLYESTER_TESTNET_ENVIRONMENT,
 });
 
-// Load the reference catalog to map between numeric symbolId and "${symbol}"
+// Load the reference catalog to map between numeric symbolId and "${tsBody(symbol)}"
 await client.catalog.ensureReady();
-const symbolId = client.catalog.market.requireSymbolIdByPairSymbol("${symbol}");
-console.log("Resolved ${symbol} -> symbolId:", symbolId);
+const symbolId = client.catalog.market.requireSymbolIdByPairSymbol(${tsString(symbol)});
+console.log("Resolved ${tsBody(symbol)} -> symbolId:", symbolId);
 
 // Fetch market overview (prices are returned as exact decimal strings)
 const { markets } = await client.marketOverview.list({ limit: 10 });
@@ -63,14 +86,14 @@ const client = new PolyesterClient({
 });
 
 await client.catalog.ensureReady();
-const symbolId = client.catalog.market.requireSymbolIdByPairSymbol("${symbol}");
+const symbolId = client.catalog.market.requireSymbolIdByPairSymbol(${tsString(symbol)});
 
-// Subscribe to live ${streamTf} candles for ${symbol}
+// Subscribe to live ${tsBody(streamTf)} candles for ${tsBody(symbol)}
 const unsubscribe = client.candles.subscribe({
   symbolId,
-  timeframe: "${streamTf}",
+  timeframe: ${tsString(streamTf)},
   onEvent: (candle) => {
-    console.log("[${symbol} ${streamTf}] close:", candle.close, "volume:", candle.volume);
+    console.log("[${tsBody(symbol)} ${tsBody(streamTf)}] close:", candle.close, "volume:", candle.volume);
   },
   onError: (ctx) => {
     console.error("Stream error:", ctx);
@@ -92,22 +115,25 @@ const client = new PolyesterClient({
   environment: POLYESTER_TESTNET_ENVIRONMENT,
   auth: {
     kind: "api-key-ed25519",
-    getKeyId: () => process.env.POLYESTER_API_KEY_ID ?? "${cleanKeyId}",
-    getSecretKey: () => evmHexToBytes(process.env.POLYESTER_API_SECRET_HEX ?? "0x..."),
+    getKeyId: () => process.env.POLYESTER_API_KEY_ID ?? ${tsString(cleanKeyId)},
+    // Must be 0x-prefixed: evmHexToBytes() throws "Invalid hex value" on a bare
+    // hex string (the vault stores raw hex without the prefix), so normalize it.
+    getSecretKey: () =>
+      evmHexToBytes("0x" + (process.env.POLYESTER_API_SECRET_HEX ?? "").replace(/^0x/, "")),
   },
 });
 
 await client.catalog.ensureReady();
-const symbolId = client.catalog.market.requireSymbolIdByPairSymbol("${symbol}");
+const symbolId = client.catalog.market.requireSymbolIdByPairSymbol(${tsString(symbol)});
 
-// Place a post-only limit ${orderSide} order on ${symbol} (mutates testnet state)
+// Place a post-only limit ${tsBody(orderSide)} order on ${tsBody(symbol)} (mutates testnet state)
 const created = await client.orders.create({
   symbolId,
-  side: "${orderSide}",
-  qty: "${cleanQty}",
+  side: "${tsBody(orderSide)}",
+  qty: ${tsString(cleanQty)},
   execution: {
     type: "limit_gtc",
-    price: "${cleanPx}",
+    price: ${tsString(cleanPx)},
     postOnly: true,
   },
   clientOrderId: crypto.randomUUID(),

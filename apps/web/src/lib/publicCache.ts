@@ -5,8 +5,14 @@
  * credentials, signing material, cursors, or user-assisted accounting inputs.
  */
 
-export const PUBLIC_CACHE_FORMAT = "polytools-public-cache@1" as const;
-export const PUBLIC_CACHE_DATABASE_NAME = "polytools-public-cache";
+import {
+  PERSISTED_PUBLIC_CACHE_DATABASE_NAME,
+  PERSISTED_PUBLIC_CACHE_FORMAT,
+} from "@polyap/core";
+
+// Persisted identifiers: values live in packages/core/src/persistedIdentifiers.ts. DO NOT RENAME.
+export const PUBLIC_CACHE_FORMAT = PERSISTED_PUBLIC_CACHE_FORMAT;
+export const PUBLIC_CACHE_DATABASE_NAME = PERSISTED_PUBLIC_CACHE_DATABASE_NAME;
 export const PUBLIC_CACHE_DATABASE_VERSION = 1;
 
 const ENTRY_STORE = "entries";
