@@ -14,9 +14,11 @@ All notable changes to this project are documented here. The format is based on
 - Package names: root `polyester-tools` → `polyap`; workspaces `@poly/core`, `@poly/backend`,
   `@poly/web` → `@polyap/core`, `@polyap/backend`, `@polyap/web` (imports, tsconfig paths, Vite
   alias and lockfile updated).
-- Documentation consolidated from 47 audit and session files into `docs/ARCHITECTURE.md`,
-  `POLYESTER_PROTOCOL.md`, `SECURITY.md`, `TESTING.md`, `DEPLOYMENT.md`, `ROADMAP.md`, and ADRs in
-  `docs/decisions/`. The originals moved to `docs/archive/` with history preserved.
+- Documentation consolidated from 56 files under `docs/` into seven maintained documents
+  (`docs/ARCHITECTURE.md`, `POLYESTER_PROTOCOL.md`, `SECURITY.md`, `TESTING.md`, `DEPLOYMENT.md`,
+  `ROADMAP.md`, `docs/README.md`) plus ADRs in `docs/decisions/`. All 41 surviving originals moved to
+  `docs/archive/`; every pre-consolidation filename still exists somewhere under `docs/`, so the
+  history is intact and the count is checkable.
 - `tests/polytools.test.mjs` renamed to `tests/polyap.test.mjs`.
 
 ### Added
