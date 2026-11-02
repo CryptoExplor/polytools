@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { account } from "@poly/core";
+import { account } from "@polyap/core";
 import { Card, EmptyState, MetricCell, MetricStrip, Pill } from "./ui";
 import { IconAlert, IconTrash } from "./icons";
 import { useNow } from "../lib/hooks";

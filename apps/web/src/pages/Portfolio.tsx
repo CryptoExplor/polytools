@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useOutletContext, useSearchParams } from "react-router-dom";
-import { NETWORKS, vault } from "@poly/core";
+import { NETWORKS, vault } from "@polyap/core";
 import {
   Card,
   ConfirmDialog,

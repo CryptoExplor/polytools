@@ -1,4 +1,4 @@
-import { fmtAgo } from "@poly/core";
+import { fmtAgo } from "@polyap/core";
 import { IconRefresh } from "./icons";
 
 /** Visible provenance for cached public metadata; never describes it as live. */

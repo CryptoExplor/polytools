@@ -12,7 +12,7 @@ export function dataFor(mcpUrl: string): PolyesterData {
   let d = pool.get(mcpUrl);
   if (!d) {
     d = new PolyesterData(
-      new McpClient({ url: mcpUrl, clientName: "poly-tools-backend" }),
+      new McpClient({ url: mcpUrl, clientName: "polyap-backend" }),
     );
     pool.set(mcpUrl, d);
   }

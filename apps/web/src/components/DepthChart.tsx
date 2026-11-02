@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { cumulativeDepth, fmtCompact, fmtNum } from "@poly/core";
+import { cumulativeDepth, fmtCompact, fmtNum } from "@polyap/core";
 import { EmptyState } from "./ui";
 import { formatCompactQuoteNotional } from "../lib/format";
 

@@ -272,7 +272,7 @@ async function callConnect(
     // setting — a request with none is a common trigger for bot management —
     // but it must never be the reason a login fails, so the fallback is a plain
     // request rather than an error.
-    res = await request({ ...baseHeaders, "User-Agent": "PolyTools/0.1 (+https://polytools)" });
+    res = await request({ ...baseHeaders, "User-Agent": "Polyap/0.1 (+https://github.com/CryptoExplor/polytools)" });
   } catch {
     try {
       res = await request(baseHeaders);
@@ -317,7 +317,7 @@ async function callConnect(
  *
  * WHY THE SERVER DOES THIS
  *   `smartAccountAddress` is a counterfactually derived Safe, not an EOA (see
- *   docs/wallet-first-audit/16 §2). A wallet with no Polyester account yet has no
+ *   docs/archive/wallet-first-audit/16 §2). A wallet with no Polyester account yet has no
  *   way to know its own Safe address, so a client that had to supply it would
  *   only ever work for users who already existed. Deriving here also means the
  *   client cannot send a mismatched pair.
@@ -351,7 +351,7 @@ export async function deriveSmartAccount(signerAddress: string): Promise<string 
        * only `.address`: `create-polyester-account-signer.js` uses `owner` for
        * the owners array and nothing else. Verified by calling the helper with
        * a bare `{ address }` and getting the same deterministic Safe address
-       * (docs/wallet-first-audit/16 §2.2). The cast documents that gap rather
+       * (docs/archive/wallet-first-audit/16 §2.2). The cast documents that gap rather
        * than fabricating a signing key to satisfy the type.
        */
       owner: { address: signerAddress } as unknown as Parameters<
@@ -520,8 +520,10 @@ async function handleLogin(
 }
 
 /**
- * Origins allowed to call these routes cross-origin, from `POLYTOOLS_APP_ORIGINS`
- * (comma-separated, exact origins). Empty by default, which means same-origin
+ * Origins allowed to call these routes cross-origin, from `POLYAP_APP_ORIGINS`
+ * (comma-separated, exact origins). The pre-rename `POLYTOOLS_APP_ORIGINS` is
+ * still read as a fallback when `POLYAP_APP_ORIGINS` is unset or blank, so
+ * existing deployments keep working until their variables are renamed. Empty by default, which means same-origin
  * only — the safest default and the right one when the API is served from the
  * same deployment (Cloudflare Pages Functions).
  *
@@ -537,7 +539,7 @@ async function handleLogin(
  *   to achieve, but without breaking the intended deployment.
  */
 export function resolveAppOrigins(env?: Record<string, string | undefined>): string[] {
-  const raw = (env?.POLYTOOLS_APP_ORIGINS ?? "").trim();
+  const raw = (env?.POLYAP_APP_ORIGINS ?? "").trim() || (env?.POLYTOOLS_APP_ORIGINS ?? "").trim();
   if (!raw) return [];
   const origins: string[] = [];
   for (const entry of raw.split(",")) {
@@ -595,7 +597,8 @@ export async function handleAuthRoute(
   const crossOrigin = isCrossOrigin(request, originHeader);
   const allowed = crossOrigin && resolveAppOrigins(opts.env).includes(originHeader as string);
 
-  // Cross-origin callers must be named in POLYTOOLS_APP_ORIGINS. An unlisted
+  // Cross-origin callers must be named in POLYAP_APP_ORIGINS (or the legacy
+  // POLYTOOLS_APP_ORIGINS). An unlisted
   // origin is refused here rather than reaching the exchange.
   if (crossOrigin && !allowed) {
     return authError(403, "origin_not_allowed");

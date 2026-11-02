@@ -16,7 +16,7 @@ import {
   wallIndexes,
   type BookDepth,
   type StreamBook,
-} from "@poly/core";
+} from "@polyap/core";
 import { api } from "../lib/api";
 import { bookForDisplay, streamOrderbook, type StreamStatus } from "../lib/orderbookStream";
 import { formatCompactQuoteNotional } from "../lib/format";

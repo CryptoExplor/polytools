@@ -6,7 +6,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { fmtNum } from "@poly/core";
+import { fmtNum } from "@polyap/core";
 import { api } from "../lib/api";
 import { zipperCompareForRequest } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";
@@ -550,7 +550,7 @@ export default function Zipper() {
         <Card
           flush
           title={`Zipper Protocol Smart Contracts (${cfgContracts.length})`}
-          subtitle="From the loaded public config; not independently verified by PolyTools"
+          subtitle="From the loaded public config; not independently verified by Polyap"
         >
           <div className="table-wrap" style={{ border: "none", borderRadius: 0 }}>
             <table className="data">

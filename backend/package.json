@@ -1,9 +1,9 @@
 {
-  "name": "@poly/backend",
+  "name": "@polyap/backend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Reusable serverless backend for Polyester tools: one pure Web-API handler with adapters for Cloudflare Pages/Workers, Vercel, and Node.",
+  "description": "Reusable serverless backend for Polyap, a Polyester dApp: one pure Web-API handler with adapters for Cloudflare Pages/Workers, Vercel, and Node.",
   "scripts": {
     "dev": "npx tsx adapters/node.ts",
     "deploy:worker": "wrangler deploy adapters/worker.ts",

@@ -4,6 +4,10 @@ import { transferBucketLabel, transferSideLabel } from "./activity";
 import type { Coverage, CoverageStatus, BasisStatus, FlowStatus } from "./coverage";
 import type { AccountDataSnapshot } from "./data";
 import type { NormalizedTransfer } from "./normalize";
+import {
+  PERSISTED_ACCOUNT_EXPORT_FILENAME_PREFIX,
+  PERSISTED_ACCOUNT_EXPORT_SCHEMA_VERSION,
+} from "../persistedIdentifiers";
 
 export const ACCOUNT_EXPORT_PRIVATE_WARNING =
   "This downloaded file contains private financial activity. Store and share it carefully.";
@@ -57,7 +61,8 @@ export interface AccountExportWindow {
 }
 
 export interface AccountExportManifest {
-  schemaVersion: "polytools.account-export.v2";
+  /** Persisted identifier (../persistedIdentifiers.ts). DO NOT RENAME. */
+  schemaVersion: typeof PERSISTED_ACCOUNT_EXPORT_SCHEMA_VERSION;
   dataset: AccountExportDataset;
   environment: "testnet";
   /** Only the coordinator's non-identifying account-scope category is retained. */
@@ -375,7 +380,7 @@ function manifestFor(
         : { snapshot: "Current response" };
   const exportedAtUtc = new Date(exportedAtMs).toISOString();
   return {
-    schemaVersion: "polytools.account-export.v2",
+    schemaVersion: PERSISTED_ACCOUNT_EXPORT_SCHEMA_VERSION,
     dataset,
     environment: "testnet",
     scopeLabel: snapshot.scopeLabel === "Selected subaccount" ? "Selected subaccount" : "Main account",
@@ -442,7 +447,7 @@ export function accountExportFilename(
     throw new AccountExportError("INVALID_ARGUMENT", "The export timestamp is invalid.");
   }
   const timestamp = new Date(exportedAtMs).toISOString().replace(/[:.]/g, "-");
-  return `polytools-testnet-${FILENAME_DATASET[dataset]}-${timestamp}.${format}`;
+  return `${PERSISTED_ACCOUNT_EXPORT_FILENAME_PREFIX}-${FILENAME_DATASET[dataset]}-${timestamp}.${format}`;
 }
 
 /**

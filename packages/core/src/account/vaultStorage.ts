@@ -1,6 +1,12 @@
-export const VAULT_FORMAT = "polytools-account-vault" as const;
+import {
+  PERSISTED_VAULT_DATABASE_NAME,
+  PERSISTED_VAULT_FORMAT,
+} from "../persistedIdentifiers";
+
+// Persisted identifiers: values live in ../persistedIdentifiers.ts. DO NOT RENAME.
+export const VAULT_FORMAT = PERSISTED_VAULT_FORMAT;
 export const VAULT_VERSION = 2 as const;
-export const VAULT_DATABASE_NAME = "polytools-account-vault";
+export const VAULT_DATABASE_NAME = PERSISTED_VAULT_DATABASE_NAME;
 export const VAULT_DATABASE_VERSION = 1;
 
 export interface EncryptedVaultEntry {

@@ -7,7 +7,7 @@
  * a channel name and a message handler.
  *
  * Deliberate boundaries:
- *  - **No encoding knowledge.** Frames are decoded by `@poly/core`; this file
+ *  - **No encoding knowledge.** Frames are decoded by `@polyap/core`; this file
  *    only decides when the socket is usable.
  *  - **No retry loop for content.** A malformed payload is the caller's problem;
  *    a dead socket is this module's.
@@ -22,7 +22,7 @@ import {
   connectCommand,
   parseFrame,
   subscribeCommand,
-} from "@poly/core";
+} from "@polyap/core";
 
 export type RealtimeStatus = "connecting" | "live" | "reconnecting" | "unavailable";
 

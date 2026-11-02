@@ -14,7 +14,7 @@ import {
   price,
   splitSymbol,
   type CandleTimeframe,
-} from "@poly/core";
+} from "@polyap/core";
 import { api } from "../lib/api";
 import { candlesForRequest, marketForSymbol } from "../lib/marketIdentity";
 import { usePollData } from "../lib/hooks";

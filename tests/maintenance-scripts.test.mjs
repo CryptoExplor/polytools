@@ -195,7 +195,7 @@ describe("P3-4/P3-6 measured build and repository assurance helpers", () => {
         "node_modules/a": { version: "1.0.0", license: "MIT" },
         "node_modules/b": { version: "2.0.0", license: "ISC", dev: true },
         "node_modules/c": { version: "3.0.0" },
-        "node_modules/@poly/web": { link: true, resolved: "apps/web" },
+        "node_modules/@polyap/web": { link: true, resolved: "apps/web" },
       },
     };
     const summary = summarizeDependencyLock(lock);
@@ -204,7 +204,7 @@ describe("P3-4/P3-6 measured build and repository assurance helpers", () => {
     assert.equal(summary.developmentPackages, 1);
     assert.deepEqual(summary.licenses, { MIT: 1, ISC: 1, UNKNOWN: 1 });
     assert.equal(summary.missingLicense.length, 1);
-    assert.deepEqual(summary.workspaceLinks, [{ path: "node_modules/@poly/web", resolved: "apps/web" }]);
+    assert.deepEqual(summary.workspaceLinks, [{ path: "node_modules/@polyap/web", resolved: "apps/web" }]);
     assert.deepEqual(
       checkWorkspaceLockVersions(lock, { version: "0.2.0" }, {}),
       [{ path: "", expected: "0.2.0", actual: "0.1.0" }],

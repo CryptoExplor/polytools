@@ -12,7 +12,7 @@ import {
   fmtTimeUTC,
   splitSymbol,
   trendSign,
-} from "@poly/core";
+} from "@polyap/core";
 import { api } from "../lib/api";
 import {
   buildCompareRows,

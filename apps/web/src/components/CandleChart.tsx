@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fmtCompact, fmtNum, fmtTimeUTC } from "@poly/core";
+import { fmtCompact, fmtNum, fmtTimeUTC } from "@polyap/core";
 import { EmptyState, Loading } from "./ui";
 
 export interface CandlePoint {

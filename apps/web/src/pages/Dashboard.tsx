@@ -19,7 +19,7 @@ import {
   spreadBps,
   trendSign,
   type MarketOverviewEntry,
-} from "@poly/core";
+} from "@polyap/core";
 import { api } from "../lib/api";
 import { useNow, usePollData } from "../lib/hooks";
 import { useApp } from "../lib/store";

@@ -6,7 +6,7 @@
  * be trusted: it distinguishes "declared by the SDK" from "seen working", and it
  * says `unspecified` rather than inventing an auth requirement.
  *
- * Read and write rows are separated on purpose — PolyTools itself is read-only,
+ * Read and write rows are separated on purpose — Polyap itself is read-only,
  * and the page should make that obvious rather than bury it.
  */
 
@@ -69,7 +69,7 @@ export function ApiSurfaceTable() {
     <div className="api-surface">
     <Card
       title="Verified API surface"
-      subtitle={`${counts.total} Connect RPC methods · ${counts.reads} read · ${counts.writes} write. Each row is declared by the installed SDK and was observed working in an independent client. PolyTools sends none of the write methods — the test suite asserts that.`}
+      subtitle={`${counts.total} Connect RPC methods · ${counts.reads} read · ${counts.writes} write. Each row is declared by the installed SDK and was observed working in an independent client. Polyap sends none of the write methods — the test suite asserts that.`}
     >
       <label className="field">
         <span>Filter by method, description or field</span>

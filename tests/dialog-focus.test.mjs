@@ -8,7 +8,7 @@
  * What they cannot prove: that Tab actually cycles, that Escape closes, that
  * focus returns to the opener, or that six tabs fit at 390 px. Those are
  * browser facts and are listed as manual checks in
- * docs/frontend-audit/REMAINING_WORK.md.
+ * docs/TESTING.md (manual browser pass).
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";

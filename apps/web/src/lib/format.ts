@@ -1,4 +1,4 @@
-import { fmtCompact } from "@poly/core";
+import { fmtCompact } from "@polyap/core";
 
 /**
  * Format a price × quantity value in the market's actual quote asset.

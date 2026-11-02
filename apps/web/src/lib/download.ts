@@ -1,4 +1,4 @@
-import { account } from "@poly/core";
+import { account } from "@polyap/core";
 
 /** Download only an explicitly confirmed, in-memory account export. */
 export function downloadAccountExport(result: account.AccountExportResult): void {

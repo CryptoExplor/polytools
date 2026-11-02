@@ -8,7 +8,7 @@
  * They cannot prove how a page looks at 390/768/1280 px, and they cannot prove
  * keyboard focus, inert behaviour, or backdrop dismissal in a real browser.
  * Those need the recorded manual pass described in
- * docs/frontend-audit/REMAINING_WORK.md.
+ * docs/TESTING.md (manual browser pass).
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -183,7 +183,7 @@ describe("Batch 1 shortened copy keeps its meaning", () => {
 
   it("keeps the SDK testnet-order warning visible before any snippet", () => {
     const sdk = source("apps/web/src/pages/SdkGuide.tsx");
-    const warning = sdk.indexOf("PolyTools does not run this code.");
+    const warning = sdk.indexOf("Polyap does not run this code.");
     const firstCard = sdk.indexOf("<Card");
     assert.ok(warning >= 0, "the mutation warning exists");
     assert.ok(warning < firstCard, "the warning is rendered above the snippet cards");

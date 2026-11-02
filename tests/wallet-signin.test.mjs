@@ -118,7 +118,7 @@ function proxyFetch() {
   return async (input, init) => {
     const url = typeof input === "string" ? input : input.url;
     return backend.api(
-      new Request(`https://polytools.example${url}`, {
+      new Request(`https://polyap.example${url}`, {
         method: init?.method ?? "GET",
         headers: init?.headers,
         body: init?.body,
@@ -315,7 +315,7 @@ describe("end to end — challenge, sign, token", () => {
     const wallet = fakeWallet();
     const failing = async (input) => {
       const url = typeof input === "string" ? input : input.url;
-      return backend.api(new Request(`https://polytools.example${url}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"signerAddress":"' + EOA + '"}' }), {
+      return backend.api(new Request(`https://polyap.example${url}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"signerAddress":"' + EOA + '"}' }), {
         env: { POLYESTER_API_ORIGIN: "http://127.0.0.1:1" },
       });
     };

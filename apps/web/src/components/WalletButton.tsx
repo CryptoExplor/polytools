@@ -311,7 +311,7 @@ export function WalletButton() {
           type="button"
           className="btn sm wallet-disconnect"
           onClick={disconnect}
-          title="Disconnect in PolyTools. This does not revoke the site in your wallet."
+          title="Disconnect in Polyap. This does not revoke the site in your wallet."
         >
           Disconnect
         </button>

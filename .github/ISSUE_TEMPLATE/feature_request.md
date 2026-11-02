@@ -1,6 +1,6 @@
 ---
 name: 💡 Tool / feature idea
-about: Suggest a new tool or an improvement for polyester users
+about: Suggest a new tool or an improvement for Polyap users
 title: "[Idea] "
 labels: enhancement
 assignees: ""
