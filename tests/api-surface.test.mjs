@@ -109,7 +109,7 @@ describe("API surface — read/write classification", () => {
   });
 });
 
-describe("API surface — PolyTools stays read-only", () => {
+describe("API surface — Polyap stays read-only", () => {
   /**
    * Two auth calls are now made for real, from the server, for wallet login:
    * the challenge request and the signature-for-token exchange. Neither places

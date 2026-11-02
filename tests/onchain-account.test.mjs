@@ -107,7 +107,7 @@ describe("normalising an explorer payload", () => {
 
 describe("the balances route", () => {
   const call = (query, fetchImpl) =>
-    backend.api(new Request(`https://polytools.example/api/account/balances${query}`), { fetch: fetchImpl });
+    backend.api(new Request(`https://polyap.example/api/account/balances${query}`), { fetch: fetchImpl });
 
   it("returns normalised balances and never contacts the browser's origin", async () => {
     let seen = null;

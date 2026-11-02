@@ -16,7 +16,7 @@
  *   - `auth` is stated ONLY where the official SDK reference states it. Where
  *     that is not documented, it is `"unspecified"` rather than guessed.
  *   - `mode` is derived from the method name and is about side effects, not
- *     permissions. PolyTools is a read-only tool: the companion test asserts
+ *     permissions. Polyap is a read-only tool: the companion test asserts
  *     that no `"write"` entry is referenced by application code.
  *
  * Nothing here executes a request. This module is data plus pure lookups.

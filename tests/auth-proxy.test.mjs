@@ -118,9 +118,9 @@ function env(overrides = {}) {
 }
 
 function authRequest(path, init = {}) {
-  return new Request(`https://polytools.example${path}`, {
+  return new Request(`https://polyap.example${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "User-Agent": "polytools-test/1.0" },
+    headers: { "Content-Type": "application/json", "User-Agent": "polyap-test/1.0" },
     ...init,
   });
 }
@@ -144,7 +144,7 @@ describe("POST /api/auth/challenge", () => {
     const body = await response.json();
     // Byte-for-byte: the wallet signs these exact characters.
     assert.equal(body.message, MESSAGE);
-    assert.equal(body.uri, "https://polytools.example");
+    assert.equal(body.uri, "https://polyap.example");
     assert.equal(body.expiresAt, new Date(1767225600 * 1000).toISOString());
 
     assert.equal(upstreamCalls.length, 1);
@@ -154,7 +154,7 @@ describe("POST /api/auth/challenge", () => {
     assert.equal(call.headers["content-type"], "application/json");
     assert.equal(call.body.smartAccountAddress, SMART_ACCOUNT);
     assert.equal(call.body.signerAddress, SIGNER);
-    assert.equal(call.body.uri, "https://polytools.example");
+    assert.equal(call.body.uri, "https://polyap.example");
     // WalletChallengePurpose.LOGIN — the enum *name*, as the official client
     // emits it, never UNSPECIFIED and never a bare number.
     assert.equal(call.body.purpose, "LOGIN");
@@ -176,8 +176,8 @@ describe("POST /api/auth/challenge", () => {
     );
 
     assert.equal(response.status, 200);
-    assert.equal(upstreamCalls[0].body.uri, "https://polytools.example");
-    assert.equal((await response.json()).uri, "https://polytools.example");
+    assert.equal(upstreamCalls[0].body.uri, "https://polyap.example");
+    assert.equal((await response.json()).uri, "https://polyap.example");
   });
 
   it("rejects malformed addresses without calling upstream", async () => {
@@ -419,7 +419,7 @@ describe("wire parity with the installed SDK", () => {
     await client.createWalletChallenge({
       smartAccountAddress: SMART_ACCOUNT,
       signerAddress: SIGNER,
-      uri: "https://polytools.example",
+      uri: "https://polyap.example",
       purpose: pb.WalletChallengePurpose.LOGIN,
     });
     // `upstreamCalls[].body` is already the parsed JSON the mock received.
@@ -597,7 +597,7 @@ describe("the challenge is bound to the page, not the host", () => {
       }),
       env(),
     );
-    assert.equal((await response.json()).uri, "https://polytools.example");
+    assert.equal((await response.json()).uri, "https://polyap.example");
   });
 });
 
@@ -660,12 +660,12 @@ describe("the on-chain address lookup needs no login", () => {
   // The point of this route: a user can find their own smart account without a
   // session, because deriving it is pure computation. If the exchange never grants
   // third-party login, this is the part of the account view that still works.
-  const get = (url) => new Request(url, { headers: { "User-Agent": "polytools-test/1.0" } });
+  const get = (url) => new Request(url, { headers: { "User-Agent": "polyap-test/1.0" } });
 
   it("derives the address for a valid EOA and touches no exchange", async () => {
     reset();
     const response = await backend.api(
-      get(`https://polytools.example/api/account/address?signer=${SIGNER}`),
+      get(`https://polyap.example/api/account/address?signer=${SIGNER}`),
       env(),
     );
     assert.equal(response.status, 200);
@@ -679,7 +679,7 @@ describe("the on-chain address lookup needs no login", () => {
     reset();
     for (const bad of ["", "0x123", "not-an-address", `0x${"zz".repeat(20)}`]) {
       const response = await backend.api(
-        get(`https://polytools.example/api/account/address?signer=${encodeURIComponent(bad)}`),
+        get(`https://polyap.example/api/account/address?signer=${encodeURIComponent(bad)}`),
         env(),
       );
       assert.equal(response.status, 400, bad);
@@ -691,7 +691,7 @@ describe("the on-chain address lookup needs no login", () => {
   it("is cacheable, because the answer is deterministic public data", async () => {
     reset();
     const response = await backend.api(
-      get(`https://polytools.example/api/account/address?signer=${SIGNER}`),
+      get(`https://polyap.example/api/account/address?signer=${SIGNER}`),
       env(),
     );
     assert.match(response.headers.get("Cache-Control") ?? "", /max-age=300/);
@@ -883,13 +883,13 @@ describe("surface discipline", () => {
   it("is same-origin only and POST-only", async () => {
     reset();
     const get = await backend.api(
-      new Request("https://polytools.example/api/auth/challenge"),
+      new Request("https://polyap.example/api/auth/challenge"),
       env(),
     );
     assert.equal(get.status, 405);
 
     const options = await backend.api(
-      new Request("https://polytools.example/api/auth/challenge", { method: "OPTIONS" }),
+      new Request("https://polyap.example/api/auth/challenge", { method: "OPTIONS" }),
       env(),
     );
     assert.equal(options.status, 204);
@@ -935,7 +935,7 @@ describe("surface discipline", () => {
   it("answers the preflight only for an allowed origin", async () => {
     const preflight = (origin, appOrigins) =>
       backend.api(
-        new Request("https://polytools.example/api/auth/challenge", {
+        new Request("https://polyap.example/api/auth/challenge", {
           method: "OPTIONS",
           headers: { Origin: origin, "Access-Control-Request-Method": "POST" },
         }),
@@ -979,7 +979,7 @@ describe("surface discipline", () => {
   it("leaves every existing route GET-only", async () => {
     reset();
     for (const path of ["/api/markets", "/api/orderbook", "/api/health", "/api/env"]) {
-      const response = await backend.api(new Request(`https://polytools.example${path}`, { method: "POST" }), env());
+      const response = await backend.api(new Request(`https://polyap.example${path}`, { method: "POST" }), env());
       assert.equal(response.status, 405, path);
     }
     assert.equal(upstreamCalls.length, 0);

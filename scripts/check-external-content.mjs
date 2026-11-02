@@ -130,7 +130,7 @@ export async function checkUrl(item, options = {}) {
   const timeoutMs = options.timeoutMs ?? 10_000;
   const baseInit = {
     redirect: "follow",
-    headers: { "User-Agent": "PolyTools-External-Freshness/1.0" },
+    headers: { "User-Agent": "Polyap-External-Freshness/1.0" },
   };
   try {
     let method = "HEAD";
@@ -232,7 +232,7 @@ export async function checkSdkRegistry(pkg, options = {}) {
     const response = await fetchWithTimeout(fetchImpl, pkg.registryUrl, {
       method: "GET",
       redirect: "follow",
-      headers: { Accept: "application/json", "User-Agent": "PolyTools-SDK-Freshness/1.0" },
+      headers: { Accept: "application/json", "User-Agent": "Polyap-SDK-Freshness/1.0" },
     }, timeoutMs);
     if (!response.ok) {
       await response.body?.cancel?.();

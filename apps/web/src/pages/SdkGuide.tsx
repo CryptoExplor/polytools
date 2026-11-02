@@ -15,7 +15,7 @@ import {
   splitSymbol,
   vault,
   type CandleTimeframe,
-} from "@poly/core";
+} from "@polyap/core";
 import { api } from "../lib/api";
 import { buildTypeScriptSdkExample } from "../lib/sdkTypescriptExamples";
 import { marketForSymbol } from "../lib/marketIdentity";
@@ -405,7 +405,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
       <div className="notice warn" role="note">
         <div>
-          <strong>PolyTools does not run this code.</strong> These snippets are examples you
+          <strong>Polyap does not run this code.</strong> These snippets are examples you
           copy into your own project. Running the order examples places real orders on
           testnet and may cancel them again — nothing here executes on your behalf.
         </div>
@@ -1112,7 +1112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     <Pill kind="info">JSON-RPC / SSE</Pill>
                   </td>
                   <td className="align-left muted">
-                    PolyTools analytics terminal &amp; AI/agent read-only inspection
+                    Polyap analytics terminal &amp; AI/agent read-only inspection
                   </td>
                 </tr>
                 <tr>

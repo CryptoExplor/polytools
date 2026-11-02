@@ -42,7 +42,7 @@ after(async () => {
   if (vite) await vite.close();
 });
 
-describe("1. @poly/core normalize & wire-sample decoding (PRICE_SCALE = 3)", () => {
+describe("1. @polyap/core normalize & wire-sample decoding (PRICE_SCALE = 3)", () => {
   it("decodes scaled integer prices by 10^3 and plain decimal quantities", () => {
     assert.equal(core.PRICE_SCALE, 3);
     assert.equal(core.price("82132470"), 82132.47);
@@ -95,7 +95,7 @@ describe("1. @poly/core normalize & wire-sample decoding (PRICE_SCALE = 3)", () 
   });
 });
 
-describe("2. @poly/core McpClient (DEF-01 isError throws & DEF-04 session-only retry)", () => {
+describe("2. @polyap/core McpClient (DEF-01 isError throws & DEF-04 session-only retry)", () => {
   it("throws McpError when result.isError === true and does NOT retry session", async () => {
     let toolCalls = 0;
     let initCalls = 0;

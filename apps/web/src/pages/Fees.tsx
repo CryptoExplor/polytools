@@ -24,10 +24,10 @@ import {
   formatUsdThreshold,
   percentValue,
   type VipTier,
-} from "@poly/core";
+} from "@polyap/core";
 import { api } from "../lib/api";
 import { usePollData } from "../lib/hooks";
-import { fmtNum } from "@poly/core";
+import { fmtNum } from "@polyap/core";
 import {
   Card,
   DataFreshness,

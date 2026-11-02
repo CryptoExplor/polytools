@@ -1,5 +1,5 @@
 /**
- * React data hooks — race-safe wrappers over @poly/core's startPoll.
+ * React data hooks — race-safe wrappers over @polyap/core's startPoll.
  *
  * Guarantees:
  *  - Older in-flight requests from a previous dependency cycle never overwrite newer state.
@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { startPoll, type PollHandle } from "@poly/core";
+import { startPoll, type PollHandle } from "@polyap/core";
 
 export interface Polled<T> {
   data: T | null;

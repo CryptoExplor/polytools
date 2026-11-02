@@ -4,8 +4,8 @@ import type {
   OrderbookResult,
   RecentTradesResult,
   SpotMarketsResult,
-} from "@poly/core";
-import { parseVipFeeSchedule } from "@poly/core";
+} from "@polyap/core";
+import { parseVipFeeSchedule } from "@polyap/core";
 
 type JsonObject = Record<string, unknown>;
 type RequestParams = Record<string, string | number | undefined>;

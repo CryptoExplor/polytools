@@ -45,7 +45,7 @@ export class McpClient {
   constructor(opts: McpClientOptions) {
     if (!opts.url) throw new McpError("MCP url is required");
     this.url = opts.url;
-    this.clientName = opts.clientName ?? "polyester-tools";
+    this.clientName = opts.clientName ?? "polyap";
     this.timeoutMs = opts.timeoutMs ?? 20_000;
     this.fetchImpl = opts.fetchImpl ?? ((input, init) => fetch(input, init));
   }

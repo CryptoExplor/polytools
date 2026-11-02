@@ -4,7 +4,7 @@
  * SCOPE BOUNDARY (deliberate, and enforced by tests):
  *  - This module talks to the injected provider and nothing else. No exchange
  *    request, no vault access, no account session, no `fetch`.
- *  - It does not import `accountSessionOwner`, `@poly/core` account modules, or
+ *  - It does not import `accountSessionOwner`, `@polyap/core` account modules, or
  *    the signer. Wallet state and account state are independent by design.
  *  - A connected address is NOT proof of exchange authentication and grants no
  *    account authorization. Stage 2b (SIWE) is a separate, unstarted stage with

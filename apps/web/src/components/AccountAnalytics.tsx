@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { account, fmtAgo } from "@poly/core";
+import { account, fmtAgo } from "@polyap/core";
 import { Card, ConfirmDialog, EmptyState, MetricCell, MetricStrip, Pill } from "./ui";
 import { IconActivity, IconAlert, IconClock, IconRefresh } from "./icons";
 import { downloadAccountExport } from "../lib/download";

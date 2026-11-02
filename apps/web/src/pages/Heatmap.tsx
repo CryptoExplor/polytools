@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { dec, fmtNum, price, splitSymbol } from "@poly/core";
+import { dec, fmtNum, price, splitSymbol } from "@polyap/core";
 import { api } from "../lib/api";
 import { formatCompactQuoteNotional } from "../lib/format";
 import { decodeHeatmapBuckets, HEATMAP_PRICE_BINS, inspectHeatmapCell } from "../lib/heatmap";

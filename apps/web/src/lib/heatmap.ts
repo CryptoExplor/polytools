@@ -1,4 +1,4 @@
-import { dec, price, type HeatmapBucket } from "@poly/core";
+import { dec, price, type HeatmapBucket } from "@polyap/core";
 
 export const HEATMAP_PRICE_BINS = 36;
 

@@ -6,7 +6,7 @@
  * polled tape and the UI says so.
  */
 
-import { mergeTrade, parseMarketTrade, type StreamTrade } from "@poly/core";
+import { mergeTrade, parseMarketTrade, type StreamTrade } from "@polyap/core";
 import { subscribeChannel, type RealtimeStatus } from "./realtimeSession";
 
 export type { RealtimeStatus };

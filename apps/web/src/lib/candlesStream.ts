@@ -11,7 +11,7 @@ import {
   parseCandlePoint,
   toChartCandle,
   type ChartCandle,
-} from "@poly/core";
+} from "@polyap/core";
 
 export type { ChartCandle };
 import { subscribeChannel, type RealtimeStatus } from "./realtimeSession";

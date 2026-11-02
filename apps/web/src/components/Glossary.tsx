@@ -24,7 +24,7 @@ export const GLOSSARY_TERMS: GlossaryEntry[] = [
     term: "Read-only",
     category: "Security & Keys",
     definition:
-      "Public market and bridge reads need no account key. After you explicitly unlock a registered key, PolyTools can also make approved read-only account requests; it never places or cancels orders or moves tokens. A separately configured standalone Worker can POST public-mover alerts to Telegram on a cron; it uses separate notification secrets, not account keys.",
+      "Public market and bridge reads need no account key. After you explicitly unlock a registered key, Polyap can also make approved read-only account requests; it never places or cancels orders or moves tokens. A separately configured standalone Worker can POST public-mover alerts to Telegram on a cron; it uses separate notification secrets, not account keys.",
   },
   {
     term: "Pair / Symbol",

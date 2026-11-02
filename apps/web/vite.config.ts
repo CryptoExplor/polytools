@@ -338,7 +338,7 @@ function devApiPlugin(): Plugin {
 export default defineConfig({
   plugins: [react(), devApiPlugin(), productionSecurityMetaPlugin()],
   resolve: {
-    alias: { "@poly/core": coreSrc },
+    alias: { "@polyap/core": coreSrc },
   },
   server: {
     host: true,

@@ -1,6 +1,6 @@
 {
-  "name": "PolyTools · Polyester Exchange Research & Analytics",
-  "short_name": "PolyTools",
+  "name": "Polyap · Polyester Exchange Research & Analytics",
+  "short_name": "Polyap",
   "description": "Read-only market data, cross-chain custody explorer, Ed25519 key vault, and official Brand Kit for the Polyester exchange.",
   "start_url": "/#/",
   "display": "standalone",

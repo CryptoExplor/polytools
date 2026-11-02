@@ -1,4 +1,4 @@
-import type { AssetInfo, PairInfo, SpotMarketsResult } from "@poly/core";
+import type { AssetInfo, PairInfo, SpotMarketsResult } from "@polyap/core";
 import { API_BASE } from "./api";
 import {
   IndexedDbPublicCacheStorage,

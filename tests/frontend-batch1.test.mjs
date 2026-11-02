@@ -183,7 +183,7 @@ describe("Batch 1 shortened copy keeps its meaning", () => {
 
   it("keeps the SDK testnet-order warning visible before any snippet", () => {
     const sdk = source("apps/web/src/pages/SdkGuide.tsx");
-    const warning = sdk.indexOf("PolyTools does not run this code.");
+    const warning = sdk.indexOf("Polyap does not run this code.");
     const firstCard = sdk.indexOf("<Card");
     assert.ok(warning >= 0, "the mutation warning exists");
     assert.ok(warning < firstCard, "the warning is rendered above the snippet cards");

@@ -1,4 +1,4 @@
-import { account } from "@poly/core";
+import { account } from "@polyap/core";
 
 type Coordinator = Pick<
   account.AccountDataCoordinator,

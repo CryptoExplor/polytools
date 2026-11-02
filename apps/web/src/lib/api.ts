@@ -19,7 +19,7 @@ import type {
   RecentTradesResult,
   SpotMarketsResult,
   VipFeeSchedule,
-} from "@poly/core";
+} from "@polyap/core";
 import {
   isWireSamplePayload,
   WIRE_SAMPLE_DATA_SOURCE,

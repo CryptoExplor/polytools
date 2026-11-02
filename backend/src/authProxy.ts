@@ -272,7 +272,7 @@ async function callConnect(
     // setting — a request with none is a common trigger for bot management —
     // but it must never be the reason a login fails, so the fallback is a plain
     // request rather than an error.
-    res = await request({ ...baseHeaders, "User-Agent": "PolyTools/0.1 (+https://polytools)" });
+    res = await request({ ...baseHeaders, "User-Agent": "Polyap/0.1 (+https://github.com/CryptoExplor/polytools)" });
   } catch {
     try {
       res = await request(baseHeaders);

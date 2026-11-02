@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { PairInfo, SpotMarketsResult, AssetInfo } from "@poly/core";
+import type { PairInfo, SpotMarketsResult, AssetInfo } from "@polyap/core";
 import {
   api,
   hasUsedWireSamples,

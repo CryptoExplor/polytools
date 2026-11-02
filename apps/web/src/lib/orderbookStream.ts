@@ -21,7 +21,7 @@ import {
   parseOrderbookDelta,
   type OrderbookDelta,
   type StreamBook,
-} from "@poly/core";
+} from "@polyap/core";
 import {
   subscribeChannel,
   type RealtimeStatus,

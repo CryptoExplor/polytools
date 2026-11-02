@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { NETWORKS, fmtTimeUTC } from "@poly/core";
+import { NETWORKS, fmtTimeUTC } from "@polyap/core";
 import { useNow } from "../lib/hooks";
 import {
   formatBooleanTelemetry,
@@ -347,7 +347,7 @@ export default function Hub() {
       {/* Interactive Checklist */}
       <Card
         title="Testnet Onboarding Checklist"
-        subtitle="Stored only in this browser. PolyTools cannot see whether you actually claimed."
+        subtitle="Stored only in this browser. Polyap cannot see whether you actually claimed."
       >
         <div>
           {CHECKLIST.map((c) => {

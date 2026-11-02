@@ -1,9 +1,9 @@
 {
-  "name": "polyester-tools",
+  "name": "polyap",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Modular tools for Polyester public data and private account research. Public data is testnet-first; private account reads are testnet-only.",
+  "description": "Polyap (Pol + yap): a read-only companion dApp for the Polyester exchange. Public data is testnet-first; private account reads are testnet-only.",
   "workspaces": [
     "packages/*",
     "apps/*",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { NETWORKS, fmtAgo } from "@poly/core";
+import { NETWORKS, fmtAgo } from "@polyap/core";
 import { useApp } from "../lib/store";
 import { useNow } from "../lib/hooks";
 import {
@@ -178,7 +178,7 @@ export function Layout() {
   const now = useNow(2000);
 
   const meta = ROUTE_META[loc.pathname] ?? {
-    title: "PolyTools",
+    title: "Polyap",
     group: "Workspace",
     showSymbolSelector: false,
   };
@@ -301,7 +301,7 @@ export function Layout() {
 
   useEffect(() => {
     const prefix = meta.showSymbolSelector ? `${symbol} · ` : "";
-    document.title = `${prefix}${meta.title} — PolyTools`;
+    document.title = `${prefix}${meta.title} — Polyap`;
   }, [meta.title, meta.showSymbolSelector, symbol]);
 
   useEffect(() => {
@@ -375,7 +375,7 @@ export function Layout() {
           >
             <img src="/favicon.svg" alt="Polyester symbol" className="logo-img" />
             <span className="brand-meta">
-              <span>PolyTools</span>
+              <span>Polyap</span>
               <span className="brand-sub">
                 {brandCopiedNote ? `✓ ${brandCopiedNote}` : "Read-only"}
               </span>
@@ -607,10 +607,10 @@ export function Layout() {
         <main id="main-workspace" className="content" tabIndex={-1}>
           {wireSampleUsed && <WireSampleNotice />}
           {!introDismissed && (
-            <section className="intent-bar" aria-label="About PolyTools">
+            <section className="intent-bar" aria-label="About Polyap">
               <div className="intent-bar-copy">
                 <span className="intent-eyebrow">Read-only toolkit · Testnet</span>
-                <strong>PolyTools is a read-only map of Polyester.</strong>{" "}
+                <strong>Polyap is a read-only map of Polyester.</strong>{" "}
                 <span>
                   Watch live prices, order book depth, trades, and bridge fees without
                   connecting a wallet. It never places orders or touches funds.
@@ -645,7 +645,7 @@ export function Layout() {
 
         <footer className="foot">
           <span>
-            PolyTools · Read-only companion for Polyester ·{" "}
+            Polyap · Read-only companion for Polyester ·{" "}
             {meta.group === "Account" ? (
               "Account amounts retain exact API decimal strings"
             ) : (

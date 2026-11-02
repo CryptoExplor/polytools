@@ -259,7 +259,7 @@ describe("P2-9 production build and development transform", () => {
   });
 
   it("emits the limited meta fallback and static headers in a real production build", async () => {
-    const outDir = mkdtempSync(join(tmpdir(), "polytools-p2-9-build-"));
+    const outDir = mkdtempSync(join(tmpdir(), "polyap-p2-9-build-"));
     try {
       await build({
         root: webDir,

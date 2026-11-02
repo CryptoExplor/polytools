@@ -14,7 +14,7 @@ import {
   price,
   splitSymbol,
   type RecentTrade,
-} from "@poly/core";
+} from "@polyap/core";
 import { api } from "../lib/api";
 import { formatCompactQuoteNotional } from "../lib/format";
 import { useNow, usePollData } from "../lib/hooks";
