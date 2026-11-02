@@ -317,7 +317,7 @@ async function callConnect(
  *
  * WHY THE SERVER DOES THIS
  *   `smartAccountAddress` is a counterfactually derived Safe, not an EOA (see
- *   docs/wallet-first-audit/16 §2). A wallet with no Polyester account yet has no
+ *   docs/archive/wallet-first-audit/16 §2). A wallet with no Polyester account yet has no
  *   way to know its own Safe address, so a client that had to supply it would
  *   only ever work for users who already existed. Deriving here also means the
  *   client cannot send a mismatched pair.
@@ -351,7 +351,7 @@ export async function deriveSmartAccount(signerAddress: string): Promise<string 
        * only `.address`: `create-polyester-account-signer.js` uses `owner` for
        * the owners array and nothing else. Verified by calling the helper with
        * a bare `{ address }` and getting the same deterministic Safe address
-       * (docs/wallet-first-audit/16 §2.2). The cast documents that gap rather
+       * (docs/archive/wallet-first-audit/16 §2.2). The cast documents that gap rather
        * than fabricating a signing key to satisfy the type.
        */
       owner: { address: signerAddress } as unknown as Parameters<

@@ -8,7 +8,7 @@
  *    the signer. Wallet state and account state are independent by design.
  *  - A connected address is NOT proof of exchange authentication and grants no
  *    account authorization. Stage 2b (SIWE) is a separate, unstarted stage with
- *    its own gates; see docs/wallet-first-audit/12 §4 and 05 Stage 2a.
+ *    its own gates; see docs/ARCHITECTURE.md (wallet layer) and docs/archive/wallet-first-audit/12 §4, 05 Stage 2a.
  *
  * The class is framework-free and takes its provider by injection so the whole
  * state machine is testable without a browser.

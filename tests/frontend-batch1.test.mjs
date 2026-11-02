@@ -8,7 +8,7 @@
  * They cannot prove how a page looks at 390/768/1280 px, and they cannot prove
  * keyboard focus, inert behaviour, or backdrop dismissal in a real browser.
  * Those need the recorded manual pass described in
- * docs/frontend-audit/REMAINING_WORK.md.
+ * docs/TESTING.md (manual browser pass).
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";

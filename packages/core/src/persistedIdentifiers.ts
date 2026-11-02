@@ -15,6 +15,8 @@
  *
  * Related wire identifiers that also stay as-is but live elsewhere:
  *  - the `x-polytools-data-source` response header (apps/web/src/lib/provenance.ts);
+ *  - the `/api/health` service name `poly-tools-backend` (backend/src/handler.ts),
+ *    which uptime checks may match;
  *  - the deploy origin `polytools-cc8.pages.dev` and Worker names `polytools` /
  *    `poly-tools-backend` (deployment config; pending a new Pages project).
  */
