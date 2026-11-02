@@ -121,6 +121,38 @@ describe("P2-9 centralized production security policy", () => {
     assert.ok(source("apps/web/public/_headers").startsWith("# Cloudflare Pages"));
   });
 
+  it("permits the websocket origin the browser actually defaults to", () => {
+    // The policy names one host by hand; the client derives its URL from config.
+    // Nothing connects the two, so changing the default endpoint without
+    // touching the policy would produce a socket the browser silently blocks —
+    // the page would sit on "Polling" with every unit test green. The live
+    // deployment confirmed this is the enforced path: a foreign wss origin is
+    // rejected by connect-src and reported as a securitypolicyviolation.
+    const client = source("apps/web/src/lib/realtimeSession.ts");
+    const fallback = /wss:\/\/[^"`\s]+/.exec(client);
+    assert.ok(fallback, "realtimeSession must declare a literal default websocket URL");
+    const socketOrigin = new URL(fallback[0]).origin;
+
+    const connectSrc = security.PRODUCTION_CONTENT_SECURITY_POLICY.split(";")
+      .map((directive) => directive.trim())
+      .find((directive) => directive.startsWith("connect-src"));
+    const allowedWs = connectSrc
+      .split(/\s+/)
+      .filter((token) => token.startsWith("wss:") || token.startsWith("ws:"))
+      .map((token) => new URL(token.replace(/\/$/, "")).origin);
+
+    assert.ok(
+      allowedWs.includes(socketOrigin),
+      `${socketOrigin} is not permitted by connect-src (${allowedWs.join(", ")})`,
+    );
+    // A build-time override can point somewhere else; that requires a policy
+    // change, so it must be visible rather than silently broken.
+    assert.ok(
+      client.includes("VITE_POLYESTER_WS_URL"),
+      "an override must keep its documented name, since changing hosts means changing the CSP",
+    );
+  });
+
   it("clones responses without losing status, body, cache, or custom headers", async () => {
     const original = new Response("synthetic asset", {
       status: 206,

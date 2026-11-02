@@ -574,10 +574,10 @@ the later pass on `bb80b30`; see the table below.
 | Stream pill reads `Live` | **covered** on `bb80b30` — asserted on the `data-stream-status` selector (§12d) |
 | Background tab → resume | **covered** on `bb80b30` |
 | Recovery after a transport drop | **covered** on `bb80b30`, once the harness stopped conflating a depth switch with a drop (§12e) |
-| Deployed CSP actually permits the socket | **not run** (dev server enforces no CSP; covered only by `tests/deployment-security.test.mjs`) |
+| Deployed CSP actually permits the socket | **verified on a branch preview deployment** (§12g) |
 
-The one row still unverified is the deployed build, and it cannot be settled locally: the
-dev and preview servers enforce no CSP, so only a real static-host deployment answers it.
+Every row in that table is now settled. The deployed row needed a real static host, because
+neither the dev server nor `vite preview` emits the policy.
 
 **Version note:** the first pass ran on `8590e4b`. The later pass ran on `bb80b30`, which
 adds the subprotocol request, the protobuf-framing guard and both new channels, so the
@@ -699,3 +699,42 @@ rejected. Nothing in the signer changes on this basis.
 What would justify the header: an authenticated call rejected with an error naming the
 nonce, or exchange documentation stating it is mandatory. Until then the signer stays as it
 is, and `X-API-NONCE` stays out of the request path.
+
+### 12g. The deployed header contract, verified — including its negative control
+
+Dev and preview servers send no CSP, so the socket had only ever been proven against a
+policy that was not being enforced. That gap is now closed on a Cloudflare Pages **branch
+preview** (`arena-609563ba-polytools.polytools-cc8.pages.dev`), which serves the policy from
+`apps/web/public/_headers`, measured in Chromium with a `securitypolicyviolation` listener.
+
+| Probe | Result |
+| --- | --- |
+| `wss://api.testnet.polyester.com/connection/websocket` | opened, `cspViolated: false` |
+| `wss://forbidden-echo.websocket.org` (negative control) | blocked, `violatedDirective: connect-src` |
+
+The negative control is the part that makes the first line mean anything. "No violation was
+reported" is equally consistent with a listener that never fires or a policy that is not
+applied; a foreign origin being actively rejected proves both were live. This is the same
+rule as the probe's PASS/FAIL auditability note in §10 — a green result that cannot be
+distinguished from a vacuous one is not evidence.
+
+**What this does and does not settle:**
+
+- The header contract is served as written, and browsers enforce it. `_headers` reaching the
+  host is not assumed here: the build emits `dist/_headers` byte-identical to
+  `apps/web/public/_headers`, and `tests/deployment-security.test.mjs` runs a real build and
+  asserts the emitted copy equals `SECURITY_HEADERS`.
+- **The root origin (`polytools-cc8.pages.dev`) is an older deployment and its policy has no
+  `wss:` source at all.** So the public site as it stands cannot stream: the socket would be
+  blocked there. That is a deployment-state fact, not a defect in this branch — merging or
+  deploying remains unauthorised, and nothing here changes that.
+- Only the *preview* origin was measured. A production deploy will serve the same file, but
+  that has not been observed and is not claimed.
+
+One residual drift risk the deployed run made concrete: the policy names the socket host by
+hand, while `defaultRealtimeUrl()` derives it from config. Change either alone and the
+browser blocks the socket — our code would retry, exhaust its budget, drop to `unavailable`
+and show "Polling" forever with every existing test green. A test now pins the two together:
+the default URL's origin must appear in `connect-src`, and a policy naming a different host
+fails with the reason. Pointing the client at another host and leaving the policy alone
+fails it in the other direction.
