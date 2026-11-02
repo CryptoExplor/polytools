@@ -976,6 +976,42 @@ describe("surface discipline", () => {
     assert.deepEqual(resolveAppOrigins({ POLYTOOLS_APP_ORIGINS: "not-a-url,https://a.example" }), ["https://a.example"]);
   });
 
+  it("reads POLYAP_APP_ORIGINS first and falls back to the legacy POLYTOOLS_APP_ORIGINS", async () => {
+    const { resolveAppOrigins } = await vite.ssrLoadModule("/backend/src/authProxy.ts");
+    assert.deepEqual(resolveAppOrigins({ POLYAP_APP_ORIGINS: "https://new.example" }), ["https://new.example"]);
+    assert.deepEqual(
+      resolveAppOrigins({ POLYAP_APP_ORIGINS: "https://new.example", POLYTOOLS_APP_ORIGINS: "https://old.example" }),
+      ["https://new.example"],
+      "the new name wins when both are set",
+    );
+    assert.deepEqual(
+      resolveAppOrigins({ POLYTOOLS_APP_ORIGINS: "https://old.example" }),
+      ["https://old.example"],
+      "the legacy name still works on its own",
+    );
+    assert.deepEqual(
+      resolveAppOrigins({ POLYAP_APP_ORIGINS: "  ", POLYTOOLS_APP_ORIGINS: "https://old.example" }),
+      ["https://old.example"],
+      "a blank new name counts as unset",
+    );
+    assert.deepEqual(resolveAppOrigins({ POLYAP_APP_ORIGINS: "", POLYTOOLS_APP_ORIGINS: "" }), []);
+  });
+
+  it("admits a cross-origin caller named only in POLYAP_APP_ORIGINS", async () => {
+    reset();
+    scenario = { reply: { status: 200, body: { message: MESSAGE, expiresAt: 1 } } };
+    const response = await backend.api(
+      authRequest("/api/auth/challenge", {
+        body: JSON.stringify({ signerAddress: SIGNER }),
+        headers: { "Content-Type": "application/json", Origin: "https://app.example" },
+      }),
+      env({ POLYAP_APP_ORIGINS: "https://app.example" }),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://app.example");
+    assert.equal((await response.json()).uri, "https://app.example");
+  });
+
   it("leaves every existing route GET-only", async () => {
     reset();
     for (const path of ["/api/markets", "/api/orderbook", "/api/health", "/api/env"]) {

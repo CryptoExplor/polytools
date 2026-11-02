@@ -520,8 +520,10 @@ async function handleLogin(
 }
 
 /**
- * Origins allowed to call these routes cross-origin, from `POLYTOOLS_APP_ORIGINS`
- * (comma-separated, exact origins). Empty by default, which means same-origin
+ * Origins allowed to call these routes cross-origin, from `POLYAP_APP_ORIGINS`
+ * (comma-separated, exact origins). The pre-rename `POLYTOOLS_APP_ORIGINS` is
+ * still read as a fallback when `POLYAP_APP_ORIGINS` is unset or blank, so
+ * existing deployments keep working until their variables are renamed. Empty by default, which means same-origin
  * only — the safest default and the right one when the API is served from the
  * same deployment (Cloudflare Pages Functions).
  *
@@ -537,7 +539,7 @@ async function handleLogin(
  *   to achieve, but without breaking the intended deployment.
  */
 export function resolveAppOrigins(env?: Record<string, string | undefined>): string[] {
-  const raw = (env?.POLYTOOLS_APP_ORIGINS ?? "").trim();
+  const raw = (env?.POLYAP_APP_ORIGINS ?? "").trim() || (env?.POLYTOOLS_APP_ORIGINS ?? "").trim();
   if (!raw) return [];
   const origins: string[] = [];
   for (const entry of raw.split(",")) {
@@ -595,7 +597,8 @@ export async function handleAuthRoute(
   const crossOrigin = isCrossOrigin(request, originHeader);
   const allowed = crossOrigin && resolveAppOrigins(opts.env).includes(originHeader as string);
 
-  // Cross-origin callers must be named in POLYTOOLS_APP_ORIGINS. An unlisted
+  // Cross-origin callers must be named in POLYAP_APP_ORIGINS (or the legacy
+  // POLYTOOLS_APP_ORIGINS). An unlisted
   // origin is refused here rather than reaching the exchange.
   if (crossOrigin && !allowed) {
     return authError(403, "origin_not_allowed");

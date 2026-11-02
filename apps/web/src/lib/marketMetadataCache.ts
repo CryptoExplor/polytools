@@ -1,4 +1,9 @@
-import type { AssetInfo, PairInfo, SpotMarketsResult } from "@polyap/core";
+import {
+  PERSISTED_PUBLIC_CACHE_RELATIVE_BASE,
+  type AssetInfo,
+  type PairInfo,
+  type SpotMarketsResult,
+} from "@polyap/core";
 import { API_BASE } from "./api";
 import {
   IndexedDbPublicCacheStorage,
@@ -24,7 +29,7 @@ export type PublicSpotMarkets = SpotMarketsResult & {
 function apiScope(): string {
   if (!API_BASE) return "same-origin";
   try {
-    const url = new URL(API_BASE, "https://relative.polytools.invalid");
+    const url = new URL(API_BASE, PERSISTED_PUBLIC_CACHE_RELATIVE_BASE);
     return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
   } catch {
     return "invalid-api-base";

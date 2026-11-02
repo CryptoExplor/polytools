@@ -12,3 +12,4 @@ export * from "./orderbookStream";
 export * from "./centrifuge";
 export * from "./tradesStream";
 export * from "./candlesStream";
+export * from "./persistedIdentifiers";

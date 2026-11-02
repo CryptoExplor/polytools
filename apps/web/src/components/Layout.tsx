@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { NETWORKS, fmtAgo } from "@polyap/core";
+import { NETWORKS, PERSISTED_WEB_STORAGE_KEYS, fmtAgo } from "@polyap/core";
 import { useApp } from "../lib/store";
 import { useNow } from "../lib/hooks";
 import {
@@ -51,7 +51,8 @@ interface NavItem {
   icon: ReactNode;
 }
 
-const INTRO_STORAGE_KEY = "poly-tools:intro:v1";
+// Persisted identifier (packages/core/src/persistedIdentifiers.ts). DO NOT RENAME.
+const INTRO_STORAGE_KEY = PERSISTED_WEB_STORAGE_KEYS.intro;
 
 const NAV_GROUPS: Array<{ group: string; items: NavItem[] }> = [
   {

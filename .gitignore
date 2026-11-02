@@ -9,3 +9,4 @@ apps/web/dist/
 .env.*
 *.log
 .DS_Store
+!.env.example

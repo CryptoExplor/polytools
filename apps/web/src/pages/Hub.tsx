@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { NETWORKS, fmtTimeUTC } from "@polyap/core";
+import { NETWORKS, PERSISTED_WEB_STORAGE_KEYS, fmtTimeUTC } from "@polyap/core";
 import { useNow } from "../lib/hooks";
 import {
   formatBooleanTelemetry,
@@ -150,7 +150,8 @@ const CHECKLIST: CheckItem[] = [
   },
 ];
 
-const STORE_KEY = "poly-tools:hub-checklist";
+// Persisted identifier (packages/core/src/persistedIdentifiers.ts). DO NOT RENAME.
+const STORE_KEY = PERSISTED_WEB_STORAGE_KEYS.hubChecklist;
 
 /** Compute timestamp (ms) of the next 00:00:00 UTC midnight relative to `nowMs`. */
 function nextReset(nowMs = Date.now()): number {

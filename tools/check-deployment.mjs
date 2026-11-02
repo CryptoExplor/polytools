@@ -110,7 +110,7 @@ if (challenge.transport) {
   say("VERDICT: this deployment HAS wallet sign-in.");
   say("  If sign-in still fails, the remaining cause is the exchange, not the build.");
   say("  Read the failed request's response body:");
-  say('    {"error":"origin_not_allowed"}   -> our allowlist (set POLYTOOLS_APP_ORIGINS)');
+  say('    {"error":"origin_not_allowed"}   -> our allowlist (set POLYAP_APP_ORIGINS; legacy POLYTOOLS_APP_ORIGINS also works)');
   say('    {"error":"permission_denied"}    -> Polyester refused this origin (C-1)');
   verdict = "has-signin";
 } else if (challenge.status === 404 && /Unknown route/i.test(code)) {
@@ -203,7 +203,7 @@ if (signer) {
     say("");
     say("VERDICT: our allowlist refused before the exchange was contacted.");
     say("  This build believes the caller is cross-origin. Set");
-    say("  POLYTOOLS_APP_ORIGINS to this deployment's exact origin.");
+    say("  POLYAP_APP_ORIGINS (or legacy POLYTOOLS_APP_ORIGINS) to this deployment's exact origin.");
   } else if (res.status === 404 && /Unknown route/i.test(body?.error ?? "")) {
     say("");
     say("VERDICT: this deployment predates wallet sign-in (no auth route).");

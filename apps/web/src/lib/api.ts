@@ -23,7 +23,7 @@ import type {
 import {
   isWireSamplePayload,
   WIRE_SAMPLE_DATA_SOURCE,
-  WIRE_SAMPLE_HEADER,
+  wireSampleDataSource,
 } from "./provenance";
 import { decodePublicApiResponse, PublicApiSchemaError } from "./publicDtos";
 
@@ -106,7 +106,7 @@ async function getResponse<T>(
     headers: { Accept: "application/json" },
     ...(cache ? { cache } : {}),
   });
-  if (res.headers.get(WIRE_SAMPLE_HEADER) === WIRE_SAMPLE_DATA_SOURCE) {
+  if (wireSampleDataSource(res.headers) === WIRE_SAMPLE_DATA_SOURCE) {
     noteWireSampleUsage();
   }
   if (!res.ok) {
