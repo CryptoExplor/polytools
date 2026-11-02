@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
+import { makeSocketClass } from "./support/realtimeHarness.mjs";
 
 let core;
 let vite;
@@ -214,45 +215,7 @@ describe("channel names are a contract", () => {
 });
 
 describe("the live stream itself", () => {
-  /** A socket that records what the client asked for and lets us deliver. */
-  function makeSocketClass() {
-    const sockets = [];
-    class FakeSocket {
-      constructor(url, protocols) {
-        this.url = url;
-        this.protocols = protocols;
-        this.protocol = "centrifuge-json";
-        this.sent = [];
-        this.closed = false;
-        this.readyState = 0;
-        sockets.push(this);
-      }
-      send(data) {
-        this.sent.push(JSON.parse(data));
-      }
-      close() {
-        this.closed = true;
-        this.readyState = 3;
-      }
-      addEventListener(type, fn) {
-        this["on" + type] = fn;
-      }
-      removeEventListener() {}
-      emit(type, event) {
-        this["on" + type]?.(event);
-      }
-      deliver(payload) {
-        this.emit("message", { data: JSON.stringify(payload) });
-      }
-    }
-    return { FakeSocket, sockets };
-  }
-
-  function open(socket) {
-    socket.readyState = 1;
-    socket.emit("open", {});
-    socket.deliver({ id: 1, connect: { client: "x", version: "6.6.0", ping: 25 } });
-  }
+  /** The shared fake, so this suite cannot drift from the others. */
 
   it("subscribes to the trade channel and delivers parsed trades", () => {
     const { FakeSocket, sockets } = makeSocketClass();
@@ -265,8 +228,8 @@ describe("the live stream itself", () => {
       onStatus: () => {},
     });
     const socket = sockets[0];
-    open(socket);
-    const sub = socket.sent.find((m) => m.subscribe);
+    socket.handshake();
+    const sub = socket.sentFrames.find((m) => m.subscribe);
     assert.equal(sub.subscribe.channel, "public:spot:market:trades:3");
 
     socket.deliver({ push: { channel: sub.subscribe.channel, pub: { data: trade() } } });
@@ -285,7 +248,7 @@ describe("the live stream itself", () => {
       onStatus: () => {},
     });
     const socket = sockets[0];
-    open(socket);
+    socket.handshake();
     const channel = `public:spot:market:trades:3`;
     socket.deliver({ push: { channel, pub: { data: { matchId: "x" } } } });
     socket.deliver({ push: { channel, pub: { data: trade({ matchId: "9" }) } } });
@@ -306,8 +269,8 @@ describe("the live stream itself", () => {
       onStatus: () => {},
     });
     const socket = sockets[0];
-    open(socket);
-    const sub = socket.sent.find((m) => m.subscribe);
+    socket.handshake();
+    const sub = socket.sentFrames.find((m) => m.subscribe);
     assert.equal(sub.subscribe.channel, "public:spot:market:candles:5m:3");
 
     socket.deliver({ push: { channel: sub.subscribe.channel, pub: { data: candle() } } });

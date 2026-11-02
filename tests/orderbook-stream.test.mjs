@@ -9,6 +9,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import { makeSocketClass, makeVisibility as makeVisibilityTarget, settle } from "./support/realtimeHarness.mjs";
 
 let core;
 let vite;
@@ -316,43 +317,11 @@ describe("streamOrderbook transport", () => {
   const loadTransport = async () =>
     vite.ssrLoadModule("/apps/web/src/lib/orderbookStream.ts");
 
-  /** A minimal fake WebSocket that records sends and can be driven by hand. */
-  class FakeSocket {
-    static instances = [];
-    static OPEN = 1;
-    constructor(url, protocols) {
-      this.url = url;
-      this.protocols = protocols;
-      // What the server negotiated; a real browser sets this from the response.
-      this.protocol = "centrifuge-json";
-      this.readyState = 0;
-      this.sent = [];
-      FakeSocket.instances.push(this);
-    }
-    send(payload) {
-      this.sent.push(payload);
-    }
-    close() {
-      this.readyState = 3;
-      this.onclose?.({});
-    }
-    // --- test drivers ---
-    open() {
-      this.readyState = 1;
-      this.onopen?.({});
-    }
-    deliver(frame) {
-      this.onmessage?.({ data: JSON.stringify(frame) });
-    }
-    drop() {
-      this.readyState = 3;
-      this.onclose?.({});
-    }
-  }
+  const { FakeSocket } = makeSocketClass();
 
   const makeHarness = async (overrides = {}) => {
     const transport = await loadTransport();
-    FakeSocket.instances = [];
+    FakeSocket.reset();
     const books = [];
     const statuses = [];
     let snapshotCalls = 0;
@@ -598,29 +567,12 @@ describe("streamOrderbook transport", () => {
     h.stop();
   });
 
-  /** A fake EventTarget that reports a controllable visibilityState. */
-  const makeVisibility = () => {
-    const listeners = new Set();
-    const target = {
-      visibilityState: "visible",
-      addEventListener: (_type, fn) => listeners.add(fn),
-      removeEventListener: (_type, fn) => listeners.delete(fn),
-    };
-    return {
-      target,
-      setState(state) {
-        target.visibilityState = state;
-        for (const fn of [...listeners]) fn({ type: "visibilitychange" });
-      },
-      get listenerCount() {
-        return listeners.size;
-      },
-    };
-  };
+  const makeVisibility = () => makeVisibilityTarget();
 
-  it("gives up after the failure budget, then resumes when the tab is visible again", async () => {
-    // A hidden tab is the usual reason a socket dies, so a permanent give-up
-    // would mean the page stays dead until reload.
+  it("falls back to unavailable past the budget, and a visible tab retries at once", async () => {
+    // Past the budget the session keeps a slow retry alive (see the soak suite);
+    // what this pins is the *status* contract and the visibility nudge, which
+    // must not wait for the next capped attempt.
     const visibility = makeVisibility();
     const h = await makeHarness({
       maxFailures: 1,
@@ -634,16 +586,16 @@ describe("streamOrderbook transport", () => {
     const afterFirst = FakeSocket.instances.length;
     assert.ok(afterFirst > 1, "retried once inside the budget");
 
-    // Second failure exceeds the budget: stop trying.
+    // Second failure exceeds the budget: report unavailable rather than live.
     h.socket().drop();
     await new Promise((resolve) => setTimeout(resolve, 20));
     const afterGiveUp = FakeSocket.instances.length;
     assert.equal(h.statuses.at(-1).status, "unavailable");
 
-    // Still hidden: no reconnect.
+    // Still hidden: the pending slow attempt is far away, so nothing happens.
     visibility.setState("hidden");
     await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(FakeSocket.instances.length, afterGiveUp, "does not retry while hidden");
+    assert.equal(FakeSocket.instances.length, afterGiveUp, "no attempt inside this window");
 
     // Visible again: retries immediately.
     visibility.setState("visible");

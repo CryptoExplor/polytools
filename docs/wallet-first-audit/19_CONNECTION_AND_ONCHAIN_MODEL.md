@@ -738,3 +738,94 @@ and show "Polling" forever with every existing test green. A test now pins the t
 the default URL's origin must appear in `connect-src`, and a policy naming a different host
 fails with the reason. Pointing the client at another host and leaving the policy alone
 fails it in the other direction.
+
+## 13. Long-run hardening of the socket lifecycle
+
+Everything above was verified in bursts of about twenty seconds. This section is what
+changed after asking what happens over minutes, and it produced three defects — all
+invisible to both the wire probe and the browser pass, because both only ever observed a
+healthy stream.
+
+### 13a. An outage longer than ~31 s used to be permanent
+
+With the shipped defaults the retry delays are 1, 2, 4, 8 and 16 s, so the fifth
+consecutive failure arrives about **31 s** into an outage — and the code then *stopped*,
+calling `stop()` after reporting `unavailable`. The only path back was `visibilitychange`,
+so a 40-second wifi drop left the page polling forever until the user happened to blur and
+refocus the window. Nothing said so; the pill read "Polling", which is what a healthy
+fallback looks like too.
+
+Now the budget no longer stops anything. Past `maxFailures` the session enters a slow lane
+at the cap (30 s, jittered) and keeps trying, reporting `unavailable` throughout, so the
+ladder shows polled data rather than a frozen frame. Recovery is automatic.
+
+One subtlety worth recording, because getting it wrong would have undone the frozen-data
+fix: while suspended, an attempt must *not* re-announce `reconnecting`. That status tells
+the UI to keep showing the last streamed value, so re-emitting it every 30 s would flash a
+dead book as live. The status stays `unavailable` until a subscribe reply arrives.
+
+### 13b. A flapping server was retried about once a second, forever
+
+`failureCount` was zeroed on every `subscribe` reply. A server that accepts a connection,
+subscribes, and drops it therefore never accumulated failures, and `maxFailures` could not
+trip. Measured through the real module against a fake that behaves that way:
+
+```
+before: 27 connections in a 300 ms window   (5 ms base delay)
+after:   9 connections in the same window
+```
+
+At the shipped 1 s base that is one reconnect per second indefinitely, from every open tab,
+against a backend that is already unhealthy.
+
+The fix is a stability window: a connection earns the budget back only after it has stayed
+subscribed for `stableAfterMs` (30 s). A single blip after a healthy period still retries
+immediately — that is the common case and it must stay cheap — while a connect/drop loop
+escalates and eventually settles into the slow lane.
+
+### 13c. Jitter did not scale with the delay, which is the case that matters
+
+The old code added `0-249 ms` on top of *any* delay. At the 16 s step that is a 1.5% spread,
+and at the 30 s cap every client retries inside the same quarter-second — precisely when a
+just-restarted server can least absorb them. The docstring already claimed proportional
+jitter; the code did not.
+
+Jitter is now ±25% of the delay: 22.5-37.5 s at the cap, and 0.75-1.25 s at the base. Pinned
+by tests at both ends, because "some jitter exists" would pass a test that the old code also
+passes.
+
+### 13d. One socket per session, stated rather than discovered
+
+There is no cross-tab coalescing. Three tabs open three sockets, measured in the suite, and
+each one reconnects on its own schedule. That is a deliberate trade — a leader-election
+scheme adds a failover path that can strand a visible tab behind a throttled background one
+— but it is now a *stated* cost rather than something to find in production. If the exchange
+ever documents a per-key websocket limit, this is the line to revisit.
+
+### 13e. What this pass did not establish
+
+| Claim | Status |
+| --- | --- |
+| Outage longer than the budget heals itself | **verified** in the suite, compressed timings |
+| Flapping escalates | **verified**, measured before and after |
+| No second socket from a stray timer or visibility | **verified**; the `connect()` guard was added for it |
+| Behaviour over a genuinely long session (hours) | **not run** — needs a real browser kept open |
+| Background-tab timer throttling | **not modelled**; a hidden tab's timers are clamped to about once a minute by browsers, which stretches the slow lane further than the maths here suggests |
+| Memory growth under continuous deltas | **not measured** |
+
+The suite runs compressed timings (5 ms standing in for 1 s) because the arithmetic is what
+is being tested. That is the right trade for a test suite and the wrong one for a soak, so
+the hour-long run still needs a real browser on a real connection.
+
+### 13f. One shared test fake
+
+There were two hand-written `FakeSocket` classes and they had already diverged: one recorded
+raw frames and had `drop()`, the other parsed JSON at send time and had `emit()`. A suite
+that passes depending on which file it lives in is not evidence. Both now come from
+`tests/support/realtimeHarness.mjs`, along with the visibility fake and a `handshake()`
+driver.
+
+The harness gained one lesson worth keeping: **hand-shaking an already-dropped socket makes
+a test lie.** The fake still delivers frames, the client marks itself `live`, and the test
+then measures a session that was never connected. One of these tests failed for exactly that
+reason before the helper grew a `readyState === 0` precondition.
